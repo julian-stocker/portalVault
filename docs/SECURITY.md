@@ -2066,6 +2066,11 @@ kann.
   Auswahl, gebunden an den Token der Vorschau und unter Sperre neu beurteilt; die alte
   Übernahme ohne Auswahl hat kein Clientrecht mehr und weist im Rumpf ab. Fehlermeldungen
   nennen Grundcodes, keine Werte. RLS, Policies und Verkäuferrechte bleiben unverändert.
+- **Vorbereiten ist nicht Übernehmen (Schritt 6A).** Die Server Action `applySelection` ist
+  gesperrt (`APPLY_RELEASED = false` in `src/lib/reconciliation/release.ts`, kein Schalter in der
+  Umgebung) und ruft bis zur eigenen Freigabe keine Datenbankfunktion auf. Keine Seite und keine
+  Komponente importiert eine Entscheidungs-, Vorschau- oder Übernahmeaktion (Test
+  `selection.test.tsx`). `decideFinding` weist `manual` und freie Werte vor dem Aufruf ab.
 - **Keine Service-Role** in `src/lib/reconciliation` (Test `server/actions.test.ts`) und im
   Staging-Funktionstest `tools/verify-sales-reconciliation.mts`: er arbeitet als vorhandenes
   Betriebskonto über den öffentlichen Schlüssel, legt kein Konto an und löscht keines

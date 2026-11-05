@@ -3,8 +3,17 @@
  *
  * The browser reads the report files and sends only the parsed, normalised
  * model (`UploadInput`). Here it is checked key by key, matched against the
- * sales book and stored as one session. Deciding and applying are thin
- * pass-throughs to the seller-gated functions of 0172/0173.
+ * sales book and stored as one session.
+ *
+ * DECIDING, PREVIEWING, APPLYING follow the contract of 0180 (ADR-0178):
+ * `take_external` is the only decision that writes, `keep_ledger` a note,
+ * `defer` leaves it open; `manual` is refused here before any call. The
+ * preview judges EXACTLY the selected decision ids and returns a token; the
+ * apply passes the same ids and that token unchanged to
+ * `seller_recon_apply(session, decision_ids, token)`. There is no path to
+ * the retired `seller_recon_apply(session, expected)` — not as a fallback,
+ * not on an error. And the apply is LOCKED (`APPLY_RELEASED`, `release.ts`)
+ * until a separate approval: it then calls no database function at all.
  *
  * TWO GATES, AND NEITHER IS THE BOUNDARY ON ITS OWN. `canOperateSeller()`
  * answers a denied click with a sentence; the database refuses anyway. And
@@ -24,7 +33,11 @@ import { coverageOf } from "../coverage";
 import { distinctFiles, mergeReports } from "../dedupe";
 import { reconcile, summarize } from "../diff";
 import { matchOrders } from "../match";
+import { APPLY_RELEASED } from "../release";
 import { RECONCILIATION_PATH } from "../routes";
+import {
+  isId, isToken, largeDateGapDecisions, type SelectionPreview, SelectionContractError, selectionIds, selectionPreviewView,
+} from "../selection";
 import { aliasIndex, ledgerSales, PayloadError, sessionPayload, validateUpload } from "./payload";
 
 const copy = de.business.reconciliation;
@@ -36,16 +49,28 @@ async function reconciliationAvailable(): Promise<boolean> {
   return isStagingProjectUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
 }
 
+/**
+ * The database's refusal as one fixed German sentence. Never the database's
+ * text, never a value — and the log carries the CODE only: 0180's texts name
+ * reason codes, but older functions name ids, and a log is not the place to
+ * find out which one spoke.
+ */
 function message(error: { code?: string; message?: string }): string {
+  const text = error.message ?? "";
   if (error.code === "42501") return de.admin.notAllowed;
+  // A function 0180 adds, asked on a database that does not have it yet (Staging 0179).
+  if (error.code === "PGRST202" || error.code === "42883") return copy.errors.notMigrated;
+  if (error.code === "0A000") return copy.errors.retired;
   if (error.code === "PT409") {
-    return (error.message ?? "").includes("confirmation counted") ? copy.errors.countChanged : copy.errors.stale;
+    if (text.includes("confirmation counted")) return copy.errors.countChanged;
+    if (text.includes("preview again")) return copy.errors.selectionChanged;
+    if (text.includes("values shown")) return copy.errors.shownValuesChanged;
+    return copy.errors.stale;
   }
   if (error.code === "23505") return copy.errors.duplicateReference;
-  if (error.code === "23514") return copy.errors.rejected;
+  if (error.code === "23514") return text.includes("cannot be applied") ? copy.errors.notApplicable : copy.errors.rejected;
   if (error.code === "23001") return copy.errors.notPossible;
-  // The database's texts name fields and states, never report values.
-  console.error("reconciliation:", error.code, error.message);
+  console.error("reconciliation: database refusal", error.code ?? "(no code)");
   return de.admin.writeFailed;
 }
 
@@ -104,23 +129,35 @@ export async function analyseReconciliation(input: unknown): Promise<ActionResul
 
 export type DecisionInput = {
   findingId: number;
-  decision: "take_external" | "keep_ledger" | "manual" | "defer";
-  manualValue?: Record<string, unknown> | null;
+  /** 0180: these three only. A free value is a correction in the Orderbuch, not a decision here. */
+  decision: "take_external" | "keep_ledger" | "defer";
   reason?: string | null;
   /** The two values the screen showed — the database compares them (0156 pattern). */
   shownLedger: string | number | null;
   shownExternal: string | number | null;
 };
 
+const DECISIONS = ["take_external", "keep_ledger", "defer"] as const;
+const isShown = (v: unknown) => v === null || typeof v === "string" || (typeof v === "number" && Number.isFinite(v));
+
+/** Record one decision. Changes no sale — the apply is a separate, locked step. */
 export async function decideFinding(input: DecisionInput): Promise<ActionResult<{ decisionId: number }>> {
   const denied = await gate();
   if (denied) return denied;
+  // The browser is not trusted: the shape is checked here, the rules in the database.
+  const raw = (input ?? {}) as Record<string, unknown>;
+  if (raw.decision === "manual" || "manualValue" in raw) return { ok: false, message: copy.errors.manualRetired };
+  if (!isId(raw.findingId) || !(DECISIONS as readonly unknown[]).includes(raw.decision)
+      || !isShown(raw.shownLedger) || !isShown(raw.shownExternal)
+      || !(raw.reason === undefined || raw.reason === null || (typeof raw.reason === "string" && raw.reason.length <= 500))) {
+    return { ok: false, message: copy.errors.rejected };
+  }
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_recon_decide", {
-    p_finding_id: input.findingId,
-    p_decision: input.decision,
-    p_manual_value: input.manualValue ?? null,
-    p_reason: input.reason ?? null,
+    p_finding_id: raw.findingId,
+    p_decision: raw.decision,
+    p_manual_value: null,
+    p_reason: (raw.reason as string | null | undefined) ?? null,
     p_shown_ledger: input.shownLedger,
     p_shown_external: input.shownExternal,
   });
@@ -128,18 +165,85 @@ export async function decideFinding(input: DecisionInput): Promise<ActionResult<
   return { ok: true, decisionId: Number(data) };
 }
 
-/** The separate final confirmation: `expected` is the count the operator confirmed. */
-export async function applyReconciliation(
-  sessionId: number, expected: number,
-): Promise<ActionResult<{ applied: number; documented: number; sales: number }>> {
+/**
+ * The preview of exactly these decisions (0180). Reads only; the answer —
+ * values, token, the large date gaps to confirm — stays in this response.
+ */
+export async function previewSelection(
+  sessionId: number, decisionIds: readonly number[],
+): Promise<ActionResult<{ preview: SelectionPreview; confirmDateGaps: number[] }>> {
   const denied = await gate();
   if (denied) return denied;
+  const ids = selectionIds(decisionIds);
+  if (!isId(sessionId) || ids === null) return { ok: false, message: copy.errors.selectionInvalid };
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("seller_recon_apply", { p_session_id: sessionId, p_expected: expected });
+  const { data, error } = await supabase.rpc("seller_recon_preview", { p_session_id: sessionId, p_decision_ids: ids });
+  if (error) return { ok: false, message: message(error) };
+  try {
+    const preview = selectionPreviewView(data);
+    return { ok: true, preview, confirmDateGaps: largeDateGapDecisions(preview) };
+  } catch (e) {
+    if (e instanceof SelectionContractError) {
+      console.error("reconciliation: preview contract", e.path);
+      return { ok: false, message: copy.errors.loadFailed };
+    }
+    throw e;
+  }
+}
+
+export type ApplySelectionInput = {
+  sessionId: number;
+  /** Exactly the ids of the preview — never "everything open". */
+  decisionIds: readonly number[];
+  /** The preview's token, passed on unchanged. */
+  token: string;
+  /** Every decision the preview marked `largeDateGap`, each confirmed by the operator. */
+  confirmedDateGaps: readonly number[];
+};
+
+/**
+ * Apply exactly the previewed selection (0180) — LOCKED until a separate
+ * approval (`APPLY_RELEASED`). Before the apply it reads the preview once
+ * more: the token must still be the operator's, and every large date gap
+ * must be confirmed. The database judges everything again under lock.
+ */
+export async function applySelection(
+  input: ApplySelectionInput,
+): Promise<ActionResult<{ applied: number; sales: number }>> {
+  const denied = await gate();
+  if (denied) return denied;
+  if (!APPLY_RELEASED) return { ok: false, message: copy.errors.applyNotReleased };
+  const raw = (input ?? {}) as Record<string, unknown>;
+  const ids = selectionIds(raw.decisionIds);
+  const confirmed = Array.isArray(raw.confirmedDateGaps) && raw.confirmedDateGaps.every(isId)
+    ? new Set(raw.confirmedDateGaps as number[]) : null;
+  if (!isId(raw.sessionId) || ids === null || confirmed === null) return { ok: false, message: copy.errors.selectionInvalid };
+  if (!isToken(raw.token)) return { ok: false, message: copy.errors.selectionChanged };
+  const token = raw.token;
+  const supabase = await createClient();
+
+  const check = await supabase.rpc("seller_recon_preview", { p_session_id: raw.sessionId, p_decision_ids: ids });
+  if (check.error) return { ok: false, message: message(check.error) };
+  let preview: SelectionPreview;
+  try {
+    preview = selectionPreviewView(check.data);
+  } catch (e) {
+    if (e instanceof SelectionContractError) return { ok: false, message: copy.errors.loadFailed };
+    throw e;
+  }
+  if (!preview.admissible) return { ok: false, message: copy.errors.notApplicable };
+  if (preview.token !== token) return { ok: false, message: copy.errors.selectionChanged };
+  if (largeDateGapDecisions(preview).some((id) => !confirmed.has(id))) {
+    return { ok: false, message: copy.errors.dateGapUnconfirmed };
+  }
+
+  const { data, error } = await supabase.rpc("seller_recon_apply", {
+    p_session_id: raw.sessionId, p_decision_ids: ids, p_token: token,
+  });
   if (error) return { ok: false, message: message(error) };
   revalidatePath(RECONCILIATION_PATH);
-  const result = (data ?? {}) as { applied?: number; documented?: number; sales?: number };
-  return { ok: true, applied: result.applied ?? 0, documented: result.documented ?? 0, sales: result.sales ?? 0 };
+  const result = (data ?? {}) as { applied?: number; sales?: number };
+  return { ok: true, applied: result.applied ?? 0, sales: result.sales ?? 0 };
 }
 
 async function sessionCall(fn: string, sessionId: number): Promise<ActionResult> {

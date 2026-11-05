@@ -1,6 +1,9 @@
 /**
  * Functional verification of the sales reconciliation on Staging (0169–0174, ADR-0174).
  *
+ * RETIRED ONCE 0180 STANDS: it then stops after the sign-in, before writing
+ * (`verify-recon-0180.mts` is the run for 0180).
+ *
  *   npm run verify:sales-reconciliation:staging              DRY RUN (default)
  *   npm run verify:sales-reconciliation:staging -- --apply   writes test data
  *
@@ -235,6 +238,16 @@ async function main(): Promise<void> {
     // The message only — never the address, never the password.
     if (signIn.error) throw new Error(`sign-in as the Staging operator failed: ${signIn.error.message}`);
     check("signed in as the existing Staging operator (no account created)", true);
+    /*
+     * RETIRED BY 0180. This run decides `manual` and applies through
+     * `seller_recon_apply(session, expected)` — both refused once 0180 stands.
+     * It stops BEFORE anything is written; the 0180 run is
+     * `npm run verify:recon-0180:staging`.
+     */
+    const preview = await op.rpc("seller_recon_preview", { p_session_id: 0, p_decision_ids: [1] });
+    if (preview.error?.code !== "PGRST202" && preview.error?.code !== "42883") {
+      throw new Error("0180 stands on this database — this run (0169–0174) is retired; use verify:recon-0180. Nothing written.");
+    }
     must(await op.rpc("seller_recon_candidates", { p_channel: "ebay", p_from: "2001-01-01", p_to: "2001-01-01" }),
          "the account is not a seller operator");
 

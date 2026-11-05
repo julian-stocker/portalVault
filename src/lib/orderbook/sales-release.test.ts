@@ -481,6 +481,8 @@ describe("no tool may create a sale that looks like real trade", () => {
      * löschbar sind — jeder ist als Testvorgang markiert und liegt im Jahr 2001.
      */
     "verify-sales-reconciliation.mts": "flags-every-sale",
+    /* Der Lauf für 0180 (ADR-0178): dieselbe Regel — Testvorgänge im Jahr 2001, keiner wird umgestuft. */
+    "verify-recon-0180.mts": "flags-every-sale",
   };
 
   /** Der Rumpf ohne Prosa: ein Kommentar ist keine Aktion. */

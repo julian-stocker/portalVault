@@ -2347,6 +2347,60 @@ export const de = {
           "Ein Abgleich umfasst höchstens 400 Tage. Wähle Berichte aus einem kürzeren Zeitraum.",
         fileUnreadable: "Diese Datei konnte nicht gelesen werden.",
         noFiles: "Wähle mindestens eine Berichtsdatei aus.",
+        /* Ab 0180 (Schritt 6A): Vorschau und Übernahme einer Auswahl. */
+        notMigrated: "Diese Funktion des Verkaufsabgleichs steht in dieser Umgebung noch nicht bereit.",
+        retired: "Diese Art der Übernahme ist abgelöst. Übernommen wird nur noch eine ausgewählte, geprüfte Vorschau.",
+        manualRetired: "Freie Korrekturen gehören ins Orderbuch, nicht in den Abgleich.",
+        selectionInvalid: "Die Auswahl ist ungültig. Wähle zwischen 1 und 500 Entscheidungen.",
+        selectionChanged:
+          "Die Auswahl hat sich seit der Vorschau geändert. Es wurde nichts übernommen — prüfe die Vorschau erneut.",
+        notApplicable:
+          "Mindestens eine ausgewählte Entscheidung kann nicht übernommen werden. Es wurde nichts übernommen.",
+        applyNotReleased: "Die Übernahme ist noch nicht freigegeben. Es wurde nichts geändert.",
+        dateGapUnconfirmed:
+          "Mindestens ein Verkaufsdatum weicht um mehr als drei Tage ab. Bestätige jede dieser Abweichungen ausdrücklich.",
+      },
+
+      /*
+       * DIE VORSCHAU EINER AUSWAHL (0180). Je Grundcode ein Satz — die
+       * Schlüssel sind genau `SELECTION_PROBLEMS` (`selection.test.ts`).
+       */
+      selection: {
+        problems: {
+          unknown_decision: "Diese Entscheidung gehört nicht zu dieser Sitzung.",
+          not_latest: "Zu diesem Befund gibt es eine neuere Entscheidung.",
+          already_applied: "Bereits übernommen.",
+          manual: "Freie Korrektur — wird im Abgleich nicht mehr ausgeführt.",
+          no_change: "Prüfvermerk oder zurückgestellt — ändert nichts.",
+          unknown_finding: "Diesen Befund gibt es nicht.",
+          field_not_takeable: "Dieses Feld wird nie aus dem Bericht übernommen.",
+          finding_kind: "Der Befund passt nicht zu seinem Feld.",
+          not_a_pair: "Ohne Paar aus Bestellung und Verkauf gibt es nichts zu übernehmen.",
+          uncertain: "Die Zuordnung ist nicht sicher genug.",
+          competitors: "Es gibt konkurrierende Kandidaten.",
+          not_external: "Kein externer Verkauf dieses Kanals.",
+          test_sale: "Testvorgänge werden nicht verändert.",
+          cancelled: "Der Verkauf ist storniert — es wird nichts übernommen.",
+          refunded: "Der Verkauf hat eine Erstattung — Beträge werden nicht übernommen.",
+          stale: "Der Verkauf wurde seit der Analyse geändert — bitte neu analysieren.",
+          ref_mismatch: "Die Bestellnummer des Verkaufs passt nicht zur Bestellung.",
+          unique_ref_only: "Zuerst nur die Bestellnummer ergänzen; Datum und Beträge nach erneuter Analyse.",
+          ref_present: "Der Verkauf hat schon eine Bestellnummer — sie wird nie überschrieben.",
+          window: "Mehr als drei Tage zwischen Bestellung und Verkauf — die Zuordnung ist nicht belegt.",
+          report_mismatch: "Der Berichtswert stimmt nicht mit der gespeicherten Bestellung überein.",
+          ledger_mismatch: "Der SkyIsles-Wert stimmt nicht mit dem Verkauf überein.",
+          no_difference: "Beide Werte sind gleich — nichts zu übernehmen.",
+          ref_taken: "Diese Bestellnummer trägt schon ein anderer Verkauf.",
+          no_lines: "Ohne Positionsliste lässt sich die Zuordnung nicht prüfen.",
+          rival_sale: "Ein anderer, ungepaarter Verkauf mit derselben Figur liegt im Zeitfenster.",
+          rival_order: "Eine andere, ungepaarte Bestellung mit derselben Figur liegt im Zeitfenster.",
+        },
+        dateGapTitle: "Großer Datumsabstand",
+        dateGapHint: (days: number) =>
+          `Das Verkaufsdatum würde um ${days} Tage verschoben. Die Bestellnummer belegt die Zuordnung, ` +
+          "aber ein so großer Abstand ist ungewöhnlich — prüfe beide Daten, bevor du bestätigst.",
+        dateGapValues: (from: string, to: string) => `SkyIsles ${from} → Bericht ${to}`,
+        dateGapConfirm: "Abstand geprüft — diese Datumskorrektur bestätigen",
       },
 
       /*

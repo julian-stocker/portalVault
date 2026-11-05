@@ -27,8 +27,8 @@ describe("the reconciliation's server actions", () => {
   it("check availability and the seller role before any database call — every one of them", () => {
     const bodies = exported(ACTIONS);
     expect([...bodies.keys()].sort()).toEqual([
-      "analyseReconciliation", "applyReconciliation", "closeReconciliation", "decideFinding",
-      "discardReconciliation", "thinReconciliationSnapshots",
+      "analyseReconciliation", "applySelection", "closeReconciliation", "decideFinding",
+      "discardReconciliation", "previewSelection", "thinReconciliationSnapshots",
     ]);
     for (const [name, body] of bodies) {
       const gated = body.indexOf("await gate()") >= 0 ? body.indexOf("await gate()") : body.indexOf("sessionCall(");
@@ -56,8 +56,20 @@ describe("the reconciliation's server actions", () => {
     expect(decide).toContain("p_shown_external: input.shownExternal");
   });
 
-  it("send the confirmed count with the application", () => {
-    expect(exported(ACTIONS).get("applyReconciliation")).toContain("p_expected: expected");
+  it("0180: the apply passes the selection and the token, and knows no path to the retired apply", () => {
+    const apply = exported(ACTIONS).get("applySelection") as string;
+    expect(apply).toContain('rpc("seller_recon_apply", {\n    p_session_id: raw.sessionId, p_decision_ids: ids, p_token: token,\n  })');
+    // Locked before any database call (`release.ts`).
+    expect(apply.indexOf("if (!APPLY_RELEASED)")).toBeGreaterThan(-1);
+    expect(apply.indexOf("if (!APPLY_RELEASED)")).toBeLessThan(apply.indexOf(".rpc("));
+    expect(ACTIONS).not.toMatch(/p_expected/);
+    expect(ACTIONS).not.toMatch(/applyReconciliation/);
+  });
+
+  it("0180: a decision never carries a manual value", () => {
+    const decide = exported(ACTIONS).get("decideFinding") as string;
+    expect(decide).toContain("p_manual_value: null");
+    expect(decide.indexOf('raw.decision === "manual"')).toBeLessThan(decide.indexOf(".rpc("));
   });
 
   it("never use the service role and never read a table directly", () => {

@@ -162,6 +162,7 @@ Auswahl nach ausdrücklicher Bestätigung analysiert werden; das legt eine Abgle
 | 4 · Analyse starten mit Bestätigungsdialog (`analyseReconciliation`) | lokal committet (siehe Git), auf Staging nie aufgerufen |
 | 5 · Vergleichsansicht `/abgleich/<id>` (nur lesend) | lokal committet (siehe Git); Browser- und iPhone-Sichtprüfung offen |
 | 5B · Detailtabelle verdichten, Zeitraumgrenzen klarstellen (nur Oberfläche) | lokal committet (siehe Git); angemeldete Sichtprüfung auf Staging und echter iPhone-Test offen |
+| 6A · Server-Actions und Staging-Funktionstest auf den Vertrag von `0180` (ohne Oberfläche, Übernahme gesperrt) | lokal committet (siehe Git); Positivpfad des Staging-Tests wartet auf eine Entscheidung |
 | 6 · Entscheiden (Verkaufsdatum, Warenwert, Versand) · 7 · Prüfen und Übernehmen · 8 · Abschließen/Verwerfen · 9 · Aufräumen | offen |
 | `0178` · Vergleichswerte in `seller_recon_session` (`ledger`) und `seller_recon_pending` — rein lesend, mit Prüfpaket | **auf Staging angewendet und vollständig verifiziert (2026-11-04); Production nicht angewendet** |
 | `0179` · `ledger.atAnalysis` nur mit Nachweis (Befund der Leseabnahme von 0178) — rein lesend, mit Prüfpaket | **auf Staging angewendet, vollständig verifiziert und abgenommen (2026-11-05, Leseabnahme 45/45); Production nicht angewendet** |
@@ -313,6 +314,15 @@ Tippen geöffnet.
 - Keine Tabelle, keine Spalte, keine Zeile; Sicherung (`0174`) und Kontolöschung (`0175`) unberührt. Rücknahme `R0180`; `R0178` verweigert, solange `0180` steht.
 - Prüfpaket: `0180_preflight.sql`, `0180_postflight.sql`, `supabase/operations/staging-0180.sql`, Eintrag in `migration-plans.json`; Probelauf `selected-apply-0180.test.ts` (48 Tests).
 - **Vor einer Staging-Abnahme offen:** der Staging-Funktionstest `tools/verify-sales-reconciliation.mts` und die Server Action `applyReconciliation` benutzen noch die alte Übernahme und `manual` — beide müssen auf Vorschau und Token umgestellt werden (eigener Schritt).
+
+**Schritt 6A (2026-11-05, nur Server und Werkzeuge, keine Oberfläche, keine Datenbankänderung).**
+
+- `decideFinding` kennt nur `take_external`, `keep_ledger`, `defer`; `manual` und jeder freie Wert werden vor dem Datenbankaufruf abgewiesen, `p_manual_value` ist immer `null`.
+- `previewSelection(Sitzung, IDs)` ruft `seller_recon_preview` mit genau der Auswahl (1–500, verschieden, sortiert) und liest die Antwort streng (`src/lib/reconciliation/selection.ts`). Fehlt die Funktion (Staging 0179: `PGRST202`/`42883`), kommt ein Satz statt eines Fehlers.
+- `applySelection({sessionId, decisionIds, token, confirmedDateGaps})` liest die Vorschau erneut, verlangt denselben Token und die ausdrückliche Bestätigung jedes großen Datumsabstands und gibt Auswahl und Token unverändert an `seller_recon_apply(bigint, bigint[], text)`. Kein Weg zur alten Übernahme. **Gesperrt:** `APPLY_RELEASED = false` (`src/lib/reconciliation/release.ts`) — bis zur eigenen Freigabe ruft die Aktion keine Datenbankfunktion auf; die Freigabe ist ein Commit, keine Umgebungsvariable.
+- **Großer Datumsabstand:** eine zulässige `sold_on`-Korrektur ist immer `deterministic` (0180 lässt `unique` nur die Nummer); weicht sie um mehr als drei Tage ab, markiert die Vorschau sie (`largeDateGap`, beide Tage). Die Vorschau von 0180 enthält beide Tage bereits (`old.soldOn`, `target.soldOn`), es braucht keine Migrationsänderung. Der Hinweis `date-gap-notice.tsx` ist vorbereitet und **nirgends eingebunden**.
+- Protokolle tragen nur noch Fehlercodes, keine Datenbanktexte.
+- **Staging-Funktionstest für 0180:** `npm run verify:recon-0180:staging` (Trockenlauf ohne Verbindung; `--apply` erst mit Freigabe und erst, wenn 0180 steht — sonst Abbruch vor dem ersten Schreiben). Er prüft auf Testverkäufen alle Ablehnungen (alte Übernahme, `manual`, `take_external` auf Testverkäufen = `test_sale`, Auswahl, Token, anon) und dass sich nichts bewegt. **Der Positivpfad (Übernahme, Wiederholschutz, zwei gleichzeitige Verbindungen, Referenz bei `unique`, erneute Analyse) ist auf Staging nicht prüfbar:** 0180 verändert keinen Testverkauf, und der Lauf legt bewusst keinen echten an. Bis zur Entscheidung endet ein sauberer Lauf mit Exit 3 „unvollständig“. Der alte Lauf (`verify:sales-reconciliation`) bricht ab, sobald 0180 steht.
 
 **Nächster Schritt:** Freigabe für `0180` auf Staging (Runner, Preflight, Lauf, Postflight); davor bzw. danach der umgestellte Staging-Funktionstest. Daneben die angemeldete Browser- und iPhone-Sichtprüfung der Vergleichsansicht; danach Schritt 6. Production für `0169`–`0180` erst mit eigener Freigabe.
 
