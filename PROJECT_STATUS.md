@@ -160,7 +160,8 @@ Auswahl nach ausdrücklicher Bestätigung analysiert werden; das legt eine Abgle
 | 3 · Berichte wählen und lokal prüfen (ohne Übertragung) | committet (`27e3f60`) |
 | 3A · Deduplizierung der Server Action nach Inhalt und Position (`distinctFiles`) | committet (siehe Git) |
 | 4 · Analyse starten mit Bestätigungsdialog (`analyseReconciliation`) | lokal committet (siehe Git), auf Staging nie aufgerufen |
-| 5 · Vergleichsansicht `/abgleich/<id>` · 6 · Entscheiden (Verkaufsdatum, Warenwert, Versand) · 7 · Prüfen und Übernehmen · 8 · Abschließen/Verwerfen · 9 · Aufräumen | offen |
+| 5 · Vergleichsansicht `/abgleich/<id>` (nur lesend) | lokal committet (siehe Git); Browser- und iPhone-Sichtprüfung offen |
+| 6 · Entscheiden (Verkaufsdatum, Warenwert, Versand) · 7 · Prüfen und Übernehmen · 8 · Abschließen/Verwerfen · 9 · Aufräumen | offen |
 | `0178` · Vergleichswerte in `seller_recon_session` (`ledger`) und `seller_recon_pending` — rein lesend, mit Prüfpaket | **auf Staging angewendet und vollständig verifiziert (2026-11-04); Production nicht angewendet** |
 | `0179` · `ledger.atAnalysis` nur mit Nachweis (Befund der Leseabnahme von 0178) — rein lesend, mit Prüfpaket | **auf Staging angewendet, vollständig verifiziert und abgenommen (2026-11-05, Leseabnahme 45/45); Production nicht angewendet** |
 | `0180` · unsichere Zuordnungen in `seller_recon_decide` abweisen, Übernahme mit Token — `0177` ist die zentrale Sicherung | nur konzipiert |
@@ -169,8 +170,8 @@ Auswahl nach ausdrücklicher Bestätigung analysiert werden; das legt eine Abgle
 Status in Worten, Zeitraum, Dateien, Verkaufsprotokoll, „Befunde mit Entscheidung" (zählt
 „später" mit — **keine** Zahl offener oder anwendbarer Entscheidungen), übernommene
 Entscheidungen, nicht leere Kategorien der gespeicherten Zusammenfassung. Leer- und Fehlerzustand
-sind getrennt (`fetchReconciliationSessions` liefert `ok` / `unavailable` / `error`). **Keine Links
-auf Sitzungen**, bis die Sitzungsseite (Schritt 5) existiert. Einstieg: leiser Link unter
+sind getrennt (`fetchReconciliationSessions` liefert `ok` / `unavailable` / `error`). Die
+Überschrift jeder Karte öffnet die Vergleichsansicht der Sitzung (Schritt 5). Einstieg: leiser Link unter
 Verkauf → Extern, kein dritter Reiter. Außerhalb Staging und ohne Verkäuferrolle: 404.
 **Kein `loading.tsx` im Betriebsbereich:** am lokalen Staging-Server gemessen strömte der
 Lade-Platzhalter an einen nicht angemeldeten Aufruf mit, vor dem 404 des Layouts — er ist
@@ -231,9 +232,29 @@ bedienen. **Fehler:** eine Ablehnung zeigt nur einen der festen Sätze aus `ANAL
 (`messages.ts`), sonst — wie bei einer geworfenen Ausnahme (Netzwerk, abgewiesener Body) — den
 allgemeinen Satz; ins Browser-Log kommt nur der Fehlername. `analyseReconciliation` selbst baut
 jede Ablehnung aus `de.ts`; Datenbanktexte bleiben im Server-Log (`analyse-messages.test.ts`
-treibt jeden Ablehnungsweg und jeden Fehlercode durch die echte Action). **Navigation** vorläufig
-zu `/business/orderbuch/abgleich?sitzung=<id>`, die Karte ist markiert; Schritt 5 stellt nur
-`sessionHref()` in `routes.ts` um. Der Pfad steht nur noch dort (`RECONCILIATION_PATH`).
+treibt jeden Ablehnungsweg und jeden Fehlercode durch die echte Action). **Navigation** nach der
+Analyse direkt zur Vergleichsansicht `/business/orderbuch/abgleich/<id>` (`sessionHref()` in
+`routes.ts`); ein älterer Link mit `?sitzung=<id>` markiert weiter die Karte. Der Pfad steht nur
+in `routes.ts` (`RECONCILIATION_PATH`).
+
+**Vergleichsansicht (Schritt 5, nur lesend).** `/business/orderbuch/abgleich/<id>`: dieselben
+Sperren wie die Übersicht (Staging, Verkäuferrolle, sonst 404), dazu 404 für eine Adresse, die
+keine Sitzungsnummer ist, und für eine Sitzung, die es nicht gibt (`P0002`); andere Ablehnungen
+und eine fremde Antwortform erscheinen als Hinweis mit „Neu laden“, im Server-Log nur Code oder
+Vertragspfad. Überblick (Plattform, Status, Zeitraum, Protokollnummern, Dateien, Zuordnungen und
+Abweichungen aus der gespeicherten Zusammenfassung), Filter nach Ergebnis und Seiten sind Links —
+jede Seite ist eine eigene Antwort von `seller_recon_session` (`?kategorie=`, `?seite=`; in der
+Adresse steht nie ein Berichtswert). Je Zuordnung eine Karte, links Bericht, rechts SkyIsles
+heute; aufklappbar (`<details>`, ohne Skript) je Angabe Bericht, SkyIsles bei der Analyse mit
+Herkunft (`gespeicherter Befundwert` / `belegt` / `nicht belegt`) und SkyIsles heute, dazu
+Positionen, Figurenbefunde, Bestellnummer, Storno und Erstattungen. **Die Farben kommen aus
+`compare.ts`, das nichts selbst vergleicht oder rechnet:** grün nur, wenn die Datenbank den
+Wert belegt hat (`derived`) und kein Befund besteht; rot nur für einen Befund bei sicherer
+Zuordnung, dessen Wert die Datenbank behalten hat; ein Befund bei `probable` heißt
+„Abweichung, Zuordnung unsicher“, ein unbelegter Wert „unbekannt“ (nie 0), Zuordnungen ohne
+Paar „nicht verglichen“ — alles neutral. `view.ts` liest `ledger` streng nach dem Vertrag von
+`0179` (`unknown` ⇔ `value` null, `ledger` genau bei einem Verkauf); ein eigenes Nachweisfeld
+gibt es nicht. Keine Entscheidung, keine Übernahme, kein Formular auf der Seite.
 
 **Tatsächliche Body-Größe.** Next kodiert das Argument mit Reacts `encodeReply`: für reine Daten
 ein String, aber nicht reines JSON (`$…` wird `$$…`, `-0` wird `"$-0"`), und begrenzt den rohen
@@ -259,7 +280,7 @@ unterscheidet nicht zwischen neuer und wiederverwendeter Sitzung.
 
 **Migration `0179` — auf Staging angewendet und abgenommen (2026-11-05), Production NICHT angewendet.** Berechtigter Postflight 9998 = 0, 9999 = 0; funktionale Leseabnahme 45 von 45 (`supabase/checks/0179_staging_run.md`): Sitzung 1 behält jeden nachweisbaren Wert, Sitzung 2 (`changed`) nur noch `stored`, Sitzung 3 meldet die drei widersprüchlichen Beträge als `unknown`. `ledger.atAnalysis` nennt einen Wert nur mit Nachweis aus der Datenbank: bei `unchanged` der heutige Wert (die Version ist die analysierte, `seller_recon_create` erzwang das mit PT409), bei `applied` die unberührten Felder und die alten Werte, die die Übernahmen aufgezeichnet haben (Gesamtbetrag aus nachgewiesenem Netto und Versand, Erstattungen vor der Sitzung, Storno nur wenn vorher), bei `changed` keiner — `stored` bleibt, `derived` wird `unknown`. Widerspruch, fehlender, mehrdeutiger oder nicht lesbarer Nachweis → `unknown` mit `value` null. Schema, Signatur und Rechte bleiben; Pending, Decide und Apply unverändert. Die Token- und Decide-Härtung heißt jetzt `0180`.
 
-**Nächster Schritt:** `0180` (unsichere Zuordnungen abweisen, Übernahme mit Token) bzw. die Vergleichsansicht (Schritt 5). Production für `0169`–`0179` erst mit eigener Freigabe.
+**Nächster Schritt:** Browser- und iPhone-Sichtprüfung der Vergleichsansicht auf Staging; danach `0180` (unsichere Zuordnungen abweisen, Übernahme mit Token) bzw. Schritt 6. Production für `0169`–`0179` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

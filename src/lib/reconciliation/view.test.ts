@@ -68,9 +68,27 @@ const findingRow = (over: Record<string, unknown> = {}) => ({
   decision: null, applied: false, ...over,
 });
 
+/** `ledger` in the shape 0179 builds: the sold_on finding is `stored`, the rest `derived`. */
+const ledgerRow = (over: Record<string, unknown> = {}) => ({
+  state: "unchanged",
+  version: { analysed: "2026-11-01T09:00:00.000001+00:00", current: "2026-11-01T09:00:00.000001+00:00" },
+  current: {
+    soldOn: "2026-03-14", itemsSubtotal: 12.5, discount: 0, itemsNet: 12.5, shipping: 4.99, refundsTotal: 0,
+    cancelledOn: null, expectedTotal: 17.49, pieces: 1, externalOrderRef: null, isTest: false,
+  },
+  atAnalysis: {
+    soldOn: { value: "2026-03-14", basis: "stored" },
+    itemsNet: { value: 12.5, basis: "derived" },
+    shipping: { value: 4.99, basis: "derived" },
+    expectedTotal: { value: 17.49, basis: "derived" },
+    pieces: { value: 1, basis: "derived" },
+  },
+  ...over,
+});
+
 const matchRow = (over: Record<string, unknown> = {}) => ({
   id: 41, category: "deviating", certainty: "unique", score: 0.912, dateDelta: 2, competitors: [], reason: null,
-  order: orderRow(), sale: saleRow(), findings: [findingRow()], ...over,
+  order: orderRow(), sale: saleRow(), ledger: ledgerRow(), findings: [findingRow()], ...over,
 });
 
 const pageAnswer = (over: Record<string, unknown> = {}) => ({
@@ -258,7 +276,7 @@ describe("seller_recon_session()", () => {
     const view = sessionPageView(pageAnswer({
       total: 3,
       matches: [
-        matchRow({ id: 42, category: "external_only", certainty: null, score: null, dateDelta: null, sale: null, findings: [] }),
+        matchRow({ id: 42, category: "external_only", certainty: null, score: null, dateDelta: null, sale: null, ledger: null, findings: [] }),
         matchRow({ id: 43, category: "not_comparable", certainty: null, score: null, dateDelta: null, reason: "edge_day", order: null, findings: [] }),
         matchRow({ id: 44, order: orderRow({ lines: null }) }),
       ],
@@ -292,6 +310,57 @@ describe("seller_recon_session()", () => {
     expect(pathOf(() => sessionPageView(without(pageAnswer(), "session"), FIRST))).toBe("page.session");
     expect(pathOf(() => sessionPageView(pageAnswer({ matches: null }), FIRST))).toBe("matches");
     expect(pathOf(() => sessionPageView(null, FIRST))).toBe("page");
+  });
+});
+
+describe("ledger: the SkyIsles side, as 0179 proved it", () => {
+  const read = (ledger: unknown, over: Record<string, unknown> = {}) =>
+    sessionPageView(pageAnswer({ matches: [matchRow({ ledger, ...over })] }), FIRST).matches[0];
+  const at = (field: string, value: unknown, basis: string) =>
+    ledgerRow({ atAnalysis: { ...ledgerRow().atAnalysis, [field]: { value, basis } } });
+
+  it("maps state, version, current and every atAnalysis field with its basis", () => {
+    const m = read(ledgerRow());
+    expect(m.ledger).toMatchObject({ state: "unchanged", current: { itemsNet: 12.5, expectedTotal: 17.49, isTest: false } });
+    expect(m.ledger?.atAnalysis.soldOn).toEqual({ value: "2026-03-14", basis: "stored" });
+    expect(m.ledger?.atAnalysis.pieces).toEqual({ value: 1, basis: "derived" });
+  });
+
+  it("keeps unknown as null — never 0", () => {
+    const m = read(at("itemsNet", null, "unknown"));
+    expect(m.ledger?.atAnalysis.itemsNet).toEqual({ value: null, basis: "unknown" });
+  });
+
+  it("there is no proof field: atAnalysis carries value and basis only", () => {
+    const m = read(ledgerRow());
+    for (const v of Object.values(m.ledger!.atAnalysis)) expect(Object.keys(v).sort()).toEqual(["basis", "value"]);
+  });
+
+  it.each([
+    ["unknown with a value", at("shipping", 4.99, "unknown"), "matches[0].ledger.atAnalysis.shipping.value"],
+    ["a proven field without a value", at("shipping", null, "derived"), "matches[0].ledger.atAnalysis.shipping.value"],
+    ["an unknown basis", at("shipping", 4.99, "proven"), "matches[0].ledger.atAnalysis.shipping.basis"],
+    ["a missing field", ledgerRow({ atAnalysis: without(ledgerRow().atAnalysis, "pieces") }), "matches[0].ledger.atAnalysis.pieces"],
+    ["an unknown state", ledgerRow({ state: "stale" }), "matches[0].ledger.state"],
+    ["a current value that is not a number", ledgerRow({ current: { ...ledgerRow().current, itemsNet: "x" } }), "matches[0].ledger.current.itemsNet"],
+  ])("refuses %s", (_, ledger, path) => {
+    expect(pathOf(() => read(ledger))).toBe(path);
+  });
+
+  it("a ledger exactly when there is a sale", () => {
+    expect(pathOf(() => read(null))).toBe("matches[0].ledger");
+    expect(pathOf(() => read(ledgerRow(), { sale: null }))).toBe("matches[0].ledger");
+    expect(pathOf(() => sessionPageView(pageAnswer({ matches: [without(matchRow(), "ledger")] }), FIRST))).toBe("matches[0].ledger");
+    expect(read(null, { sale: null }).ledger).toBeNull();
+  });
+
+  it("the vocabularies are those of 0178/0179", () => {
+    const m0178 = readFileSync("supabase/migrations/0178_sales_recon_comparison_and_pending.sql", "utf8");
+    const m0179 = readFileSync("supabase/migrations/0179_sales_recon_ledger_proof.sql", "utf8");
+    for (const st of ["unchanged", "applied", "changed"]) expect(m0179).toContain(`'${st}'`);
+    for (const b of ["stored", "derived", "unknown"]) expect(m0179).toContain(`'${b}'`);
+    for (const f of ["soldOn", "itemsNet", "shipping", "expectedTotal", "pieces"]) expect(m0179).toContain(`'${f}'`);
+    for (const k of ["itemsSubtotal", "discount", "refundsTotal", "cancelledOn", "externalOrderRef", "isTest"]) expect(m0178).toContain(`'${k}'`);
   });
 });
 

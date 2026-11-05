@@ -2,9 +2,8 @@
  * Orderbuch — Verkaufsabgleich (ADR-0174, phase 4 step 2).
  *
  * The list of reconciliation sessions, and above it the report check
- * (`ReportPicker`) — which reads files in the browser and sends nothing. No
- * upload, no decision, no session action yet: later steps, each released on
- * its own.
+ * (`ReportPicker`). Each session opens its comparison page (`[id]`, step 5).
+ * No decision, no session action yet: later steps, each released on its own.
  *
  * TWO GATES BEFORE THE FIRST QUERY.
  *
@@ -32,7 +31,7 @@ export default async function ReconciliationPage({ searchParams }: {
   searchParams?: Promise<{ sitzung?: string }>;
 } = {}) {
   if (!reconciliationEnvironment()) notFound();
-  // `?sitzung=` marks the session an analysis just opened (`sessionHref`, until step 5).
+  // `?sitzung=` marks a session (older links; an analysis now opens its own page).
   const marked = parseSessionParam((await searchParams)?.sitzung);
 
   const result = await fetchReconciliationSessions();

@@ -8,9 +8,9 @@
  * "open" or "applicable" decisions. That number needs `seller_recon_pending`,
  * which does not exist yet.
  *
- * NO LINK YET. The session page (`/abgleich/[id]`) is step 5; until it exists
- * a card is not a link, rather than a link to a 404. After an analysis the
- * page opens with `?sitzung=<id>` and that card is marked (`sessionHref`).
+ * THE HEADING IS THE WAY IN to the session's comparison page
+ * (`/abgleich/<id>`, step 5, `sessionHref`). An older link with
+ * `?sitzung=<id>` still marks its card.
  *
  * ONE LAYOUT FOR BOTH SIZES. A card per session: stacked on a phone, the
  * facts in two columns from `sm:` up. A table would need sideways scrolling
@@ -18,8 +18,11 @@
  *
  * The state is said in words, not only by a tint (WCAG 1.4.1).
  */
+import Link from "next/link";
+
 import { de } from "@/lib/i18n/de";
 import { formatDate, formatNumber } from "@/lib/format";
+import { sessionHref } from "@/lib/reconciliation/routes";
 import { CATEGORIES, type SessionListItem, type SessionState } from "@/lib/reconciliation/view";
 
 const copy = de.business.reconciliation;
@@ -60,7 +63,10 @@ export function SessionCard({ session: s, marked = false }: { session: SessionLi
              className={`rounded-sky-md bg-surface/60 p-4 ring-1 ${marked ? "ring-2 ring-fg/60" : "ring-border/70"}`}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h3 id={headingId} className="text-base font-medium">
-          {list.session(s.id)}
+          <Link href={sessionHref(s.id)}
+                className="focus-ring -mx-1 inline-flex min-h-11 items-center rounded-sky-md px-1 underline underline-offset-2 sm:min-h-8">
+            {list.session(s.id)}
+          </Link>
           <span className="ml-2 text-sm font-normal text-muted">{list.channels[s.channel] ?? s.channel}</span>
         </h3>
         <span data-testid="state" className={`rounded-sky-md px-2 py-0.5 text-xs ring-1 ${STATE_CHIP[s.state]}`}>

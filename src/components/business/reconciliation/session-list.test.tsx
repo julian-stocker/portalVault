@@ -98,12 +98,13 @@ describe("SessionList", () => {
     expect(t).not.toMatch(/\b(offene?[nrs]?|ausstehend\w*|anwendbar\w*)\b/);
   });
 
-  it("is a labelled list of articles, each named by its heading — and no links yet", () => {
+  it("is a labelled list of articles, each named by its heading — the heading opens the session", () => {
     const out = html([item(), item({ id: 8 })]);
     expect(out).toContain(`aria-label="${copy.list.heading}"`);
     expect(out.match(/<article aria-labelledby="recon-session-(7|8)"/g)?.length).toBe(2);
     expect(out).toContain('id="recon-session-7"');
-    expect(out).not.toContain("<a ");
+    const hrefs = [...out.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+    expect(hrefs).toEqual(["/business/orderbuch/abgleich/7", "/business/orderbuch/abgleich/8"]);
   });
 
   it("stacks on a phone and uses two columns from sm: up", () => {

@@ -111,15 +111,15 @@ describe("the states", () => {
     for (const s of ["open", "closed", "discarded"] as const) expect(html).toContain(copy.states[s]);
   });
 
-  it("links only to pages that exist: back to Verkauf and reload — no session page yet", async () => {
+  it("links back to Verkauf and to each session's comparison page", async () => {
     MOCK.result = { status: "ok", sessions: [session(3, "open")] };
     const hrefs = [...(await render()).matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
-    expect(hrefs).toEqual(["/business/orderbuch/verkauf"]);
+    expect(hrefs).toEqual(["/business/orderbuch/verkauf", "/business/orderbuch/abgleich/3"]);
   });
 });
 
 describe("after an analysis (?sitzung=)", () => {
-  it("marks exactly that session — the overview is where an analysis lands until step 5", async () => {
+  it("marks exactly that session (older links; an analysis now opens the session page)", async () => {
     MOCK.result = { status: "ok", sessions: [session(3, "open"), session(2, "closed")] };
     const html = await render("3");
     expect(html.match(/data-marked="true"/g)?.length).toBe(1);

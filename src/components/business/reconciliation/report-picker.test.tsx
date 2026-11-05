@@ -189,7 +189,7 @@ describe("Analyse starten", () => {
     expect(sent.files.map((f) => f.report.fileName)).toEqual(["maerz.csv"]);
     expect(sent.files[0].fingerprint).toMatch(/^[0-9a-f]{64}$/);
     for (const value of Object.values(FAKE_BUYER)) expect(JSON.stringify(sent)).not.toContain(value);
-    expect(MOCK.push).toHaveBeenCalledWith("/business/orderbuch/abgleich?sitzung=7");
+    expect(MOCK.push).toHaveBeenCalledWith("/business/orderbuch/abgleich/7");
     expect(dialog()).toBeNull();
     expect(status()).toBe(t.analyse.done(7));
   });
@@ -213,7 +213,7 @@ describe("Analyse starten", () => {
     await act(async () => { release({ ok: true, sessionId: 9 }); });
     await settle();
     expect(MOCK.push).toHaveBeenCalledTimes(1);
-    expect(MOCK.push).toHaveBeenCalledWith("/business/orderbuch/abgleich?sitzung=9");
+    expect(MOCK.push).toHaveBeenCalledWith("/business/orderbuch/abgleich/9");
   });
 
   it("a refusal stays in the dialog as an alert, with the server's sentence, and can be retried", async () => {

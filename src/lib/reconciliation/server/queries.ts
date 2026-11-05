@@ -8,10 +8,10 @@
 import { isStagingProjectUrl } from "@/lib/admin/catalog-source";
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
-import { sessionListView, ViewContractError, type SessionListItem } from "../view";
-
-export type SessionCategory =
-  | "exact" | "deviating" | "probable" | "ambiguous" | "external_only" | "ledger_only" | "not_comparable";
+import {
+  sessionListView, sessionPageView, ViewContractError,
+  type PageRequest, type SessionListItem, type SessionPage,
+} from "../view";
 
 /**
  * Does this deployment have the reconciliation at all? Fail-closed: no URL,
@@ -59,16 +59,40 @@ export async function fetchReconciliationSessions(): Promise<SessionListResult> 
   }
 }
 
-/** One page of one session; null when not allowed or not found. */
-export async function fetchReconciliationSession(
-  id: number,
-  page: { category?: SessionCategory | null; offset?: number; limit?: number } = {},
-): Promise<Record<string, unknown> | null> {
-  if (!(await allowed())) return null;
+/**
+ * Four answers for one session page — "there is no such session" is a 404,
+ * "could not read it" an alert, and neither looks like an empty session.
+ */
+export type SessionPageResult =
+  | { status: "ok"; page: SessionPage }
+  | { status: "unavailable" }
+  | { status: "not_found" }
+  | { status: "error" };
+
+/**
+ * One page of one session (`seller_recon_session`, 0172; `ledger` 0178/0179).
+ * Only codes and contract paths are logged — never a value: an order number
+ * or a title does not belong in a server log.
+ */
+export async function fetchReconciliationSession(id: number, request: PageRequest): Promise<SessionPageResult> {
+  if (!(await allowed())) return { status: "unavailable" };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_recon_session", {
-    p_id: id, p_category: page.category ?? null, p_offset: page.offset ?? 0, p_limit: page.limit ?? 50,
+    p_id: id, p_category: request.category, p_offset: request.offset, p_limit: request.limit,
   });
-  if (error || data === null || typeof data !== "object") return null;
-  return data as Record<string, unknown>;
+  if (error) {
+    // `no_data_found`: no such session — or, behind the gate, none of ours.
+    if (error.code === "P0002") return { status: "not_found" };
+    console.error("reconciliation session:", error.code);
+    return { status: "error" };
+  }
+  try {
+    return { status: "ok", page: sessionPageView(data, request) };
+  } catch (e) {
+    if (e instanceof ViewContractError) {
+      console.error("reconciliation session:", e.path);
+      return { status: "error" };
+    }
+    throw e;
+  }
 }

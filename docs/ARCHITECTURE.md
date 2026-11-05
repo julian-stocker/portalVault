@@ -518,6 +518,10 @@ seller_recon_sessions() / seller_recon_session()      (0172, JSON)
                                 und camelCase (Liste, Zuordnung, Verkauf, Befunde);
                                 falsche Form → ViewContractError (Pfad, nie ein Wert)
       →  /business/orderbuch/abgleich    Sitzungsübersicht, nur lesend
+      →  compare.ts             Befunde (Analyse) + ledger.atAnalysis (Beleg, 0179) → ein Wort
+                                je Angabe; vergleicht und rechnet selbst nichts
+      →  /business/orderbuch/abgleich/<id>   Vergleichsansicht, nur lesend; Seiten und Filter
+                                sind Links, jede Seite eine Antwort der Datenbank
 
 Berichtsdateien (CSV, nur im Browser — kein Netzwerkzugriff)
       →  report-picker.tsx      Auswahl; Datei über 10 MB wird nicht gelesen
@@ -529,7 +533,7 @@ Berichtsdateien (CSV, nur im Browser — kein Netzwerkzugriff)
       →  analyseReconciliation(preview.upload)   validateUpload → distinctFiles → Matching
                                 → seller_recon_create (Sitzung neu oder wiederverwendet,
                                 kein Verkaufswert geändert)
-      →  ?sitzung=<id>          vorläufiges Ziel (`sessionHref`), ab Schritt 5 /abgleich/<id>
+      →  /abgleich/<id>         Ziel nach der Analyse (`sessionHref`)
 ```
 
 Die Vorschau selbst überträgt nichts. Gemessen wird der **tatsächliche** Body: Next kodiert das

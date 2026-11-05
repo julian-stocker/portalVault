@@ -18,8 +18,9 @@
  * TWO KEY CONVENTIONS, BECAUSE THE FUNCTIONS BUILD THEM TWO WAYS
  *
  *   snake_case   `session`, `files` and a match's `order` — `to_jsonb(row)`
- *   camelCase    the session list, a match, its `sale` and `findings`, and
- *                the order's `lines` (stored as the payload sent them)
+ *   camelCase    the session list, a match, its `sale`, `ledger` and
+ *                `findings`, and the order's `lines` (stored as the payload
+ *                sent them)
  *
  * THE SHOWN VALUES STAY RAW. `seller_recon_decide` compares the two values the
  * screen showed with the stored ones (0156 pattern, PT409 otherwise). So
@@ -86,6 +87,18 @@ complete<Missing<FindingField, (typeof FINDING_FIELDS)[number]>>();
 complete<Missing<Decision, (typeof DECISIONS)[number]>>();
 complete<Missing<CauseCode, (typeof CAUSE_CODES)[number]>>();
 complete<Missing<ReportIssue["code"], (typeof REPORT_ISSUE_CODES)[number]>>();
+
+/** How far SkyIsles' value at analysis is proven (0179, `sales_recon_proven`). */
+export const LEDGER_BASES = ["stored", "derived", "unknown"] as const;
+export type LedgerBasis = (typeof LEDGER_BASES)[number];
+
+/** How the sale relates to the analysed version (0178). */
+export const LEDGER_STATES = ["unchanged", "applied", "changed"] as const;
+export type LedgerState = (typeof LEDGER_STATES)[number];
+
+/** The five fields `ledger.atAnalysis` carries, in the order the screen shows them. */
+export const LEDGER_FIELDS = ["soldOn", "itemsNet", "shipping", "expectedTotal", "pieces"] as const;
+export type LedgerField = (typeof LEDGER_FIELDS)[number];
 
 /** `seller_recon_session` serves 1 to 200 rows per page (0172). */
 export const PAGE_LIMIT_MAX = 200;
@@ -244,6 +257,44 @@ export type Finding = {
 
 export type Competitor = { orderRef: string; saleId: number; score: number };
 
+/**
+ * One field of `ledger.atAnalysis`, exactly as the database proved it.
+ *
+ *   stored    the finding's SkyIsles value — recorded at analysis; under
+ *             `changed` it is that record, not re-proven
+ *   derived   no finding, and the database showed the report value equals
+ *             what SkyIsles held then
+ *   unknown   no proof — `value` is null, never a stand-in
+ */
+export type AtAnalysisValue = { readonly value: JsonScalar; readonly basis: LedgerBasis };
+
+/** What SkyIsles holds NOW (`sales_recon_sale_values`, 0178). */
+export type LedgerCurrent = {
+  soldOn: string | null;
+  itemsSubtotal: number;
+  discount: number;
+  itemsNet: number;
+  shipping: number;
+  refundsTotal: number;
+  cancelledOn: string | null;
+  expectedTotal: number;
+  pieces: number;
+  externalOrderRef: string | null;
+  isTest: boolean;
+};
+
+/**
+ * The SkyIsles side of a match (0178, proof since 0179). Null exactly when
+ * the match has no sale. Nothing here is computed on the client: the screen
+ * shows `atAnalysis` as the database proved it.
+ */
+export type Ledger = {
+  state: LedgerState;
+  version: { analysed: string | null; current: string | null };
+  current: LedgerCurrent;
+  atAnalysis: Readonly<Record<LedgerField, AtAnalysisValue>>;
+};
+
 export type Match = {
   id: number;
   category: Category;
@@ -254,6 +305,8 @@ export type Match = {
   reason: NotComparableReason | null;
   order: SessionOrder | null;
   sale: SessionSale | null;
+  /** Null exactly when `sale` is null. */
+  ledger: Ledger | null;
   findings: Finding[];
 };
 
@@ -589,11 +642,52 @@ function competitorView(raw: unknown, path: string): Competitor {
   return { orderRef: str(o, "orderRef", path), saleId: int(o, "saleId", path), score: num(o, "score", path) };
 }
 
+function atAnalysisView(raw: unknown, path: string): AtAnalysisValue {
+  const o = obj(raw, path);
+  const basis = oneOf(o, "basis", LEDGER_BASES, path);
+  const value = scalar(o, "value", path);
+  // The 0179 contract: no proof, no value — and a proven value is never empty.
+  if (basis === "unknown" && value !== null) throw new ViewContractError(`${path}.value`, "unknown with a value");
+  if (basis !== "unknown" && value === null) throw new ViewContractError(`${path}.value`, "proven without a value");
+  return Object.freeze({ value, basis });
+}
+
+function ledgerView(raw: unknown, path: string): Ledger | null {
+  if (raw === null) return null;
+  const o = obj(raw, path);
+  const version = obj(has(o, "version", path), `${path}.version`);
+  const current = obj(has(o, "current", path), `${path}.current`);
+  const at = obj(has(o, "atAnalysis", path), `${path}.atAnalysis`);
+  const cp = `${path}.current`;
+  const atAnalysis = {} as Record<LedgerField, AtAnalysisValue>;
+  for (const f of LEDGER_FIELDS) atAnalysis[f] = atAnalysisView(has(at, f, `${path}.atAnalysis`), `${path}.atAnalysis.${f}`);
+  return {
+    state: oneOf(o, "state", LEDGER_STATES, path),
+    version: { analysed: optStr(version, "analysed", `${path}.version`), current: optStr(version, "current", `${path}.version`) },
+    current: {
+      soldOn: optStr(current, "soldOn", cp),
+      itemsSubtotal: num(current, "itemsSubtotal", cp),
+      discount: num(current, "discount", cp),
+      itemsNet: num(current, "itemsNet", cp),
+      shipping: num(current, "shipping", cp),
+      refundsTotal: num(current, "refundsTotal", cp),
+      cancelledOn: optStr(current, "cancelledOn", cp),
+      expectedTotal: num(current, "expectedTotal", cp),
+      pieces: int(current, "pieces", cp),
+      externalOrderRef: optStr(current, "externalOrderRef", cp),
+      isTest: bool(current, "isTest", cp),
+    },
+    atAnalysis: Object.freeze(atAnalysis),
+  };
+}
+
 function matchView(raw: unknown, i: number, sessionOpen: boolean): Match {
   const p = `matches[${i}]`;
   const o = obj(raw, p);
   const sale = saleView(has(o, "sale", p), `${p}.sale`);
   const stale = sale?.stale ?? false;
+  const ledger = ledgerView(has(o, "ledger", p), `${p}.ledger`);
+  if ((sale === null) !== (ledger === null)) throw new ViewContractError(`${p}.ledger`, sale ? "missing for a sale" : "without a sale");
   return {
     id: int(o, "id", p),
     category: oneOf(o, "category", CATEGORIES, p),
@@ -604,6 +698,7 @@ function matchView(raw: unknown, i: number, sessionOpen: boolean): Match {
     reason: optOneOf(o, "reason", NOT_COMPARABLE_REASONS, p),
     order: orderView(has(o, "order", p), `${p}.order`),
     sale,
+    ledger,
     findings: arr(has(o, "findings", p), `${p}.findings`).map((f, k) => findingView(f, `${p}.findings[${k}]`, sessionOpen, stale)),
   };
 }
