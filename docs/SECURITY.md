@@ -2071,6 +2071,13 @@ kann.
   Umgebung) und ruft bis zur eigenen Freigabe keine Datenbankfunktion auf. Keine Seite und keine
   Komponente importiert eine Entscheidungs-, Vorschau- oder Übernahmeaktion (Test
   `selection.test.tsx`). `decideFinding` weist `manual` und freie Werte vor dem Aufruf ab.
+- **Der Prüflauf für 0180 hinterlässt nichts und gilt nur für Staging (Schritt 6B).**
+  `supabase/operations/staging-0180-probe.sql` ist eine einzige Transaktion ohne `commit`, die
+  zurückgerollt wird; ihre Prüffunktionen liegen nur in `pg_temp` der Sitzung, ohne Clientrecht, und
+  nehmen ausschließlich Testverkäufe an, die der Lauf selbst angelegt hat. Vor jedem Schreiben:
+  Staging-Stempel, Rolle `skyisles_agent`, Rumpf-md5, keine unbekannten Trigger oder Webhooks, genau
+  ein Betriebskonto, dessen Identität nur transaktionslokal gesetzt wird. Der reguläre Weg bleibt
+  für Testverkäufe gesperrt. Einzelheiten und Grenzen: `supabase/checks/0180_probe.md`.
 - **Keine Service-Role** in `src/lib/reconciliation` (Test `server/actions.test.ts`) und im
   Staging-Funktionstest `tools/verify-sales-reconciliation.mts`: er arbeitet als vorhandenes
   Betriebskonto über den öffentlichen Schlüssel, legt kein Konto an und löscht keines

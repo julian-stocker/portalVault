@@ -91,21 +91,28 @@ create table public.orderbook_audit (
   changed_at timestamptz not null default now(), changed_by uuid);
 `;
 
+/** The functions the world takes word for word from the migration that defines them today. */
+const BODIES = [
+  ["0062_orderbook_sale_maintenance.sql", "orderbook_log"],
+  ["0062_orderbook_sale_maintenance.sql", "orderbook_guard_stale"],
+  ["0062_orderbook_sale_maintenance.sql", "orderbook_touch_sale"],
+  ["0062_orderbook_sale_maintenance.sql", "seller_add_sale_refund"],
+  ["0091_update_sale_date_range.sql", "seller_update_sale"],
+  ["0110_external_hold_runtime.sql", "hold_sale_item"],
+  ["0110_external_hold_runtime.sql", "release_sale_item_hold"],
+] as const;
+
+/**
+ * The same world as SQL scripts, in order — for a REAL PostgreSQL server
+ * (`src/lib/reconciliation/pg/`), which runs exactly what PGlite runs.
+ */
+export function reconciliationWorldScripts(migrations: readonly string[] = RECONCILIATION_MIGRATIONS): string[] {
+  return [WORLD, ...BODIES.map(([file, name]) => body(file, name)), ...migrations.map(MIG)];
+}
+
 export async function reconciliationWorld(options: { migrations?: readonly string[] } = {}): Promise<PGlite> {
   const db = new PGlite();
-  await db.exec(WORLD);
-  for (const [file, name] of [
-    ["0062_orderbook_sale_maintenance.sql", "orderbook_log"],
-    ["0062_orderbook_sale_maintenance.sql", "orderbook_guard_stale"],
-    ["0062_orderbook_sale_maintenance.sql", "orderbook_touch_sale"],
-    ["0062_orderbook_sale_maintenance.sql", "seller_add_sale_refund"],
-    ["0091_update_sale_date_range.sql", "seller_update_sale"],
-    ["0110_external_hold_runtime.sql", "hold_sale_item"],
-    ["0110_external_hold_runtime.sql", "release_sale_item_hold"],
-  ] as const) {
-    await db.exec(body(file, name));
-  }
-  for (const file of options.migrations ?? RECONCILIATION_MIGRATIONS) await db.exec(MIG(file));
+  for (const script of reconciliationWorldScripts(options.migrations)) await db.exec(script);
   return db;
 }
 
