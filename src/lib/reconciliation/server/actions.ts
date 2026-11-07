@@ -15,6 +15,12 @@
  * not on an error. And the apply is LOCKED (`APPLY_RELEASED`, `release.ts`)
  * until a separate approval: it then calls no database function at all.
  *
+ * THE SIMPLE PATH (`confirmReconciliation`) is what the screen uses: one
+ * confirmation per "Abgleichen" — the decisions, the preview and the apply in
+ * one call, still through the same three 0180 functions and the same token.
+ * It never takes a day over, and while `APPLY_RELEASED` is false it writes
+ * nothing at all, not even a decision.
+ *
  * TWO GATES, AND NEITHER IS THE BOUNDARY ON ITS OWN. `canOperateSeller()`
  * answers a denied click with a sentence; the database refuses anyway. And
  * `reconciliationAvailable()` keeps the feature on Staging while the
@@ -30,9 +36,11 @@ import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
 import { createClient } from "@/lib/supabase/server";
 import { coverageOf } from "../coverage";
+import { changeValues } from "../decide";
 import { distinctFiles, mergeReports } from "../dedupe";
 import { reconcile, summarize } from "../diff";
 import { matchOrders } from "../match";
+import { type ConfirmItem, isConfirmField } from "../plan";
 import { APPLY_RELEASED } from "../release";
 import { RECONCILIATION_PATH } from "../routes";
 import {
@@ -232,6 +240,8 @@ export async function applySelection(
     throw e;
   }
   if (!preview.admissible) return { ok: false, message: copy.errors.notApplicable };
+  // The reconciliation no longer corrects a day — not through this action either.
+  if (preview.changes.some((c) => c.field === "sold_on")) return { ok: false, message: copy.errors.dateNotTakeable };
   if (preview.token !== token) return { ok: false, message: copy.errors.selectionChanged };
   if (largeDateGapDecisions(preview).some((id) => !confirmed.has(id))) {
     return { ok: false, message: copy.errors.dateGapUnconfirmed };
@@ -239,6 +249,110 @@ export async function applySelection(
 
   const { data, error } = await supabase.rpc("seller_recon_apply", {
     p_session_id: raw.sessionId, p_decision_ids: ids, p_token: token,
+  });
+  if (error) return { ok: false, message: message(error) };
+  revalidatePath(RECONCILIATION_PATH);
+  const result = (data ?? {}) as { applied?: number; sales?: number };
+  return { ok: true, applied: result.applied ?? 0, sales: result.sales ?? 0 };
+}
+
+// ---------------------------------------------------------------------------
+// "Abgleich bestätigen" — the one confirmation of the simple screen
+// ---------------------------------------------------------------------------
+
+export type ConfirmInput = { sessionId: number; items: readonly ConfirmItem[] };
+
+/** The values shown and the preview's agree — money to the cent, text exactly. */
+function sameValue(shown: unknown, previewed: unknown): boolean {
+  if (shown === null || previewed === null || shown === undefined || previewed === undefined) {
+    return (shown ?? null) === (previewed ?? null);
+  }
+  const a = typeof shown === "number" ? shown : Number(shown);
+  const b = typeof previewed === "number" ? previewed : Number(previewed);
+  if (typeof shown === "number" || typeof previewed === "number") return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 0.005;
+  return String(shown) === String(previewed);
+}
+
+/** The browser's items, checked key by key. Null: not a confirmation. */
+function confirmInput(raw: unknown): { sessionId: number; items: ConfirmItem[] } | "date" | null {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  if (!isId(o.sessionId) || !Array.isArray(o.items) || o.items.length === 0 || o.items.length > 500) return null;
+  const items: ConfirmItem[] = [];
+  const seen = new Set<number>();
+  for (const x of o.items as unknown[]) {
+    const i = (x ?? {}) as Record<string, unknown>;
+    if (i.field === "sold_on") return "date";
+    if (!isId(i.findingId) || seen.has(i.findingId) || !isConfirmField(i.field)
+        || (i.decision !== "take_external" && i.decision !== "keep_ledger")
+        || !isShown(i.shownLedger) || !isShown(i.shownExternal) || Object.keys(i).length !== 5) return null;
+    seen.add(i.findingId);
+    items.push({ findingId: i.findingId, field: i.field, decision: i.decision,
+      shownLedger: i.shownLedger as ConfirmItem["shownLedger"], shownExternal: i.shownExternal as ConfirmItem["shownExternal"] });
+  }
+  return { sessionId: o.sessionId, items };
+}
+
+/**
+ * Confirm the reconciliation of the orders in the dialog: record each
+ * decision with the values the operator saw, preview exactly the take-overs,
+ * check the preview against those values, apply with its token.
+ *
+ * LOCKED FIRST. While `APPLY_RELEASED` is false nothing is called — no
+ * decision is recorded either. Then: only goods value, shipping and order
+ * number (`CONFIRM_FIELDS`); a day is refused before any call. A refusal on
+ * the way leaves the sales unchanged — decisions already recorded stay as
+ * notes and are re-decided by the next confirmation.
+ */
+export async function confirmReconciliation(input: ConfirmInput): Promise<ActionResult<{ applied: number; sales: number }>> {
+  const denied = await gate();
+  if (denied) return denied;
+  if (!APPLY_RELEASED) return { ok: false, message: copy.errors.applyNotReleased };
+  const parsed = confirmInput(input);
+  if (parsed === "date") return { ok: false, message: copy.errors.dateNotTakeable };
+  if (parsed === null) return { ok: false, message: copy.errors.rejected };
+  const { sessionId, items } = parsed;
+  const supabase = await createClient();
+
+  const takes = new Map<number, ConfirmItem>();
+  for (const item of items) {
+    const { data, error } = await supabase.rpc("seller_recon_decide", {
+      p_finding_id: item.findingId, p_decision: item.decision, p_manual_value: null, p_reason: null,
+      p_shown_ledger: item.shownLedger, p_shown_external: item.shownExternal,
+    });
+    if (error) return { ok: false, message: message(error) };
+    if (item.decision === "take_external") takes.set(Number(data), item);
+  }
+  if (takes.size === 0) {
+    revalidatePath(RECONCILIATION_PATH);
+    return { ok: true, applied: 0, sales: 0 };
+  }
+
+  const ids = [...takes.keys()].sort((a, b) => a - b);
+  const check = await supabase.rpc("seller_recon_preview", { p_session_id: sessionId, p_decision_ids: ids });
+  if (check.error) return { ok: false, message: message(check.error) };
+  let preview: SelectionPreview;
+  try {
+    preview = selectionPreviewView(check.data);
+  } catch (e) {
+    if (e instanceof SelectionContractError) return { ok: false, message: copy.errors.loadFailed };
+    throw e;
+  }
+  if (!preview.admissible || preview.token === null || preview.changes.length !== ids.length) {
+    return { ok: false, message: copy.errors.notApplicable };
+  }
+  for (const c of preview.changes) {
+    const item = takes.get(c.decisionId);
+    if (c.field === "sold_on") return { ok: false, message: copy.errors.dateNotTakeable };
+    if (!item || c.field !== item.field) return { ok: false, message: copy.errors.notApplicable };
+    // What would be written is exactly what the operator saw.
+    const { old, target } = changeValues(c);
+    if (!sameValue(item.shownLedger, old) || !sameValue(item.shownExternal, target)) {
+      return { ok: false, message: copy.errors.shownValuesChanged };
+    }
+  }
+
+  const { data, error } = await supabase.rpc("seller_recon_apply", {
+    p_session_id: sessionId, p_decision_ids: ids, p_token: preview.token,
   });
   if (error) return { ok: false, message: message(error) };
   revalidatePath(RECONCILIATION_PATH);

@@ -7,15 +7,22 @@
  * from the answer's `total`. Filter and paging are LINKS: the next page is
  * the server's next answer (`seller_recon_session` with offset and limit),
  * never a slice of a list the browser already holds.
+ *
+ * THE REPORT'S ORDERS FIRST. In "Alle" the extra candidates — SkyIsles sales
+ * loaded only because they lie within ±3 days of the report
+ * (`not_comparable`) — are not shown as orders: they wait, collapsed, under
+ * their own heading below the list. Their own filter still lists them.
  */
 import Link from "next/link";
 
 import { formatDate, formatNumber } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { sessionPageHref } from "@/lib/reconciliation/routes";
+import { isExtraCandidate, isRelevant, planMatch } from "@/lib/reconciliation/plan";
 import { CATEGORIES, type Category, pairingCounts, type SessionPage } from "@/lib/reconciliation/view";
 
 import { MatchCard } from "./match-comparison";
+import { ReconcileButton } from "./reconcile-dialog";
 
 const copy = de.business.reconciliation;
 const t = copy.detail;
@@ -46,10 +53,6 @@ export function SessionOverview({ page: p }: { page: SessionPage }) {
         <Fact label={t.period}>
           {s.coveredFrom || s.coveredTo ? `${formatDate(s.coveredFrom)} – ${formatDate(s.coveredTo)}` : copy.list.noPeriod}
         </Fact>
-        <Fact label={t.chain}>{s.chainComplete ? copy.list.chainComplete : copy.list.chainIncomplete}</Fact>
-        {s.recordFirst !== null && s.recordLast !== null ? (
-          <Fact label={t.records}>{t.recordRange(String(s.recordFirst), String(s.recordLast))}</Fact>
-        ) : null}
         {counts === null ? (
           <Fact label={t.matches}>{copy.list.noSummary}</Fact>
         ) : (
@@ -58,26 +61,41 @@ export function SessionOverview({ page: p }: { page: SessionPage }) {
             {summary ? <Fact label={t.deviatingMatches}>{formatNumber(summary.categories.deviating)}</Fact> : null}
             <Fact label={t.reportOnlyCount}><span data-count="report-only">{formatNumber(counts.reportOnly)}</span></Fact>
             <Fact label={t.ledgerOnlyCount}><span data-count="ledger-only">{formatNumber(counts.ledgerOnly)}</span></Fact>
-            <Fact label={t.unpairedCount}><span data-count="unpaired">{formatNumber(counts.unpaired)}</span></Fact>
-            <Fact label={t.matchRecords}><span data-count="records">{formatNumber(counts.records)}</span></Fact>
           </>
         )}
       </dl>
-      {counts && counts.unpaired > 0 ? <p className="mt-2 text-xs text-muted">{t.unpairedHint}</p> : null}
       <p className="mt-2 text-xs text-muted">{copy.list.stateHints[s.state]}</p>
 
-      {summary ? (
-        <div className="mt-3">
-          <h3 className="text-xs text-muted">{t.deviationsByField}</h3>
-          <ul className="mt-1 flex flex-wrap gap-1">
-            {DEVIATION_FIELDS.map((f) => (
-              <li key={f} className="rounded-sky-md px-2 py-0.5 text-xs ring-1 ring-border/70">
-                {copy.fields[f]} <span className="tabular-nums">{formatNumber(summary.deviations[f])}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <details className="mt-2">
+        <summary className="focus-ring -mx-1 inline-flex min-h-11 cursor-pointer items-center rounded-sky-md px-1 text-sm underline underline-offset-2 sm:min-h-8">
+          {t.moreFacts}
+        </summary>
+        <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-3">
+          <Fact label={t.chain}>{s.chainComplete ? copy.list.chainComplete : copy.list.chainIncomplete}</Fact>
+          {s.recordFirst !== null && s.recordLast !== null ? (
+            <Fact label={t.records}>{t.recordRange(String(s.recordFirst), String(s.recordLast))}</Fact>
+          ) : null}
+          {counts ? (
+            <>
+              <Fact label={t.unpairedCount}><span data-count="unpaired">{formatNumber(counts.unpaired)}</span></Fact>
+              <Fact label={t.matchRecords}><span data-count="records">{formatNumber(counts.records)}</span></Fact>
+            </>
+          ) : null}
+        </dl>
+        {counts && counts.unpaired > 0 ? <p className="mt-2 text-xs text-muted">{t.unpairedHint}</p> : null}
+        {summary ? (
+          <div className="mt-3">
+            <h3 className="text-xs text-muted">{t.deviationsByField}</h3>
+            <ul className="mt-1 flex flex-wrap gap-1">
+              {DEVIATION_FIELDS.map((f) => (
+                <li key={f} className="rounded-sky-md px-2 py-0.5 text-xs ring-1 ring-border/70">
+                  {copy.fields[f]} <span className="tabular-nums">{formatNumber(summary.deviations[f])}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </details>
 
       <div className="mt-3">
         <h3 className="text-xs text-muted">{t.filesHeading}</h3>
@@ -159,9 +177,31 @@ export function MatchList({ page: p }: { page: SessionPage }) {
   if (p.matches.length === 0) {
     return <p className="mt-4 text-sm text-muted">{category ? t.emptyCategory : t.empty}</p>;
   }
+  // In "Alle" the report's orders come first; extra candidates are listed apart, collapsed.
+  const extra = category === null ? p.matches.filter(isExtraCandidate) : [];
+  const main = category === null ? p.matches.filter((m) => !isExtraCandidate(m)) : p.matches;
+  const relevant = main.filter((m) => isRelevant(planMatch(m)));
   return (
-    <ul className="mt-4 flex flex-col gap-3" aria-label={t.matchesHeading}>
-      {p.matches.map((m) => <li key={m.id}><MatchCard match={m} /></li>)}
-    </ul>
+    <>
+      {relevant.length > 1 ? (
+        <div className="mt-4"><ReconcileButton matches={relevant} label={copy.reconcile.all(relevant.length)} /></div>
+      ) : null}
+      {main.length > 0 ? (
+        <ul className="mt-4 flex flex-col gap-3" aria-label={t.matchesHeading}>
+          {main.map((m) => <li key={m.id}><MatchCard match={m} /></li>)}
+        </ul>
+      ) : null}
+      {extra.length > 0 ? (
+        <details data-extra-candidates="" className="mt-6 rounded-sky-md px-3 py-2 ring-1 ring-border/70">
+          <summary className="focus-ring -mx-1 inline-flex min-h-11 cursor-pointer items-center rounded-sky-md px-1 text-sm font-medium sm:min-h-8">
+            {t.extraCandidates(extra.length)}
+          </summary>
+          <p className="mt-1 text-xs text-muted">{t.extraCandidatesHint}</p>
+          <ul className="mt-3 flex flex-col gap-3">
+            {extra.map((m) => <li key={m.id}><MatchCard match={m} /></li>)}
+          </ul>
+        </details>
+      ) : null}
+    </>
   );
 }

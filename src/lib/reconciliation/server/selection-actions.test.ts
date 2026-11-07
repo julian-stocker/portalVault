@@ -25,7 +25,7 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/lib/auth/capabilities", () => ({ canOperateSeller: async () => MOCK.allowed }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
-const { applySelection, decideFinding, previewSelection } = await import("./actions");
+const { applySelection, confirmReconciliation, decideFinding, previewSelection } = await import("./actions");
 const { de } = await import("@/lib/i18n/de");
 const { STAGING_PROJECT_REF } = await import("@/lib/admin/catalog-source");
 const { APPLY_RELEASED } = await import("../release");
@@ -159,6 +159,14 @@ describe("the apply is locked until its separate approval", () => {
   it("answers with a sentence and calls NO database function — not the preview, not either apply", async () => {
     MOCK.answer = () => ({ data: previewAnswer(), error: null });
     const r = await applySelection({ sessionId: 3, decisionIds: [7], token: TOKEN, confirmedDateGaps: [] });
+    expect(r).toEqual({ ok: false, message: errors.applyNotReleased });
+    expect(MOCK.calls).toEqual([]);
+  });
+
+  it("the confirmation of „Abgleichen“ writes nothing either — not even a decision", async () => {
+    MOCK.answer = () => ({ data: 1, error: null });
+    const r = await confirmReconciliation({ sessionId: 5, items: [
+      { findingId: 1, field: "external_order_ref", decision: "take_external", shownLedger: null, shownExternal: "55-00000-00001" }] });
     expect(r).toEqual({ ok: false, message: errors.applyNotReleased });
     expect(MOCK.calls).toEqual([]);
   });

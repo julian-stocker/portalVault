@@ -1,6 +1,12 @@
 /**
- * One match of a session, report on the left and SkyIsles on the right
- * (ADR-0174, phase 4 step 5). Read-only: no decision, no button.
+ * One order of a session as a compact card (ADR-0174, simplified CSV
+ * reconciliation): the eBay order number, the SkyIsles sale, how many
+ * differences there are, one short line per relevant difference — and one
+ * action, "Abgleichen" (`reconcile-dialog.tsx`). The sale links to its page
+ * in the Orderbuch, the only place where a date, a position, a refund or a
+ * cancellation is corrected. The full field table stays behind "Einzelheiten".
+ *
+ * An order without a relevant difference is one line and its details.
  *
  * WHAT THE COLOURS MEAN comes from `compareMatch` — green only for a value the
  * database PROVED equal, red only for a recorded deviation of a certain pair.
@@ -14,12 +20,19 @@
  *
  * Every value is text through React — nothing from a report is rendered as HTML.
  */
+import Link from "next/link";
+
 import { formatDate, formatNumber, formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
   compareMatch, toneOf, type ComparisonField, type FieldStatus, type MatchComparison, type Tone, type ValueKind,
 } from "@/lib/reconciliation/compare";
+import { orderbookSaleHref } from "@/lib/reconciliation/decide";
+import { isRelevant, type MatchPlan, planMatch } from "@/lib/reconciliation/plan";
 import type { AtAnalysisValue, JsonScalar, Match } from "@/lib/reconciliation/view";
+
+import { EntryValues, reasonText } from "./plan-values";
+import { ReconcileButton } from "./reconcile-dialog";
 
 const copy = de.business.reconciliation;
 const t = copy.detail;
@@ -195,69 +208,90 @@ function Figures({ c, hasOrder }: { c: MatchComparison; hasOrder: boolean }) {
   );
 }
 
-function Side({ title, children }: { title: string; children: React.ReactNode }) {
+const BADGE: Record<string, string> = {
+  MISSING_IN_SKYISLES: "text-success ring-success/40",
+  CONFLICT: "text-danger ring-danger/40",
+  UNCERTAIN: "text-muted ring-border/70",
+  READ_ONLY_DIFFERENCE: "text-muted ring-border/70",
+};
+
+/** One short line per difference that matters — additions, conflicts, checks. */
+function PlanLines({ plan }: { plan: MatchPlan }) {
+  const entries = [...plan.supplements, ...plan.conflicts, ...plan.checks];
+  if (entries.length === 0) return null;
   return (
-    <div className="min-w-0">
-      <p className="text-xs text-muted">{title}</p>
-      <div className="mt-0.5 text-sm break-words">{children}</div>
-    </div>
+    <ul className="mt-2 flex flex-col gap-1" aria-label={copy.reconcile.dialogTitle}>
+      {entries.map((e) => (
+        <li key={e.finding.id} data-plan={e.state} data-plan-field={e.finding.field}
+            className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-sm font-medium">{copy.fields[e.finding.field]}</span>
+          <EntryValues entry={e} />
+          <span title={reasonText(e.reason) ?? undefined}
+                className={`rounded-sky-md px-2 py-0.5 text-xs ring-1 ${BADGE[e.state] ?? BADGE.UNCERTAIN}`}>
+            {copy.reconcile.badges[e.state]}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 export function MatchCard({ match: m }: { match: Match }) {
   const c = compareMatch(m);
+  const plan = planMatch(m);
   const headingId = `recon-match-${m.id}`;
   const cur = m.ledger?.current ?? null;
   return (
     <article aria-labelledby={headingId} data-category={m.category} data-tone={c.tone}
              className={`rounded-sky-md bg-surface/60 p-3 ring-1 sm:p-4 ${TONE_RING[c.tone]}`}>
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h3 id={headingId} className="sr-only">
-          {m.order ? t.order(m.order.orderRef) : t.noOrder} · {m.sale ? t.sale(m.sale.id) : t.noSale}
-        </h3>
-        <span title={copy.categoryHints[m.category]}
-              className={`rounded-sky-md px-2 py-0.5 text-xs ring-1 ${TONE_CHIP[c.tone]}`}>
-          {copy.categories[m.category]}
-        </span>
-        {c.deviations > 0 ? <span className="text-xs text-danger">{t.deviationCount(c.deviations)}</span> : null}
-        {c.state ? <span className="text-xs text-muted">{t.ledgerStates[c.state]}</span> : null}
-        {/* Why it is not compared — in the head, not only in the details (0169: a reason exists only here). */}
-        {m.category === "not_comparable" && m.reason ? (
-          <span data-reason={m.reason} className="rounded-sky-md px-2 py-0.5 text-xs ring-1 ring-border/70">
-            {copy.notComparableReasons[m.reason]}
+      <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+        <div className="min-w-0">
+          <h3 id={headingId} className="text-sm font-medium break-words">
+            {m.order ? t.order(m.order.orderRef) : m.sale ? t.sale(m.sale.id) : t.noOrder}
+          </h3>
+          <p className="text-xs text-muted tabular-nums break-words">
+            {m.order && m.sale ? <>{t.sale(m.sale.id)} · </> : null}
+            {m.order && !m.sale ? <>{t.noSale} · </> : null}
+            {!m.order && m.category !== "not_comparable" ? <>{t.noOrder} · </> : null}
+            {cur ? <>{copy.reconcile.ledger} {formatDate(cur.soldOn)} · {formatPrice(cur.expectedTotal)}</> : null}
+            {m.order && cur ? " · " : null}
+            {m.order ? <>{copy.reconcile.csv} {formatDate(m.order.soldOn)} · {formatPrice(m.order.total)}</> : null}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span title={copy.categoryHints[m.category]}
+                className={`rounded-sky-md px-2 py-0.5 text-xs ring-1 ${TONE_CHIP[c.tone]}`}>
+            {copy.categories[m.category]}
           </span>
-        ) : null}
-        {cur?.isTest ? <span className="text-xs text-muted">{t.testSale}</span> : null}
+          {c.deviations > 0 ? <span className="text-xs text-danger">{t.deviationCount(c.deviations)}</span> : null}
+          {plan.supplements.length > 0 ? <span className="text-xs text-success">{t.additionCount(plan.supplements.length)}</span> : null}
+          {c.state && c.state !== "unchanged" ? <span className="text-xs text-muted">{t.ledgerStates[c.state]}</span> : null}
+          {/* Why it is not compared — in the head, not only in the details (0169: a reason exists only here). */}
+          {m.category === "not_comparable" && m.reason ? (
+            <span data-reason={m.reason} className="rounded-sky-md px-2 py-0.5 text-xs ring-1 ring-border/70">
+              {copy.notComparableReasons[m.reason]}
+            </span>
+          ) : null}
+          {cur?.isTest ? <span className="text-xs text-muted">{t.testSale}</span> : null}
+        </div>
       </header>
       {m.category === "not_comparable" && m.reason ? (
-        <p className="mt-1 text-xs text-muted">{t.reasonHints[m.reason]}</p>
+        <p className="mt-1 text-xs text-muted">{t.notCompared}. {t.reasonHints[m.reason]}</p>
       ) : null}
 
-      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-4">
-        <Side title={t.csv}>
-          {m.order ? (
-            <>
-              <span className="font-medium">{t.order(m.order.orderRef)}</span>
-              <span className="block tabular-nums text-muted">
-                {formatDate(m.order.soldOn)} · {formatPrice(m.order.total)}
-              </span>
-            </>
-          ) : m.category === "not_comparable"
-            // A candidate that cannot be judged is not "missing from the report".
-            ? <span className="text-muted">{t.notCompared}</span>
-            : <span className="text-muted">{t.noOrder}</span>}
-        </Side>
-        <Side title={t.skyisles}>
-          {m.sale && cur ? (
-            <>
-              <span className="font-medium">{t.sale(m.sale.id)}</span>
-              <span className="block tabular-nums text-muted">
-                {formatDate(cur.soldOn)} · {formatPrice(cur.expectedTotal)} <span className="text-xs">({t.current})</span>
-              </span>
-            </>
-          ) : <span className="text-muted">{t.noSale}</span>}
-        </Side>
-      </div>
+      <PlanLines plan={plan} />
+
+      {isRelevant(plan) || m.sale ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          {isRelevant(plan) ? <ReconcileButton matches={[m]} /> : null}
+          {m.sale ? (
+            <Link href={orderbookSaleHref(m.sale.id)} data-orderbook=""
+                  className="focus-ring -mx-1 inline-flex min-h-11 items-center rounded-sky-md px-1 text-sm underline underline-offset-2 sm:min-h-8">
+              {copy.reconcile.orderbook}
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
       <details data-match-details="" className="mt-2">
         <summary className="focus-ring -mx-1 inline-flex min-h-11 cursor-pointer items-center rounded-sky-md px-1 text-sm underline underline-offset-2 sm:min-h-8">

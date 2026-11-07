@@ -26,3 +26,17 @@ export const ANALYSE_MESSAGES: ReadonlySet<string> = new Set([
 export function shownRefusal(message: unknown, fallback: string): string {
   return typeof message === "string" && ANALYSE_MESSAGES.has(message) ? message : fallback;
 }
+
+/**
+ * Every sentence the decide, preview, apply and close actions can refuse with:
+ * the fixed texts of `errors` plus the two general ones. Same rule as above —
+ * anything else is shown as the caller's general sentence.
+ */
+export const ACTION_MESSAGES: ReadonlySet<string> = new Set([
+  ...(Object.values(errors) as unknown[]).filter((v): v is string => typeof v === "string"),
+  de.admin.notAllowed, de.admin.writeFailed,
+]);
+
+export function shownActionRefusal(message: unknown, fallback: string): string {
+  return typeof message === "string" && ACTION_MESSAGES.has(message) ? message : fallback;
+}

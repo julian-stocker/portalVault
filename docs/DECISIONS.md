@@ -17145,6 +17145,18 @@ abgenommen; 0180 insgesamt erst mit A und C (`supabase/checks/0180_staging_run.m
 
 ---
 
+**Nachtrag 2026-11-06 — vereinfachte Bedienung (lokal committet).** Die Oberfläche
+entscheidet nicht mehr Feld für Feld. Ein Befund wird in `plan.ts` einem von fünf Zuständen
+zugeordnet; eine fehlende Bestellnummer auf sicherem Paar ist vorgemerkt, ein Widerspruch bei
+Warenwert oder Versand verlangt eine Wahl, alles andere ist Hinweis. Bestätigt wird je
+Bestellung (oder je Seite) mit `confirmReconciliation`: dieselben drei Funktionen
+(`seller_recon_decide`, `_preview`, `_apply`), derselbe Token, zusätzlich der Abgleich der
+Vorschauwerte mit den angezeigten Werten. **Das Verkaufsdatum wird über den Abgleich nicht mehr
+geändert** — Produktentscheidung des Betreibers; 0180 könnte es, die Actions weisen es ab.
+Folge: Entscheidungen entstehen erst beim Bestätigen, nicht beim Öffnen oder Analysieren; bei
+gesperrter Übernahme (`APPLY_RELEASED = false`) entsteht auch keine Entscheidung. Keine
+Migration, 0180 unverändert.
+
 ## ADR-0177 · Der Verkaufsabgleich prüft jeden Upload ganz — auch einen, den er schon kennt
 
 **Status:** AUF STAGING ANGEWENDET UND ABGENOMMEN · 2026-11-03 (`0664e6c`). Migration `0176` läuft

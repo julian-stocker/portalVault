@@ -1,9 +1,12 @@
 /**
  * Orderbuch — Verkaufsabgleich, one session (ADR-0174, phase 4 step 5).
  *
- * The comparison of one session, report against SkyIsles, page by page.
- * READ-ONLY: no decision, no application, no new analysis — later steps,
- * each released on its own.
+ * The comparison of one session, report against SkyIsles, page by page —
+ * and on an OPEN session one "Abgleichen" per order (and per page): missing
+ * values preselected, conflicts to choose, everything else a hint. The
+ * confirmation is locked by `APPLY_RELEASED` (`release.ts`): the button says
+ * so and the action refuses on its own. A closed or discarded session stays
+ * read-only.
  *
  * THE SAME GATES AS THE OVERVIEW, BEFORE THE FIRST QUERY.
  *
@@ -20,8 +23,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { CloseSession } from "@/components/business/reconciliation/close-session";
+import { ReconcileProvider } from "@/components/business/reconciliation/reconcile-context";
 import { CategoryFilter, MatchList, Pagination, SessionOverview } from "@/components/business/reconciliation/session-detail";
 import { de } from "@/lib/i18n/de";
+import { APPLY_RELEASED } from "@/lib/reconciliation/release";
 import { parseSessionParam, RECONCILIATION_PATH, sessionPageHref } from "@/lib/reconciliation/routes";
 import { fetchReconciliationSession, reconciliationEnvironment } from "@/lib/reconciliation/server/queries";
 import { pageRequest } from "@/lib/reconciliation/view";
@@ -43,6 +49,7 @@ export default async function ReconciliationSessionPage({ params, searchParams }
   const request = pageRequest(query);
   const result = await fetchReconciliationSession(id, request);
   if (result.status === "unavailable" || result.status === "not_found") notFound();
+  const open = result.status === "ok" && result.page.session.state === "open";
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pt-6 pb-10 md:pt-8">
@@ -53,7 +60,7 @@ export default async function ReconciliationSessionPage({ params, searchParams }
       <h1 className="mt-1 text-xl font-semibold tracking-tight md:text-2xl">
         {copy.title} · {t.title(id)}
       </h1>
-      <p className="mt-1 max-w-prose text-sm text-muted">{t.readOnly}</p>
+      <p className="mt-1 max-w-prose text-sm text-muted">{open ? t.decideIntro : t.readOnly}</p>
 
       {result.status === "error" ? (
         <div role="alert" className="mt-4 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">
@@ -64,7 +71,7 @@ export default async function ReconciliationSessionPage({ params, searchParams }
           </Link>
         </div>
       ) : (
-        <>
+        <ReconcileProvider sessionId={id} sessionOpen={open} applyReleased={APPLY_RELEASED}>
           <SessionOverview page={result.page} />
           <section aria-labelledby="recon-matches">
             <h2 id="recon-matches" className="sr-only">{t.matchesHeading}</h2>
@@ -73,7 +80,8 @@ export default async function ReconciliationSessionPage({ params, searchParams }
             <MatchList page={result.page} />
             <Pagination page={result.page} />
           </section>
-        </>
+          {open ? <CloseSession sessionId={id} /> : null}
+        </ReconcileProvider>
       )}
     </main>
   );

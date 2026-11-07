@@ -21,7 +21,12 @@ vi.mock("@/lib/reconciliation/server/queries", () => ({
   reconciliationEnvironment: () => MOCK.environment,
   fetchReconciliationSession: async (id: number, request: unknown) => { MOCK.calls.push({ id, request }); return MOCK.result; },
 }));
-vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NEXT_NOT_FOUND"); } }));
+vi.mock("next/navigation", () => ({
+  notFound: () => { throw new Error("NEXT_NOT_FOUND"); },
+  useRouter: () => ({ refresh: () => undefined, push: () => undefined }),
+}));
+// The client blocks import the actions; a static render never calls them.
+vi.mock("@/lib/reconciliation/server/actions", () => ({ confirmReconciliation: vi.fn(), closeReconciliation: vi.fn() }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => createElement("a", { href, ...rest }, children),
 }));
@@ -144,8 +149,9 @@ describe("the gates", () => {
     }
   });
 
-  it("no loading boundary, no client code, no action, no database call of its own", () => {
+  it("no loading boundary, no action, no database call of its own — the comparison stays server-rendered", () => {
     expect(PAGE).not.toMatch(/server\/actions|\.rpc\(|\.from\(|"use client"/);
+    // "Abgleichen" is its own client block; the comparison is not one.
     expect(COMPONENTS).not.toMatch(/server\/actions|\.rpc\(|\.from\(|"use client"|useState|onClick/);
   });
 });
@@ -321,8 +327,9 @@ describe("the value at analysis, as 0179 proved it", () => {
 });
 
 describe("read-only, and nothing private where it does not belong", () => {
-  it("no decision, no button, no form — nothing to take over or keep", async () => {
+  it("a closed session: no decision, no button, no form — nothing to take over or keep", async () => {
     const html = await render();
+    expect(html).toContain(t.readOnly);
     expect(html).not.toMatch(/<button|<form|<input|<select|<textarea/);
     for (const d of Object.values(copy.decisions)) expect(html).not.toContain(d);
   });
@@ -332,7 +339,8 @@ describe("read-only, and nothing private where it does not belong", () => {
     const hrefs = [...(await render("3", { kategorie: "deviating", seite: "2" })).matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
     expect(hrefs.length).toBeGreaterThan(5);
     for (const h of hrefs) {
-      expect(h).toMatch(/^\/business\/orderbuch\/abgleich(\/3(\?kategorie=[a-z_]+(&amp;seite=\d+)?|\?seite=\d+)?)?$/);
+      // The list, a session page — or a sale in the Orderbuch, by its id only (AP1).
+      expect(h).toMatch(/^\/business\/orderbuch\/(abgleich(\/3(\?kategorie=[a-z_]+(&amp;seite=\d+)?|\?seite=\d+)?)?|verkauf\/\d+)$/);
       expect(h).not.toContain("01-0000");
     }
   });
@@ -499,5 +507,99 @@ describe("the period: pairs, one-sided rows and candidates at the edge", () => {
   it("a session without a hint-worthy candidate shows no hint", async () => {
     MOCK.result = ok({ session: session({ summary: { ...SUMMARY, categories: { ...SUMMARY.categories, not_comparable: 0 } } }) });
     expect(await render()).not.toContain(t.unpairedHint);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// An open session: one "Abgleichen" per order — the confirmation stays locked
+// ---------------------------------------------------------------------------
+
+describe("an open session", () => {
+  const r = copy.reconcile;
+  const openWith = (matches: unknown[]) => {
+    MOCK.result = ok({ session: session({ state: "open", closed_at: null }), matches, total: matches.length });
+  };
+  const ref = (over: Record<string, unknown> = {}) => finding({ id: 41, key: "external_order_ref", field: "external_order_ref",
+    kind: "addition", ledger: null, external: "06-14260-71832", delta: null, allowedDecisions: ["take_external", "keep_ledger", "defer"], ...over });
+  const noRef = { ...ledger().current, externalOrderRef: null };
+
+  it("a short intro, no decision buttons and no selection panel — one Abgleichen per order with something to do", async () => {
+    openWith([match(1), match(2, { category: "deviating", certainty: "unique", findings: [finding(), ref()],
+      sale: sale({ id: 362, externalOrderRef: null }), ledger: ledger({ current: noRef }, { soldOn: at("2026-01-14", "stored") }) })]);
+    const html = await render();
+    expect(html).toContain(t.decideIntro);
+    expect(html).not.toContain(t.readOnly);
+    for (const gone of ["CSV-Wert übernehmen", "Zurückstellen", "Vorschau prüfen", "Auswahl und Übernahme", 'type="checkbox"']) {
+      expect(html).not.toContain(gone);
+    }
+    expect(card(html, "deviating").match(/data-reconcile=""/g)).toHaveLength(1);
+    // The exact order without anything to add has no action — one line and its details.
+    expect(card(html, "exact")).not.toContain("data-reconcile");
+    expect(html).toContain(r.close.button);
+  });
+
+  it("the card names the order, the sale, the counts and one line per difference — addition and date apart", async () => {
+    openWith([match(2, { category: "deviating", certainty: "unique", findings: [finding(), ref()],
+      sale: sale({ id: 362, externalOrderRef: null }), ledger: ledger({ current: noRef }, { soldOn: at("2026-01-14", "stored") }) })]);
+    const c = card(await render(), "deviating");
+    expect(c).toContain(t.order("01-00002-00002"));
+    expect(c).toContain(t.sale(362));
+    expect(c).toContain(t.deviationCount(1));
+    expect(c).toContain(t.additionCount(1));
+    expect(c).toMatch(/data-plan="MISSING_IN_SKYISLES" data-plan-field="external_order_ref"/);
+    expect(c).toMatch(/data-plan="READ_ONLY_DIFFERENCE" data-plan-field="sold_on"/);
+    expect(c).toContain(r.badges.MISSING_IN_SKYISLES);
+    expect(c).toContain(r.badges.READ_ONLY_DIFFERENCE);
+    expect(c).toContain(`href="/business/orderbuch/verkauf/362"`);
+    expect(c).toContain(r.orderbook);
+  });
+
+  it("a figure that differs is a check, never an addition or a conflict", async () => {
+    openWith([match(2, { category: "deviating", findings: [finding({ id: 36, key: "figure:0", field: "figure", ledger: "Spyro", external: "Dark Spyro", delta: null })] })]);
+    const c = card(await render(), "deviating");
+    expect(c).toMatch(/data-plan="READ_ONLY_DIFFERENCE" data-plan-field="figure"/);
+    expect(c).not.toMatch(/data-plan="(MISSING_IN_SKYISLES|CONFLICT)"/);
+  });
+
+  it("several orders to reconcile: one action for the page as well", async () => {
+    openWith([1, 2, 3].map((id) => match(id, { findings: [ref({ id: 40 + id })], sale: sale({ id: 360 + id, externalOrderRef: null }),
+      ledger: ledger({ current: noRef }) })));
+    expect(await render()).toContain(r.all(3));
+  });
+
+  it("a closed session shows no Abgleichen at all", async () => {
+    MOCK.result = ok({ matches: [match(2, { findings: [ref()], sale: sale({ id: 362, externalOrderRef: null }), ledger: ledger({ current: noRef }) })], total: 1 });
+    const html = await render();
+    expect(html).not.toContain("data-reconcile");
+    expect(html).not.toContain(r.close.button);
+  });
+});
+
+describe("the report's orders first — extra candidates of the search window apart", () => {
+  it("in 'Alle' the candidates after the period wait collapsed below the orders, never among them", async () => {
+    MOCK.result = ok({ total: 3, matches: [match(1),
+      match(7, { category: "not_comparable", certainty: null, score: null, dateDelta: null, reason: "after_coverage", order: null,
+        sale: sale({ id: 377, soldOn: "2026-03-01" }) }),
+      match(2, { category: "deviating", findings: [finding()] })] });
+    const html = await render();
+    const list = html.slice(html.indexOf(`aria-label="${t.matchesHeading}"`), html.indexOf("data-extra-candidates"));
+    expect(list).toContain('data-category="exact"');
+    expect(list).toContain('data-category="deviating"');
+    expect(list).not.toContain('data-category="not_comparable"');
+    const extra = html.slice(html.indexOf("<details data-extra-candidates"));
+    expect(extra).toContain(t.extraCandidates(1));
+    expect(extra).toContain(t.extraCandidatesHint);
+    expect(extra).toContain('data-category="not_comparable"');
+  });
+
+  it("their own filter still lists them as cards; an order of the report is never moved there", async () => {
+    MOCK.result = ok({ total: 1, matches: [match(7, { category: "not_comparable", certainty: null, reason: "after_coverage", order: null })] },
+      { category: "not_comparable", offset: 0, limit: 50 });
+    const html = await render("3", { kategorie: "not_comparable" });
+    expect(html).not.toContain("data-extra-candidates");
+    expect(html).toContain('data-category="not_comparable"');
+    MOCK.result = ok({ total: 2, matches: [match(1, { order: order({ sold_on: "2026-03-01" }) }), match(5, { category: "external_only",
+      certainty: null, score: null, dateDelta: null, sale: null, ledger: null, order: order({ sold_on: "2026-03-02" }) })] });
+    expect(await render()).not.toContain("data-extra-candidates");
   });
 });

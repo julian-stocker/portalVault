@@ -4,10 +4,8 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { DateGapNotice } from "@/components/business/reconciliation/date-gap-notice";
 import { de } from "@/lib/i18n/de";
 import {
   dayDistance, largeDateGapDecisions, SELECTION_PROBLEMS, SelectionContractError, selectionIds, selectionPreviewView,
@@ -78,18 +76,6 @@ describe("large date gaps (deterministic corrections over three days)", () => {
     expect(dayDistance("01.03.2026", "2026-03-02")).toBeNull();
     expect(dayDistance(null, "2026-03-02")).toBeNull();
   });
-
-  it("the prepared notice shows both days and the distance, and has no button", () => {
-    const [c] = selectionPreviewView(preview([change({ old: { soldOn: "2026-03-01" }, target: { soldOn: "2026-03-10" } })])).changes;
-    const html = renderToStaticMarkup(DateGapNotice({ change: c }) ?? <></>);
-    expect(html).toContain('role="note"');
-    expect(html).toContain(de.business.reconciliation.selection.dateGapTitle);
-    expect(html).toContain("9 Tage");
-    expect(html).toMatch(/01\.03\.2026.*10\.03\.2026/);
-    expect(html).not.toMatch(/<button|<form|<input|href=/);
-    const [small] = selectionPreviewView(preview([change()])).changes;
-    expect(DateGapNotice({ change: small })).toBeNull();
-  });
 });
 
 describe("the selection the browser sends", () => {
@@ -120,20 +106,20 @@ function sources(dir: string): string[] {
 describe("the separation between preparing and applying", () => {
   const ui = [...sources("src/app"), ...sources("src/components")];
 
-  it("no page and no component imports a deciding, previewing or applying action", () => {
-    const hits = ui.filter((f) => /\b(decideFinding|previewSelection|applySelection|applyReconciliation)\b/.test(readFileSync(f, "utf8")));
-    expect(hits).toEqual([]);
+  it("only the Abgleichen dialog confirms; no page or component decides, previews or applies on its own", () => {
+    const users = (word: string) => ui.filter((f) => !f.endsWith(".test.tsx") && !f.endsWith(".test.ts")
+      && new RegExp(`\\b${word}\\b`).test(readFileSync(f, "utf8"))).sort();
+    expect(users("confirmReconciliation")).toEqual(["src/components/business/reconciliation/reconcile-dialog.tsx"]);
+    expect(users("decideFinding")).toEqual([]);
+    expect(users("previewSelection")).toEqual([]);
+    expect(users("applySelection")).toEqual([]);
+    expect(users("applyReconciliation")).toEqual([]);
   });
 
   it("no page and no component names a deciding or applying database function", () => {
     // Code only: a comment may explain what a number needs.
     const code = (f: string) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     const hits = ui.filter((f) => /seller_recon_(decide|apply|preview|pending)\b/.test(code(f)));
-    expect(hits).toEqual([]);
-  });
-
-  it("the prepared date-gap notice is mounted nowhere", () => {
-    const hits = ui.filter((f) => !f.endsWith("date-gap-notice.tsx") && readFileSync(f, "utf8").includes("date-gap-notice"));
     expect(hits).toEqual([]);
   });
 

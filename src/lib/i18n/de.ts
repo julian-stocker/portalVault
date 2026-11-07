@@ -2359,6 +2359,8 @@ export const de = {
         applyNotReleased: "Die Übernahme ist noch nicht freigegeben. Es wurde nichts geändert.",
         dateGapUnconfirmed:
           "Mindestens ein Verkaufsdatum weicht um mehr als drei Tage ab. Bestätige jede dieser Abweichungen ausdrücklich.",
+        dateNotTakeable:
+          "Das Verkaufsdatum wird im Abgleich nicht geändert. Korrigiere es bei Bedarf im Orderbuch. Es wurde nichts geändert.",
       },
 
       /*
@@ -2384,7 +2386,7 @@ export const de = {
           refunded: "Der Verkauf hat eine Erstattung — Beträge werden nicht übernommen.",
           stale: "Der Verkauf wurde seit der Analyse geändert — bitte neu analysieren.",
           ref_mismatch: "Die Bestellnummer des Verkaufs passt nicht zur Bestellung.",
-          unique_ref_only: "Zuerst nur die Bestellnummer ergänzen; Datum und Beträge nach erneuter Analyse.",
+          unique_ref_only: "Nur über Datum und Figuren zugeordnet — Beträge erst nach Ergänzung der Bestellnummer und neuer Analyse.",
           ref_present: "Der Verkauf hat schon eine Bestellnummer — sie wird nie überschrieben.",
           window: "Mehr als drei Tage zwischen Bestellung und Verkauf — die Zuordnung ist nicht belegt.",
           report_mismatch: "Der Berichtswert stimmt nicht mit der gespeicherten Bestellung überein.",
@@ -2395,12 +2397,80 @@ export const de = {
           rival_sale: "Ein anderer, ungepaarter Verkauf mit derselben Figur liegt im Zeitfenster.",
           rival_order: "Eine andere, ungepaarte Bestellung mit derselben Figur liegt im Zeitfenster.",
         },
-        dateGapTitle: "Großer Datumsabstand",
-        dateGapHint: (days: number) =>
-          `Das Verkaufsdatum würde um ${days} Tage verschoben. Die Bestellnummer belegt die Zuordnung, ` +
-          "aber ein so großer Abstand ist ungewöhnlich — prüfe beide Daten, bevor du bestätigst.",
-        dateGapValues: (from: string, to: string) => `SkyIsles ${from} → Bericht ${to}`,
-        dateGapConfirm: "Abstand geprüft — diese Datumskorrektur bestätigen",
+      },
+
+      /*
+       * ABGLEICHEN (vereinfachter CSV-Abgleich, 0180). Fehlende Angaben werden
+       * vorgemerkt, Widersprüche entscheidet der Betrieb, alles andere wird
+       * nur gezeigt. Geändert wird erst mit „Abgleich bestätigen“ — und das
+       * ist gesperrt, bis die Übernahme freigegeben ist.
+       */
+      reconcile: {
+        button: "Abgleichen",
+        all: (n: number) => (n === 1 ? "1 Bestellung abgleichen" : `${n} Bestellungen auf dieser Seite abgleichen`),
+        orderbook: "Im Orderbuch bearbeiten",
+        check: "Im Orderbuch prüfen",
+        dialogTitle: "Abgleich prüfen",
+        orders: (n: number) => (n === 1 ? "1 Bestellung" : `${n} Bestellungen`),
+        supplements: "Fehlende Angaben — werden ergänzt",
+        conflicts: "Widersprüche — bitte entscheiden",
+        checks: "Nicht automatisch korrigierbar",
+        nothing: "Keine Unterschiede, die der Abgleich ändern könnte.",
+        ledger: "SkyIsles",
+        csv: "CSV",
+        missing: "nicht vorhanden",
+        willAdd: "Wird ergänzt",
+        takeCsv: "CSV-Wert übernehmen",
+        keepLedger: "SkyIsles-Wert behalten",
+        orderOf: (ref: string | null, sale: number | null) =>
+          [ref ? `Bestellung ${ref}` : null, sale !== null ? `Verkauf ${sale}` : null].filter(Boolean).join(" · "),
+        /* Warum etwas nicht übernommen wird — kurz, ohne Codes. */
+        reasons: {
+          date: "Das Datum wird im Abgleich nicht geändert.",
+          positions: "Positionen und Lager ändert der Abgleich nie.",
+          total: "Ergibt sich aus Ware, Versand und Erstattungen.",
+          closed: "Die Sitzung ist beendet.",
+          no_value: "Eine Seite hat keinen Wert — nichts wird ergänzt.",
+        },
+        summary: (additions: number, corrections: number, sales: number) =>
+          additions + corrections === 0
+            ? "Bei Bestätigung wird kein Verkauf geändert."
+            : `Bei Bestätigung: ${additions === 1 ? "1 Ergänzung" : `${additions} Ergänzungen`}, ` +
+              `${corrections === 1 ? "1 Korrektur" : `${corrections} Korrekturen`} in ` +
+              `${sales === 1 ? "1 Verkauf" : `${sales} Verkäufen`}.`,
+        unchanged: "Positionen, Lager, Datum und Erstattungen bleiben unverändert.",
+        openConflicts: (n: number) => (n === 1 ? "Noch 1 Widerspruch offen." : `Noch ${n} Widersprüche offen.`),
+        notReleased: "Die Übernahme ist noch nicht freigegeben — es wird nichts gespeichert.",
+        cancel: "Schließen",
+        confirm: "Abgleich bestätigen",
+        confirming: "Wird abgeglichen …",
+        failed: "Der Abgleich konnte nicht gespeichert werden. Lade die Seite neu und versuche es erneut.",
+        done: (applied: number, sales: number) =>
+          applied === 0
+            ? "Entscheidungen gespeichert. Kein Verkauf wurde geändert."
+            : `${applied === 1 ? "1 Wert" : `${applied} Werte`} in ${sales === 1 ? "1 Verkauf" : `${sales} Verkäufen`} übernommen.`,
+        additions: (n: number) => (n === 1 ? "1 Ergänzung" : `${n} Ergänzungen`),
+        conflictCount: (n: number) => (n === 1 ? "1 Entscheidung" : `${n} Entscheidungen`),
+        checkCount: (n: number) => (n === 1 ? "1 Hinweis" : `${n} Hinweise`),
+        badges: {
+          MISSING_IN_SKYISLES: "Wird ergänzt",
+          CONFLICT: "Entscheidung nötig",
+          UNCERTAIN: "Nicht sicher",
+          READ_ONLY_DIFFERENCE: "Im Orderbuch prüfen",
+          EQUAL: "Gleich",
+        },
+        close: {
+          button: "Sitzung abschließen",
+          title: "Sitzung abschließen?",
+          body:
+            "Danach kann in dieser Sitzung nichts mehr abgeglichen werden. Verkäufe ändern sich dadurch nicht. " +
+            "Abgeschlossen heißt nicht abgeglichen: offene Abweichungen bleiben sichtbar und unentschieden. " +
+            "Dieselben Berichte lassen sich anschließend neu analysieren.",
+          cancel: "Abbrechen",
+          confirm: "Jetzt abschließen",
+          running: "Wird abgeschlossen …",
+          failed: "Die Sitzung konnte nicht abgeschlossen werden. Lade die Seite neu.",
+        },
       },
 
       /*
@@ -2415,7 +2485,7 @@ export const de = {
         ambiguous: "Mehrdeutig",
         external_only: "Nur im Bericht",
         ledger_only: "Nur in SkyIsles",
-        not_comparable: "Nicht vergleichbar",
+        not_comparable: "Zusatzkandidaten",
       },
       categoryHints: {
         exact: "Sicher zugeordnet, alle Angaben gleich.",
@@ -2424,7 +2494,7 @@ export const de = {
         ambiguous: "Mehrere Verkäufe kommen infrage; nichts wurde zugeordnet.",
         external_only: "Diese Bestellung steht im Bericht, aber in SkyIsles fehlt ein passender Verkauf.",
         ledger_only: "Dieser Verkauf liegt im Berichtszeitraum, steht aber nicht im Bericht.",
-        not_comparable: "Dieser Verkauf lässt sich mit diesen Berichten nicht vergleichen.",
+        not_comparable: "SkyIsles-Verkauf, der nur als möglicher Kandidat geladen wurde — keine Bestellung aus dem Bericht.",
       },
       certainties: {
         deterministic: "Über die Bestellnummer",
@@ -2550,7 +2620,7 @@ export const de = {
         noSummary: "Keine Zusammenfassung gespeichert.",
         stateHints: {
           open: "Entscheidungen können getroffen und übernommen werden.",
-          closed: "Beendet — nur noch lesbar.",
+          closed: "Beendet — nur noch lesbar. Offen gebliebene Abweichungen bleiben unentschieden.",
           discarded: "Verworfen — daraus wurde nichts übernommen.",
         },
         reload: "Neu laden",
@@ -2664,6 +2734,15 @@ export const de = {
         title: (id: number) => `Sitzung ${id}`,
         backToList: "Zurück zu den Abgleichssitzungen",
         readOnly: "Nur Ansicht — auf dieser Seite wird nichts entschieden oder übernommen.",
+        decideIntro:
+          "„Abgleichen“ zeigt je Bestellung, was ergänzt wird und wo du entscheiden musst. " +
+          "Geändert wird erst nach deiner Bestätigung.",
+        moreFacts: "Weitere Angaben",
+        extraCandidates: (n: number) =>
+          n === 1 ? "1 Zusatzkandidat außerhalb des Berichts" : `${n} Zusatzkandidaten außerhalb des Berichts`,
+        extraCandidatesHint:
+          "SkyIsles-Verkäufe aus dem Suchfenster von ±3 Tagen. Sie stehen nicht im Bericht und werden nicht abgeglichen.",
+        additionCount: (n: number) => (n === 1 ? "1 Ergänzung" : `${n} Ergänzungen`),
         overview: "Überblick",
         platform: "Plattform",
         state: "Status",

@@ -27,7 +27,7 @@ describe("the reconciliation's server actions", () => {
   it("check availability and the seller role before any database call — every one of them", () => {
     const bodies = exported(ACTIONS);
     expect([...bodies.keys()].sort()).toEqual([
-      "analyseReconciliation", "applySelection", "closeReconciliation", "decideFinding",
+      "analyseReconciliation", "applySelection", "closeReconciliation", "confirmReconciliation", "decideFinding",
       "discardReconciliation", "previewSelection", "thinReconciliationSnapshots",
     ]);
     for (const [name, body] of bodies) {
@@ -64,6 +64,16 @@ describe("the reconciliation's server actions", () => {
     expect(apply.indexOf("if (!APPLY_RELEASED)")).toBeLessThan(apply.indexOf(".rpc("));
     expect(ACTIONS).not.toMatch(/p_expected/);
     expect(ACTIONS).not.toMatch(/applyReconciliation/);
+  });
+
+  it("Abgleichen: locked before any call, no day, the shown values checked against the preview", () => {
+    const confirm = exported(ACTIONS).get("confirmReconciliation") as string;
+    expect(confirm.indexOf("if (!APPLY_RELEASED)")).toBeGreaterThan(-1);
+    expect(confirm.indexOf("if (!APPLY_RELEASED)")).toBeLessThan(confirm.indexOf(".rpc("));
+    expect(confirm.indexOf('parsed === "date"')).toBeLessThan(confirm.indexOf(".rpc("));
+    expect(confirm).toContain("p_manual_value: null");
+    expect(confirm).toContain("sameValue(item.shownLedger, old)");
+    expect(confirm).toContain("p_token: preview.token");
   });
 
   it("0180: a decision never carries a manual value", () => {
