@@ -8,9 +8,12 @@
 -- dem Erzeuger.
 --
 -- NOCH NICHT FREIGEGEBEN. Gefahren wird sie erst, wenn 0180 auf Staging steht
--- und der Betreiber den Prueflauf eigens freigibt. Vollstaendig markieren, in
--- den SQL-Editor des Staging-Projekts qqxcpesbwfxzgytkdsac einfuegen,
--- ausfuehren — als `postgres`.
+-- und der Betreiber den Prueflauf eigens freigibt — und NICHT diese Datei,
+-- sondern die Laufdatei `supabase/log/staging/0180-probe-lauf.sql`
+-- (`npm run probe:recon-0180:staging`): diese Datei Zeichen fuer Zeichen,
+-- nach `begin;` die eine Zeile, die das Betriebskonto benennt (R7). Die
+-- Laufdatei vollstaendig in den SQL-Editor des Staging-Projekts
+-- qqxcpesbwfxzgytkdsac einfuegen, ausfuehren — als `postgres`.
 --
 -- ES BLEIBT NICHTS. Die Datei beginnt mit `begin` und enthaelt KEIN
 -- `commit`. Sie endet mit einer Ausnahme, die das Ergebnis jeder Pruefung
@@ -36,9 +39,14 @@
 --       der ins Netz spricht (Webhooks, pg_net, dblink, NOTIFY);
 --   R6  jede Pflichtspalte von `sales` und `sale_items` ist eine, die der
 --       Lauf setzt;
---   R7  genau EIN aktives Betriebskonto; nur dessen Identitaet wird
---       transaktionslokal eingesetzt (`request.jwt.claims`), und `auth.uid()`
---       muss sie danach liefern.
+--   R7  das BENANNTE Betriebskonto (`skyisles.probe_operator`, gesetzt von
+--       der Laufdatei, die `build-recon-probe.mts --run-file` erzeugt): eine
+--       gueltige Kennung, genau eine freigeschaltete Mitgliedschaft beim
+--       aktiven Verkaeufer (andere Konten duerfen bestehen); vorher keine
+--       Identitaet und das Tor zu; mit seiner Identitaet (transaktionslokal,
+--       `request.jwt.claim.sub` / `request.jwt.claims`) liefert `auth.uid()`
+--       genau sie und das Tor ist offen; die Gegenprobe mit einem fremden
+--       Konto findet das Tor zu. Ohne Laufdatei bricht R7 ab.
 --
 -- DIE TEMPORAEREN FUNKTIONEN liegen ausschliesslich in `pg_temp` dieser
 -- Sitzung — keine andere Verbindung sieht sie, und sie verschwinden mit dem
@@ -60,7 +68,9 @@ declare
   v_expected text;
   v_body text;
   v_bad text;
+  v_named text;
   v_operator uuid;
+  v_stranger uuid;
   v_count integer;
 begin
   /* R1 — der Stempel. */
@@ -149,20 +159,55 @@ begin
   if v_bad is not null then
     raise exception 'ABBRUCH R6: Pflichtspalten, die der Lauf nicht setzt: %', v_bad;
   end if;
-  /* R7 — genau ein Betriebskonto, und nur dessen Identitaet. */
+  /* R7 — das benannte Betriebskonto, und nur dessen Identitaet. */
+  v_named := coalesce(current_setting('skyisles.probe_operator', true), '');
+  if v_named = '' then
+    raise exception 'ABBRUCH R7: kein Betriebskonto benannt (skyisles.probe_operator) — nur ueber die Laufdatei von build-recon-probe.mts --run-file';
+  end if;
+  if v_named !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     or v_named = '00000000-0000-0000-0000-000000000000' then
+    raise exception 'ABBRUCH R7: skyisles.probe_operator ist keine gueltige Kennung';
+  end if;
+  v_operator := v_named::uuid;
   select count(*) into v_count
     from public.seller_operators o join public.sellers s on s.id = o.seller_id
-   where s.is_active and o.is_enabled;
+   where s.is_active and o.is_enabled and o.user_id = v_operator;
   if v_count <> 1 then
-    raise exception 'ABBRUCH R7: % aktive Betriebskonten — der Lauf setzt nur ein eindeutiges ein', v_count;
+    raise exception 'ABBRUCH R7: das benannte Betriebskonto hat % freigeschaltete Mitgliedschaften beim aktiven Verkaeufer, verlangt ist genau eine', v_count;
   end if;
-  select o.user_id into v_operator
-    from public.seller_operators o join public.sellers s on s.id = o.seller_id
-   where s.is_active and o.is_enabled;
+  /* Vorher: keine Identitaet in dieser Sitzung, das Tor zu. */
+  if coalesce(current_setting('request.jwt.claim.sub', true), '') <> ''
+     or coalesce(current_setting('request.jwt.claims', true), '') <> ''
+     or (select auth.uid()) is not null then
+    raise exception 'ABBRUCH R7: die Sitzung traegt schon eine Identitaet';
+  end if;
+  if public.can_operate_active_seller() then
+    raise exception 'ABBRUCH R7: das Tor ist ohne Identitaet offen';
+  end if;
+  /* Mit der Identitaet: genau dieses Konto, und das Tor offen. */
+  perform set_config('request.jwt.claim.sub', v_operator::text, true);
+  perform set_config('request.jwt.claims', json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  if (select auth.uid()) is distinct from v_operator then
+    raise exception 'ABBRUCH R7: die transaktionslokale Identitaet greift nicht';
+  end if;
+  if not public.can_operate_active_seller() then
+    raise exception 'ABBRUCH R7: mit der Identitaet bleibt das Tor zu';
+  end if;
+  /* Gegenprobe: ein Konto ohne jede freigeschaltete Mitgliedschaft — das Tor muss zu sein. */
+  v_stranger := gen_random_uuid();
+  if exists (select 1 from public.seller_operators o where o.user_id = v_stranger) then
+    raise exception 'ABBRUCH R7: die Gegenprobe fand keine fremde Kennung';
+  end if;
+  perform set_config('request.jwt.claim.sub', v_stranger::text, true);
+  perform set_config('request.jwt.claims', json_build_object('sub', v_stranger, 'role', 'authenticated')::text, true);
+  if (select auth.uid()) is distinct from v_stranger or public.can_operate_active_seller() then
+    raise exception 'ABBRUCH R7: Gegenprobe — das Tor oeffnet sich fuer ein fremdes Konto';
+  end if;
+  /* Zurueck auf das benannte Konto, und noch einmal nachgesehen. */
   perform set_config('request.jwt.claim.sub', v_operator::text, true);
   perform set_config('request.jwt.claims', json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
   if (select auth.uid()) is distinct from v_operator or not public.can_operate_active_seller() then
-    raise exception 'ABBRUCH R7: die transaktionslokale Identitaet greift nicht';
+    raise exception 'ABBRUCH R7: das benannte Konto liess sich nicht wiederherstellen';
   end if;
 end
 $probe_r$;

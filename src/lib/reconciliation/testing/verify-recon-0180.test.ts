@@ -84,6 +84,11 @@ describe("the tool creates nothing on Staging", () => {
     for (const word of ["zmiwxswrpkmizvqsgype", ".env.local", "auth.admin"]) expect(TOOL).not.toContain(word);
   });
 
+  it("signs out in a finally, this session only — not every session of the operator", () => {
+    expect(main).toMatch(/finally \{\s+(\/\/[^\n]*\n\s+)?await op\.auth\.signOut\(\{ scope: "local" \}\);/);
+    expect(main.match(/signOut\(/g)).toHaveLength(1);
+  });
+
   it("is offline unless --live is given", () => {
     const offline = main.indexOf("if (live)");
     expect(offline).toBeGreaterThan(-1);

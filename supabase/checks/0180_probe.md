@@ -1,7 +1,7 @@
 # 0180 — Prüfstrategie B + C: die Übernahme auf Testverkäufen prüfen, ohne etwas zu hinterlassen
 
-**Stand 2026-11-05: lokal vorbereitet, nichts auf Staging gefahren.** 0180 ist auf Staging noch
-nicht angewendet; der Prüflauf B setzt es voraus und bricht sonst ab (R4). `APPLY_RELEASED` bleibt
+**Stand 2026-11-06: B auf Staging bestanden und abgenommen (32/32, zurückgerollt; `0180_staging_run.md`); A und C offen.** 0180 ist auf Staging
+angewendet (`0180_staging_run.md`); R7 benennt jetzt das Betriebskonto (ADR-0178, Ergänzung). `APPLY_RELEASED` bleibt
 `false`. Production: nicht betroffen, nicht angesprochen.
 
 ADR-0178, Variante **B + C** (Entwurf vom 2026-11-05, freigegeben). 0180 und seine Regeln bleiben
@@ -10,7 +10,7 @@ ADR-0178, Variante **B + C** (Entwurf vom 2026-11-05, freigegeben). 0180 und sei
 | Teil | Wo | Was es zeigt | Was nicht |
 |---|---|---|---|
 | **A** Ablehnungen über PostgREST | `npm run verify:recon-0180:staging -- --live` | Vorschau, Übernahme, alte Übernahme, anon — jede Ablehnung **vor** einem Schreiben; legt **nichts** an | eine Übernahme |
-| **B** Prüflauf, zurückgerollt | `supabase/operations/staging-0180-probe.sql` (SQL-Editor, `postgres`) | die ganze Übernahme mit den echten Staging-Funktionen: Token, Sperre, Audit, Rollback bei Fehler, Wiederholschutz, `unique` → nur Nummer, erneute Analyse, Erstattung, Storno, veraltet; regulärer Weg weiter gesperrt | zwei Verbindungen |
+| **B** Prüflauf, zurückgerollt | Laufdatei `supabase/log/staging/0180-probe-lauf.sql` aus `npm run probe:recon-0180:staging` (SQL-Editor, `postgres`) | die ganze Übernahme mit den echten Staging-Funktionen: Token, Sperre, Audit, Rollback bei Fehler, Wiederholschutz, `unique` → nur Nummer, erneute Analyse, Erstattung, Storno, veraltet; regulärer Weg weiter gesperrt | zwei Verbindungen |
 | **C** echte Parallelität | `npm run test:recon-pg` (lokal, eigener Cluster) | gleichzeitige Übernahme derselben Auswahl, Sitzungssperre, gekreuzte Verkäufe ohne Deadlock, Entscheidung während Übernahme, fremde Änderung → PT409, veralteter Token, genau eine Anwendung je Entscheidung | Supabase, PostgREST, Pooler |
 
 Vollständig ist die Abnahme erst, wenn alle drei belegt sind: `verify-recon-0180.mts` meldet sonst
@@ -49,9 +49,9 @@ nichts sind zeichengleich die von 0180.
   `pg_temp` nie.
 - Die Rechte jeder Funktion in `public` sind vorher und nachher zeichengleich (Test).
 - Die Identität: `request.jwt.claims` / `request.jwt.claim.sub` **transaktionslokal**
-  (`set_config(…, true)`) auf das eine aktive Betriebskonto (R7); danach muss `auth.uid()` es
-  liefern und `can_operate_active_seller()` wahr sein, sonst Abbruch. Mit dem Rollback ist die
-  Einstellung fort (Test).
+  (`set_config(…, true)`) auf das **benannte** Betriebskonto (R7); danach muss `auth.uid()` es
+  liefern und `can_operate_active_seller()` wahr sein, für ein fremdes Konto falsch, sonst Abbruch.
+  Mit dem Rollback sind Identität und Benennung fort (Test, mit Stagings `auth.uid()`).
 
 ## B — die Riegel vor dem ersten Schreiben
 
@@ -63,7 +63,7 @@ nichts sind zeichengleich die von 0180.
 | R4 | md5 von 23 Rümpfen = Commit: die zehn von 0180, Lesen/Anlegen (0176, 0178, 0179), Sperre, `seller_update_sale`, Orderbuch-Helfer, Erstattung, Storno. Der Erzeuger gleicht die 0180-Werte mit der Nachbedingung von 0180 ab und verweigert, wenn eine spätere Migration eine der Funktionen neu definiert | Abbruch |
 | R5 | **Nebenwirkungen:** kein Trigger auf den berührten Tabellen außer den vier bekannten (`sales_set_day_and_index_trg`, `sale_items_no_historical_movement_trg`, die zwei Nur-Erweitern-Trigger); keine Triggerfunktion, die `net.`, `http`, `dblink` oder `NOTIFY` nennt. Ein Dashboard-Webhook ist ein Trigger und fällt hier auf | Abbruch |
 | R6 | jede Pflichtspalte von `sales`/`sale_items` ohne Vorgabe ist eine, die der Lauf setzt | Abbruch |
-| R7 | genau **ein** aktives Betriebskonto; die Identität greift | Abbruch |
+| R7 | das **benannte** Betriebskonto (`skyisles.probe_operator`, nur über die Laufdatei): gültige Kennung, genau eine freigeschaltete Mitgliedschaft beim aktiven Verkäufer (andere Konten zulässig); vorher keine Identität, Tor zu; mit Identität `auth.uid()` = Konto und Tor offen; Gegenprobe fremdes Konto → Tor zu; danach wieder das Konto | Abbruch |
 
 Jeder Riegel ist im Test einzeln verletzt: Abbruch mit seinem Namen, danach jede Zeile und jede
 Funktion wie vorher.
@@ -103,7 +103,12 @@ Zustandsdatei und die 0180-Nachkontrolle von außen, dass nichts geblieben ist.
 - **R4 gegen die Lokalwelt:** die md5-Werte sind die der Migrationsdateien. Weicht ein Rumpf auf
   Staging ab (eine nie erfasste Handänderung), bricht B ab — richtig so, aber dann ist zuerst der
   Stand zu klären.
-- **R7** verlangt genau ein aktives Betriebskonto; ob Staging das erfüllt, ist ungeprüft.
+- **R7 benennt das Konto.** Staging hat drei aktive Betriebskonten; B nimmt keines von selbst,
+  sondern das Staging-Betriebskonto der Prüfwerkzeuge, dessen Kennung `npm run
+  probe:recon-0180:staging` aus einer Anmeldung liest (ohne Service-Role; An- und Abmeldung sind
+  Supabases eigene Buchführung in `auth`, sonst schreibt das Werkzeug nichts). Die versionierte
+  Datei allein bricht in R7 ab. Die Simulation wechselt die Datenbankrolle nicht: B prüft das Tor,
+  nicht die Grants für `authenticated` (Teil A).
 - **Der SQL-Editor**: dass er `pg_temp`-Funktionen in einer Sitzung über das ganze Skript hält und
   die abschließende Ausnahme anzeigt, ist erst beim ersten Lauf zu sehen. Bricht er anders ab, ist
   trotzdem nichts geblieben.
@@ -113,7 +118,7 @@ Zustandsdatei und die 0180-Nachkontrolle von außen, dass nichts geblieben ist.
 1. Lokal: `npm run test:recon-pg -- --reporter=json --outputFile=<datei-c>` grün (6/6).
 2. Staging lesend: Zustandsdatei `verify_sales_reconciliation_state.sql` als `postgres` (vorher).
 3. 0180 über `db:migrate:staging -- 0180` (Preflight, Einfügen, `--resume`, `db:privileges:staging`).
-4. `staging-0180-probe.sql` als `postgres` einfügen; die Meldung vollständig in `<datei-b>` sichern.
+4. `npm run probe:recon-0180:staging` (schreibt Laufdatei und Vorprüfung nach `supabase/log/staging/`); die Vorprüfung `0180-probe-riegel-vorab.sql` als `postgres` (9999 = 0); dann die Laufdatei `0180-probe-lauf.sql` als `postgres` einfügen; die Meldung vollständig in `<datei-b>` sichern.
 5. Zustandsdatei erneut (101–108 zeichengleich) und 0180-Nachkontrolle erneut (231–253 gleich).
 6. `npm run verify:recon-0180:staging -- --live --evidence-b <datei-b> --evidence-c <datei-c>` → Exit 0.
 7. Laufzettel `0180_staging_run.md`, `APPLIED.md`.

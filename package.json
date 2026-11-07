@@ -68,6 +68,7 @@
     "verify:sale-workflow:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sale-workflow.mts",
     "verify:sales-reconciliation:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sales-reconciliation.mts",
     "verify:recon-refusals:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-recon-refusals.mts",
+    "probe:recon-0180:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/build-recon-probe.mts --run-file",
     "verify:recon-0180:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-recon-0180.mts",
     "verify:ship-day:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-ship-and-day.mts",
     "ui-fixtures:ship-day:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/ui-fixtures-ship-day.mts",

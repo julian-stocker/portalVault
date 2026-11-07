@@ -137,7 +137,8 @@ async function main(): Promise<void> {
       check("anon cannot decide", (await anon.rpc("seller_recon_decide", { p_finding_id: 1, p_decision: "keep_ledger", p_manual_value: null,
         p_reason: null, p_shown_ledger: null, p_shown_external: null })).error !== null);
     } finally {
-      await op.auth.signOut();
+      // This session only: the default scope "global" would end every session of the operator.
+      await op.auth.signOut({ scope: "local" });
     }
   } else {
     console.log("  Keine Verbindung. --live prüft die Ablehnungen über PostgREST, ohne etwas anzulegen.");

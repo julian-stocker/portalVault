@@ -296,8 +296,11 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        `0175` am selben Tag als siebenundvierzigste (ADR-0176, ebenso), `0176`
        als achtundvierzigste (ADR-0177, ebenso), `0178` am 2026-11-04 als
        neunundvierzigste (ADR-0174 Phase 4, ebenso; `0177` ist reserviert),
-       `0179` am 2026-11-05 als fünfzigste (ADR-0174 Phase 4, ebenso). */
-    expect(zeilen.length).toBe(50);
+       `0179` am 2026-11-05 als fünfzigste (ADR-0174 Phase 4, ebenso), `0180`
+       am 2026-11-05/06 als einundfünfzigste (ADR-0178; ohne Runner-Akte,
+       berechtigt nachkontrolliert, nicht abgenommen — `0180_staging_run.md`). */
+    expect(zeilen.length).toBe(51);
+    expect(zeilen.map((z) => z.datei)).toContain("0180_sales_recon_selected_apply.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0178_sales_recon_comparison_and_pending.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0179_sales_recon_ledger_proof.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0176_sales_recon_validate_before_dedup.sql");
@@ -406,7 +409,8 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        2026-10-31, neununddreißig seit `0168` am 2026-11-02, fünfundvierzig
        seit `0169`–`0174` am 2026-11-03 (ein gemeinsamer Lauf), sechsundvierzig seit `0175`
        und siebenundvierzig seit `0176` am selben Tag, achtundvierzig seit
-       `0178` am 2026-11-04, neunundvierzig seit `0179` am 2026-11-05. Nur
+       `0178` am 2026-11-04, neunundvierzig seit `0179` am 2026-11-05, fünfzig
+       seit `0180` am 2026-11-05/06. Nur
        `0130` weicht ab und
        zeigt auf ihren Nachtrag.
 
@@ -421,7 +425,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        geändert (Regel 1), und `gleich` ist die Behauptung, dass sie es nicht
        wurde. Bei `0147` hat das Gewicht: die Fassung, die lief, ist die mit
        der benannten Triggererwartung — nicht die, die abgebrochen ist. */
-    expect(gleiche.length).toBe(49);
+    expect(gleiche.length).toBe(50);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }

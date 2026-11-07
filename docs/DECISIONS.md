@@ -17119,6 +17119,30 @@ Token aus `0178` war Auskunft. Geschrieben wurde mit `p_expected_updated_at => n
   Token umgestellt werden.
 - `R0180` öffnet die Lücken wieder und ist kein Routineschritt.
 
+### Ergänzung 2026-11-06 — Prüflauf B benennt sein Betriebskonto (Riegel R7)
+
+Der zurückgerollte Staging-Prüflauf B (`supabase/checks/0180_probe.md`) verlangte genau **ein**
+aktives Betriebskonto. Staging hat drei (bekannt seit `0124_baseline.sql`); mehrere Konten je
+Verkäufer sind gewollt (ADR-0077). Die Annahme war zu streng, nicht die Daten falsch.
+
+**Entscheidung.** R7 verlangt ein **benanntes** Konto: `skyisles.probe_operator`, gesetzt von der
+Laufdatei, die `npm run probe:recon-0180:staging` erzeugt (Anmeldung als das vorhandene
+Staging-Betriebskonto der Prüfwerkzeuge, nur dessen Kennung, ohne Service-Role, Datei nur unter dem
+ignorierten `supabase/log/staging/`). Gültige Kennung, genau eine freigeschaltete Mitgliedschaft
+beim aktiven Verkäufer, andere Konten zulässig; vorher keine Identität und das Tor zu; mit der
+Identität `auth.uid()` = Konto und das Tor offen; Gegenprobe mit einem fremden Konto: Tor zu.
+Jede Abweichung bricht vor dem ersten Schreiben ab. Keine Auswahl aus den Daten (kein `limit`,
+keine Rangfolge).
+
+**Konsequenzen.** Die versionierte Prüfdatei allein bricht in R7 ab; gefahren wird nur die
+Laufdatei. Die Tests fahren B jetzt mit Stagings `auth.uid()` und dem Tor aus `0041` statt mit der
+Testidentität — erst damit ist belegt, dass die Claims das Tor öffnen. Die Simulation wechselt die
+Datenbankrolle nicht: B prüft das Tor, nicht die Rechte von `authenticated` (Teil A, 212–215).
+
+**Bewährt (2026-11-06).** Auf Staging mit drei Betriebskonten: R1–R7 bestanden (9999 = 0), B 32/32
+und zurückgerollt, zwei berechtigte Nachkontrollen gleich dem Vorher-Stand (md5 231–253). Teil B ist
+abgenommen; 0180 insgesamt erst mit A und C (`supabase/checks/0180_staging_run.md`).
+
 ---
 
 ## ADR-0177 · Der Verkaufsabgleich prüft jeden Upload ganz — auch einen, den er schon kennt
