@@ -159,6 +159,21 @@ Das ist zulässig, solange jeder dieser RPCs selbst prüft. Für jeden einzelnen
 
   Ganz ohne Schutz sind `verify:shop|seller|commerce:staging`. Sie sind schreibfrei und machen nur anonyme Aufrufe, die abgelehnt werden sollen. `verify:payment-smoke:staging` hat eine eigene Prüfung, nicht den gemeinsamen Guard.
 - **[RISIKO]** Elf Werkzeuge nutzen `requireStagingIfRequested` und sind deshalb nur geschützt, wenn das Flag gesetzt ist, zum Beispiel `import-catalog`, `import-legacy-*`, `reconcile-inventory` und `settle-legacy-sales`. Wer sie direkt mit `node` startet, umgeht den Guard.
+- **Nachtrag M-02 (2026-11-09, umgesetzt, nicht committet):** `sync-legacy-orderbook.mts` ruft jetzt vor dem Client `requirePinnedStagingWrite` auf (`tools/lib/staging-guard.mts`).
+  - Mit `--apply` gilt nur noch die festgelegte Staging-Projekt-ID `qqxcpesbwfxzgytkdsac`, dieselbe Konstante wie in `tools/lib/staging-db.mts`.
+  - Production und unbekannte Projekte werden abgelehnt, auch wenn `.env.staging` sie nennt oder `.env.local` fehlt.
+  - Die Vorschau ohne `--apply` folgt `SKYISLES_REQUIRE_STAGING`. Das Flag wird damit endlich gelesen.
+  - **Folge:** `sync:orderbook:prod --apply` ist nicht mehr möglich. Ein Production-Sync bräuchte eine eigene Freigabe und einen eigenen Pfad.
+  - Tests: `src/lib/ops/legacy-sync-write-guard.test.ts`.
+- **Weitere schreibende Werkzeuge mit schwächerem Schutz (Stand M-02, nur dokumentiert, nicht umgebaut):**
+
+  | Werkzeug | schreibt | Schutz heute | Lücke |
+  |---|---|---|---|
+  | `grant-admin.mts` (`admin:grant`) | `shop_admins` per `upsert`, gegen `.env.local` = Production | keiner | weder Guard noch `--confirm-production`. Ziel ist allein die Env-Datei |
+  | `import-catalog`, `import-characters`, `import-legacy-history`, `import-legacy-inventory`, `reconcile-inventory`, `settle-legacy-sales` | Katalog, Charaktere, Lager, Legacy-Historie (jeweils mit `:prod`-Variante) | `requireStagingIfRequested` | ohne Flag kein Guard. Der `:prod`-Pfad verlangt keine ausdrückliche Bestätigung (anders als `import-sales` mit `chooseEnvironment` und `--confirm-production`) |
+  | `verify-rls`, `verify-editorial`, `verify-inventory`, `verify-calculations`, `verify-legacy-history` | Prüf-Fixtures, teils schreibend | `requireStagingIfRequested` | dieselbe Lücke wie oben, wenn direkt mit `node` gestartet |
+  | `verify-commerce`, `verify-seller`, `verify-shop` | nur anonyme Aufrufe, die abgelehnt werden **sollen** | keiner | kein Schreibrisiko. Der Guard fehlt nur formal (`CLAUDE.md`-Aussage) |
+  | `storage-transfer`, `catalog-sync(-apply)`, `catalog-publish`, `catalog-finish`, `transfer-to-production` | Storage/Katalog | eigene Prüfungen mit fester Projekt-ID und `--confirm-production` | keine gefunden |
 - **[IDEE] Archivieren:** Einige Einmalwerkzeuge sind sichtbar abgeschlossen:
   - `preflight-0115/0116-staging`,
   - `cat01`–`cat05`,
@@ -248,6 +263,247 @@ Das ist zulässig, solange jeder dieser RPCs selbst prüft. Für jeden einzelnen
   - favorites, offer_state, availability_notifications und availability_alerts,
   - die Belegtabellen,
   - catalog_removed_sky_ids.
+
+### 3.5a Nachtrag M-03 (2026-11-09): Restore-Test, Stand **blockiert, wartet auf Freigabe**
+
+**Backup-Formate:**
+
+| Format | Werkzeug | Restore vorhanden? |
+|---|---|---|
+| Betriebssicherung JSON (`skyisles-business-backup-*.json`, `BACKUP_FORMAT_VERSION = 1`) | Export per RPC `seller_business_backup()` (0104 und folgende), Prüfung `verify:backup` (eine Datei, offline) | **nein, bewusst.** Es gibt keine Importfunktion (`manifest.ts:29`) |
+| Plattformarchiv ZIP (`skyisles-platform-backup-*.zip`, Formatversion 4, 62 Bereiche) | Export per `system_platform_export()` (0105 und folgende), Prüfung `verify:platform-archive` | **nein, bewusst.** `restore_supported = false` (`platform-manifest.ts:29`) |
+| `pg_dump` im Custom-Format (public, storage und auth) | `tools/dr/00`–`60` | **ja**, das ist der einzige Restore-Pfad: `40-restore.sh` mit `pg_restore --single-transaction --exit-on-error --use-list` |
+
+**Sicherheitsmechanismen des DR-Pfads (gelesen, nicht ausgeführt):**
+
+- Die Quelle muss Production sein (`require_source_is_production`).
+- Das Ziel darf weder Production noch Staging sein und muss eine ausdrücklich genannte Testreferenz tragen (`DR_TARGET_REF`).
+- In der URI darf kein Passwort stehen, und `sslmode=require` ist Pflicht.
+- Das Volume muss außerhalb des Repositorys und außerhalb synchronisierter Ordner liegen. `PGPASSFILE` braucht Rechte 600.
+- Die Prüfsummen der Dumpdateien werden kontrolliert.
+- Das Ziel muss leer sein (null Tabellen in `public`). Ein bestehendes Ziel wird nie überschrieben.
+- Vor dem Restore muss eine Bestätigung wörtlich eingegeben werden.
+- Der Restore läuft in einer Transaktion: Ein Teil-Restore kann technisch nicht entstehen.
+- Bestanden ist erst, wenn `60-compare.sh` die Messungen (a) und (b) vergleicht und die Mindestmengen erreicht sind.
+
+**Probe in einem lokalen Wegwerf-Cluster** (PostgreSQL 17.11, nur Unix-Socket, temporäres Verzeichnis, danach gelöscht):
+
+- Eine kleine Supabase-Hülle (Rollen sowie `auth.users`, `auth.uid()`, `storage.buckets`/`objects`) reichte für **0001–0066 ohne Fehler**.
+- **[NACHGEWIESEN] Ab 0067 lässt sich das Schema auf einer leeren Datenbank nicht aus den Migrationen nachbauen.**
+  - **Datenmigrationen prüfen echte Bestände:** 0067 erwartet 5 Werkbuch-Bestellungen, 0071 21 versandte und 1 stornierte Bestellung, 0117 bestimmte SKY-Zeilen, 0135 die Kategorie „Spiele“. Diese Migrationen brechen auf leerer Datenbank ab, und zwar bewusst („refusing to guess“).
+  - **Lücken der Hülle:** 0107 braucht `auth.users.banned_until`, 0125 die Rechte von `service_role`.
+  - Daraus folgen 32 weitere Fehler, unter anderem bei Export (0104/0105), Belegen, Artikeltypen und Abgleich (0178–0182).
+- **Folge:** Die Migrationen sind kein Wiederherstellungsmittel. Ein leeres Projekt lässt sich nur aus einem Dump wiederherstellen. Das macht M-03 wichtiger, nicht unwichtiger.
+
+**Blockade:** Der vorhandene Drill braucht als Quelle einen Production-Dump und als Ziel ein Supabase-Testprojekt, beides außerhalb der Grenzen dieser Runde. Für einen Test mit synthetischen Daten fehlt ein lokal aufbaubares vollständiges Schema. Die Wege dahin stehen in der Rückmeldung zu M-03. M-03 gilt **noch nicht** als bestanden.
+
+**M-03A (2026-11-09): Schema-Dump über den Staging-Prüfzugang, Ergebnis gestoppt.**
+
+- **Verbindung:** Sie lief rein lesend mit TLS-Vollprüfung (`verify-full` gegen die festgelegte Supabase-CA), als Rolle `skyisles_agent`, gegen ausschließlich `qqxcpesbwfxzgytkdsac`.
+  - Der Datenbankkommentar lautet „skyisles-staging qqxcpesbwfxzgytkdsac“, der SKY-Stempel steht auf 2/2.
+  - Die Sitzung war schreibgeschützt (`transaction_read_only = on`). Der Server läuft auf 17.6.
+- **Rechte:** Die Rolle darf 12 von 78 Tabellen in `public` lesen. Das ist bewusst so (ADR-0140), damit der Prüfzugang keine Kunden-, Auth- oder Bestelldaten sieht.
+- **Dump:** `pg_dump --schema-only` bricht vor der ersten Ausgabe ab, mit `permission denied for table profiles` beim `LOCK TABLE … IN ACCESS SHARE MODE`. pg_dump sperrt jede Tabelle, auch für einen reinen Schema-Dump.
+  - Es wurde nichts exportiert.
+  - Die temporäre Passwortdatei (Rechte 600, im Scratchpad) ist gelöscht.
+- **Unterstützen die DR-Skripte ein lokales Ziel ohne aufgeweichte Regeln?** (gelesen, nicht ausgeführt)
+  - **`40-restore.sh` und `50-verify.sh`: ja.** Ein lokales Ziel erfüllt jede Regel in `lib.sh`:
+    - eine `postgresql://`-URI ohne Passwort, das Passwort steht in `PGPASSFILE` mit Rechten 600,
+    - `sslmode=require` über einen lokalen Server mit selbstsigniertem Zertifikat in einem Temp-Verzeichnis,
+    - eine Testreferenz im Datenbanknamen (`DR_TARGET_REF`),
+    - `DR_VOL` als Verzeichnis außerhalb des Repositorys und außerhalb synchronisierter Ordner.
+
+    Dass das Volume verschlüsselt ist, prüft `lib.sh` nicht selbst.
+  - **`10-baseline.sh`, `20-dump.sh` und `35-shape-check.sh`: nein.** Sie verlangen `require_source_is_production`, die Quelle muss also die Production-Referenz tragen. Lokal lassen sie sich nur nachstellen: dieselben `pg_dump`-Aufrufe und dieselben Abfragen aus `supabase/checks/dr/`, ausgeführt von Hand. Die Regel selbst bleibt unverändert.
+- **Status M-03:** weiterhin **nicht bestanden**. Weder ein lokaler Teilerfolg noch der vollständige Production-DR-Nachweis liegt vor.
+
+**M-03B (2026-11-09): Vorbereitung für einen manuell bereitgestellten Schema-Dump. Kein Dump erstellt, keine Rechte geändert.**
+
+- **Benötigt laut Migrationen und DR-Skripten:**
+  - **zwingend:** das Schema `public` vollständig, mit Tabellen, Funktionen, Triggern, Policies und ACLs. Grants gehören zum Sicherheitsmodell und werden mitgeprüft.
+  - **als exakte Form, ohne Inhalt:** `auth.users`, `auth.identities`, `storage.buckets` und `storage.objects`. `30-filter-toc` überträgt genau deren Zeilen, `35-shape-check` vergleicht ihre Spaltenform.
+- **Ersetzt durch eine lokale Hülle:**
+  - die Rollen `anon`, `authenticated` und `service_role`, dazu jede weitere Rolle aus den Grants des Dumps,
+  - `auth.uid()`,
+  - die Supabase-eigenen Funktionen und Trigger in `auth` und `storage`.
+- **Nicht nötig:** `realtime`, `vault`, `cron`, `net`, `graphql`, `pgsodium`, `extensions`, Publikationen und Erweiterungen. Die Migrationen nutzen nur Kernfunktionen (`sha256`, `md5`, `gen_random_uuid`, `encode`) und keine `create extension`.
+- **Ablage:** `~/SkyIsles-Daten/dr/staging-schema-20261109/`, Verzeichnis mit Rechten 700, Dateien mit Rechten 600. Das liegt außerhalb des Repositorys und außerhalb synchronisierter Ordner.
+- **Prüfung vor jeder Verwendung:** ein Prüfskript im Scratchpad. Es meldet nur Zählungen und Zeilennummern, keine Inhalte:
+  - keine `COPY`-, `INSERT`- oder `setval`-Anweisungen,
+  - keine Schlüssel- oder Passwortmuster,
+  - E-Mail-Domains nur als Liste,
+  - Serverversion 17.
+- **Versionen:** lokaler Server und Client 17.11, Staging-Server 17.6. Kompatibel. OpenSSL 4.1 ist für ein selbstsigniertes Test-Zertifikat vorhanden. Docker und die Supabase-CLI sind nicht installiert und werden nicht gebraucht.
+
+**Zugangsdaten-Hygiene (2026-11-09):**
+
+- Neu ist `docs/CREDENTIALS_MAP.md`, ohne jeden Wert: Zugänge je Umgebung, Ablageort, Nutzer, die Folgen einer Passwortänderung und die Regeln für den Umgang.
+- `.env.local` und `.env.staging` stehen von 644 auf **600** (geprüft mit `stat`, Inhalte unverändert).
+- **Verwaist und zum Löschen vorgemerkt** (nach Freigabe, noch nicht gelöscht):
+  - `~/.skyisles/.staging-operator.env.swp`: Der vim-Prozess läuft nicht mehr, und die echte Datei ist neuer.
+  - `~/.skyisles/staging-db.env.save`: älter als die gültige Datei, kein Verweis darauf.
+- **Ein neues Staging-`postgres`-Passwort beeinträchtigt kein lokales Werkzeug.** Kein Code liest ein `postgres`-Passwort, `SUPABASE_DB_URL` oder `DATABASE_URL`.
+
+**M-03C (2026-11-09): lokaler Restore-Test mit Staging-Schema und synthetischen Daten.**
+
+*Grundlage:* zwei vom Betreiber selbst erstellte Schema-Dumps (`public.sql` 1,5 MB, `auth-storage.sql` 19 KB). Das Prüfskript bestätigte:
+
+- keine `COPY`-, `INSERT`- oder `setval`-Anweisungen,
+- keine Schlüssel- oder Passwortmuster, keine E-Mail-Adressen,
+- Serverversion 17, Rechte 600/700, Ablage außerhalb des Repositorys.
+
+Der Dump umfasst 78 Tabellen, 426 Funktionen, 45 Policies und 1 019 Grants. Er nennt die Rollen `anon`, `authenticated`, `service_role`, `skyisles_agent` und `postgres`, dazu weitere Supabase-Rollen nur in den ACLs von auth und storage. Er setzt keine Erweiterungen voraus.
+
+*Aufbau:*
+
+- Zwei Wegwerf-Cluster mit PostgreSQL 17.11, danach gestoppt und samt aller Dumps gelöscht.
+- **Quelle:** nur Unix-Socket.
+- **Ziel:** `127.0.0.1`, **TLS 1.3 Pflicht** (`hostnossl … reject`), scram-sha-256, Passwort nur in einer `PGPASSFILE` mit Rechten 600 im Test-Volume.
+- **Supabase-Hülle:** NOLOGIN-Rollen, `auth.uid()` und Durchreich-Stubs für die Storage-Triggerfunktionen. Die Form von `auth.users`, `auth.identities`, `storage.buckets` und `storage.objects` ist exakt aus dem Dump übernommen.
+- Die vier `catalog_images`-Policies und den Trigger `on_auth_user_created` erhielt nur die Quelle.
+- **Daten:** 2 synthetische Konten (`example.invalid`), die Profile erzeugte der Trigger. Dazu 12 Figuren, Lager mit Bewegungen, 2 Einkäufe, 3 Verkäufe, eine Erstattung, ein Beleg mit Zähler, eine Abgleichsitzung, der Bucket `catalog` mit einem Objekt und Favoriten.
+
+**Lokal erfolgreich nachgewiesen:**
+
+| Schritt | Ergebnis |
+|---|---|
+| Schema aus dem Staging-Dump aufbauen | fehlerfrei: 78 Tabellen, 426 Funktionen, 49 Policies, 71 Trigger |
+| Messung (a), Befehle aus `10-baseline.sh` | 8 Dateien |
+| Dump, Befehle und Dateiprüfungen aus `20-dump.sh` | `full.dump` 1,88 MB. Schemas public, storage und auth, `TABLE DATA purchases` und `SEQUENCE SET` vorhanden, `MANIFEST.txt` geschrieben |
+| `30-filter-toc.mts`, **unverändert** | 2 356 Einträge behalten, 82 verworfen, keine ungeparste Zeile |
+| `40-restore.sh` (eine Zeile ersetzt, siehe Fehler 1) | Prüfsummen ok, Ziel leer, wörtliche Bestätigung, eine Transaktion, fehlerfrei, nachdem die Reihenfolge korrigiert war (Fehler 2) |
+| `60-compare.sh`, **unverändert** | **gleich:** Zeilenzahlen aller Tabellen, Sequenzstände, Inhaltsabdrücke (29 Tabellen), Geschäftsinvarianten (22), Spaltenform von auth/storage. **Alle Mindestmengen erfüllt.** |
+| Zielprüfungen (von Hand, siehe Fehler 3) | Bucket `catalog` korrekt, 4 Storage-Policies, 2 Belegsperren, 78 von 78 Tabellen mit RLS, 1 aktive Verkäuferzeile |
+| Rechte im Ziel | anon liest `purchases` nicht (`permission denied`). Ein `update` auf einen Beleg bricht ab („an issued receipt cannot be changed“) |
+| Referenzielle Integrität | 133 Fremdschlüssel, alle validiert |
+| IDs | Die nächste Neuanlage bekommt ID 4 bei bisher höchster ID 3. Die Identitätsspalten laufen also korrekt weiter |
+| Belegtes Ziel | abgelehnt: „im Ziel stehen schon 78 Tabellen“ |
+| Falsche Prüfsumme im Manifest | abgelehnt, vor jedem Schreibzugriff |
+| Beschädigter Dump (8 Bytes überschrieben) | abgelehnt durch die Prüfsumme |
+| Abgeschnittener Dump mit stimmigem Manifest | `pg_restore` scheitert, **Ziel unverändert** (0 Tabellen, 0 Konten) |
+| Abbruch mitten im Restore (Fremdschlüssel-Fehler, siehe Fehler 2) | **Ziel unverändert**, die eine Transaktion greift |
+| Falsche Bestätigung | abgelehnt |
+| Schutz des Ziels (`lib.sh`, unverändert) | abgelehnt werden: Staging-Referenz, Production-Referenz, Passwort in der URI, fehlendes `sslmode=require`, falsches `DR_TARGET_REF`, Volume im Repository, `PGPASSFILE` mit Rechten 644 |
+
+**Erkannte Fehler und Einschränkungen [NACHGEWIESEN]:**
+
+1. **`40-restore.sh:31` und `20-dump.sh:40`:** `xargs -I{} note …` ruft eine Shell-Funktion über `xargs` auf. Das geht nicht (Exit 127). Unter `set -e` brechen **beide Skripte immer ab**: `20-dump.sh` nach dem Dump, `40-restore.sh` vor dem Restore. Betroffen ist nur eine Ausgabezeile, keine Prüfung. Im Test lief eine Kopie, in der genau diese Zeile ersetzt war und die die unveränderte `lib.sh` lud. **Das Repo-Skript ist unverändert.**
+2. **Reihenfolge im Restore-Plan:** `pg_restore` spielt `auth.identities` **vor** `auth.users` ein. Im Ziel besteht der Fremdschlüssel `identities_user_id_fkey` bereits, und zwar auch in jedem echten Supabase-Projekt, laut Staging-Dump. Der Restore bricht deshalb ab, sobald es Konten gibt. Abhilfe im Test: die beiden Zeilen in `toc.keep` beim vorgesehenen Durchlesen tauschen. Dauerhaft muss `30-filter-toc.mts` die Daten von `users` vor `identities` ordnen.
+3. **`supabase/checks/dr/verify-target.sql`, Zeile 1:** `case when to_regclass('cron.job') is null … else (select … from cron.job)` scheitert, wenn es kein `cron`-Schema gibt, denn PostgreSQL plant den Unterzweig trotzdem. `50-verify.sh` bricht dann ab, **bevor** die Prüfungen von RLS und Belegsperre laufen. Im Test liefen alle Abfragen von Hand, nur ohne Zeile 1.
+4. **`verify-target.sql`, Zeile 7:** Der fest hinterlegte md5-Wert von `seller_business_backup()` (`a3c9…`) ist veraltet. Staging-Quelle und Ziel tragen übereinstimmend `b426…`, die Funktion wurde seit 0104 mehrfach neu definiert.
+5. **Unser Trigger `on_auth_user_created` (Migration 0001) wird nicht restauriert.** Der Filter verwirft jedes Objekt in `auth`, und der DR-Plan führt den Trigger fälschlich als „Supabase-eigen“ (`disaster_recovery_pg_dump.md:423`). **Folge:** Nach einem Restore bekommt ein neu registriertes Konto **kein Profil** (im Ziel nachgewiesen). `60-compare` meldet das als „Katalog-Inventar weicht ab: auth, Trigger, 1“.
+6. **Schema-ACL von `public`:** `ACL - SCHEMA public` steht im TOC ohne Schema und wird verworfen („fremdes Schema -“). Ein echtes Supabase-Ziel bringt die Standardrechte für anon, authenticated und service_role mit. **Verloren geht die `USAGE`-Freigabe für `skyisles_agent`** (Staging-Prüfzugang). Lokal wich die ACL zusätzlich ab, weil die Hülle die Supabase-Standardrechte nicht nachbildet. Dieser Teil ist ein Artefakt des Tests.
+7. **`baseline-definitions.sql`:** Der Sortierschlüssel wird nach 63 Zeichen abgeschnitten. Die beiden Überladungen von `admin_merge_draft(…)` erscheinen deshalb in wechselnder Reihenfolge, und `60-compare` meldet eine Abweichung, obwohl beide Definitionen identisch sind (falsch positiv).
+8. **`data.dump`** (Weg „nur Daten“): pg_dump warnt vor zirkulären Fremdschlüsseln (`purchase_receipts`, `skylanders`). Dieser Weg ist **nicht getestet**.
+
+**Nicht getestet (Production-spezifisch oder lokal nicht nachbildbar):**
+
+- `10-baseline.sh`, `20-dump.sh` und `35-shape-check.sh` als Skripte. Sie verlangen Production als Quelle, und diese Regel blieb unangetastet. Ihre Befehle liefen nachgestellt.
+- Ein Dump von **Production** über den Session-Pooler: Laufzeit, Größe, Rechte des Production-Kontos.
+- Ein **echtes Supabase-Zielprojekt** mit seinen eigenen auth/storage-Versionen, `auth.schema_migrations`, `storage.migrations`, `cron` und den Standardrechten.
+- **Storage-Dateien** (nur Metadaten in `storage.objects`, keine Bytes), der Auth-Login nach dem Restore, Edge Functions und Secrets.
+- Das verschlüsselte Volume (`lib.sh` prüft es nicht).
+- Der Weg über `data.dump`.
+
+**Tatsächlich nachgewiesene Wiederherstellbarkeit:** Ein `pg_dump` im vorgesehenen Format mit dem **Schema von Staging (Stand 2026-11-09)** lässt sich mit dem vorhandenen Filter und `pg_restore --single-transaction` vollständig und konsistent in ein leeres, Supabase-förmiges Ziel einspielen. Dabei bleiben Daten, IDs, Sequenzen, Fremdschlüssel, RLS und Belegsperren erhalten, unter zwei Bedingungen:
+
+- Die Reihenfolge `users` vor `identities` wird korrigiert (Fehler 2).
+- Der Trigger `on_auth_user_created` wird nachgezogen (Fehler 5).
+
+Die Schutzmechanismen gegen falsches Ziel, belegtes Ziel, veränderte Dateien und Teil-Restores greifen alle.
+
+**Status M-03: nicht bestanden.** Nachgewiesen ist ein **lokaler Teilerfolg**, kein Disaster-Recovery-Nachweis für Production. Offen für den vollständigen DR-Test:
+
+- (a) Fehler 1–5 und 7 beheben: zwei Skriptzeilen, die Filterreihenfolge, der Trigger, zwei Prüfabfragen und der Sortierschlüssel. Das ist eigene Arbeit mit Freigabe und berührt **keine Sicherheitsregel**.
+- (b) Für Fehler 6 entscheiden, ob die `USAGE`-Freigabe für `skyisles_agent` beim Restore nachgezogen werden soll.
+- (c) Ein Supabase-Testprojekt als Ziel.
+- (d) Eine lesende Verbindung zu Production für Messung (a) und Dump, mit eigener Freigabe.
+- (e) Der Drill gegen Production mit Protokoll.
+- (f) Ein Test der Storage-Bytes und des Auth-Logins nach dem Restore.
+
+**M-03D (2026-11-09): die Korrekturen aus M-03C und der erneute lokale Lauf.**
+
+Keine Zielschutzregel wurde verändert, keine Prüfung entfernt oder übersprungen, keine Datenbankrechte vergeben. Geändert wurden ausschließlich Dateien des DR-Pfads.
+
+| Fehler (M-03C) | Ursache | Korrektur | Datei |
+|---|---|---|---|
+| 1 `xargs` ruft Shell-Funktion | `xargs` kennt Funktionen der eigenen Shell nicht, Exit 127 unter `set -e` | `note "$(grep -c …) …"` | `tools/dr/20-dump.sh`, `40-restore.sh` |
+| 2 `identities` vor `users` | `pg_restore --list` ordnet alphabetisch. Die Fremdschlüssel der Plattform bestehen im Ziel | Der Filter ordnet jedes Paar Elternteil vor Kind (`users`→`identities`, `buckets`→`objects`) und prüft das Ergebnis nach (Verstoß, falls doch falsch) | `tools/dr/30-filter-toc.mts` |
+| 5 `on_auth_user_created` fehlt | Der Filter verwarf alles in `auth`, und der Plan hielt den Trigger für Supabase-eigen | Genau dieser Name auf `auth.users` wird behalten. Ein Verstoß ist er, wenn er doppelt vorkommt oder `public.handle_new_user()` im Plan fehlt. Jeder andere Trigger in `auth` bleibt draußen | `30-filter-toc.mts`, Plan-Text in `disaster_recovery_pg_dump.md` |
+| 3 `cron`-Abfrage scheitert | PostgreSQL plant den `else`-Zweig mit `cron.job` auch ohne Schema | Die Zählung läuft dynamisch über `query_to_xml`, nur wenn die Tabelle existiert. Ein Ziel mit Jobs bleibt ein Befund | `supabase/checks/dr/verify-target.sql` |
+| 4 veralteter md5 | fest hinterlegter Abdruck von `seller_business_backup()` | Der Rumpf wird nur noch über `baseline-definitions` (Quelle gegen Ziel) verglichen, und Zeile 7 prüft Vorhandensein, Eindeutigkeit und `security definer`. Es gibt keinen neuen festen Hash | `verify-target.sql` |
+| 6 Schema-ACL von `public` | Der Eintrag `ACL - SCHEMA public` hat im TOC kein Schema und fiel unter „fremdes Schema“ | Genau dieser Eintrag wird behalten und stellt die ACL der Quelle her, nicht mehr. Neu in `40-restore.sh`: **Vor** der Bestätigung muss jede Rolle aus den Rechten des Plans im Ziel bestehen. Angelegt wird nichts | `30-filter-toc.mts`, `40-restore.sh` |
+| 7 abgeschnittener Sortierschlüssel | `information_schema.table_name` gibt der Union den Typ `name` (63 Zeichen) | `objekt::text` | `supabase/checks/dr/baseline-definitions.sql` |
+| zusätzlich: Zielprüfungen ohne Urteil | `60-compare.sh` gab `verify-target.csv` und die Rechteproben nur aus. Eine verfehlte Prüfung blieb ohne Folgen | Jede Zeile trägt `ok`, und jedes `f` ist ein Befund. Weniger als 9 Zeilen oder eine fehlende `ok`-Spalte sind ein Befund. anon darf `purchases` nicht lesen, sonst Befund. Die Belegsperre muss greifen, wenn Belege existieren | `60-compare.sh`, `verify-target.sql` (neue Zeile 9: Registrierungstrigger) |
+| zusätzlich: unlesbarer Plan ohne Meldung | Die neue Rollenvorprüfung brach unter `set -e` still ab | ausdrückliche Meldung „Restore-Plan lässt sich nicht lesen“ | `40-restore.sh` |
+| zusätzlich: `grep 'PUBLIC\|'` | `ugrep` auf diesem Rechner lehnt die leere Alternative ab (SIGPIPE, Exit 141) | portables `awk` | `40-restore.sh` |
+
+Mitgeführt: `supabase/SHA256SUMS.txt` (die drei geänderten Prüfdateien), `tools/dr/README.md`, `src/lib/admin/dr-toc-filter.test.ts`.
+
+**Gezielte Tests:**
+
+- `dr-toc-filter.test.ts`: **32 grün**, 12 davon neu. Abgedeckt:
+  - Reihenfolge umgekehrt geliefert und umgeordnet, keine Zeile verloren oder hinzugekommen, bereits richtige Reihenfolge unverändert.
+  - Trigger behalten, aber kein ähnlicher Name, keine andere Tabelle, keine Funktion gleichen Namens, nicht doppelt, nicht ohne Funktion.
+  - ACL von `public` behalten, die ACL von auth, storage, cron und extensions nicht, ebenso wenig Kommentar oder `CREATE SCHEMA`.
+- `npm run verify:check-sql`: 188 Dateien ohne Planfehler.
+- `verify:sums` stimmt, `tsc` und `eslint` ohne Befund, `bash -n` für alle DR-Skripte.
+
+**Erneuter lokaler Lauf** (Testumgebung im Scratchpad, Wegwerf-Cluster wie in M-03C, Ziel mit TLS 1.3 und scram, danach alles gelöscht). Die Repo-Skripte liefen **unverändert, ohne Kopie und ohne Handänderung an `toc.keep`**:
+
+| Schritt | Ergebnis |
+|---|---|
+| `30-filter-toc.mts` | Exit 0. 2 358 Einträge behalten (darunter Trigger und `ACL - SCHEMA public`), 80 verworfen. `users` steht vor `identities`, `buckets` vor `objects` |
+| `40-restore.sh` | **Exit 0.** 6 Rollen aus den Rechten im Ziel vorhanden, Prüfsummen ok, Ziel leer, Bestätigung, eine Transaktion |
+| `50-verify.sh` | **Exit 0.** anon: `permission denied for table purchases`, Belegsperre hat gegriffen |
+| `60-compare.sh` | **Exit 0, KEIN BEFUND.** Gleich: Katalog-Inventar, Zeilenzahlen, Sequenzen, Inhaltsabdrücke, **Definitionen**, **Rechte inkl. Schema-ACL**, Geschäftsinvarianten, auth/storage-Form. Mindestmengen erfüllt, **alle 9 Zielprüfungen `t`**, beide Rechteproben ok |
+| Auth im Ziel | 2 Konten, 1 Identität, 0 verwaiste Identitäten, 2 Profile |
+| Registrierung nach dem Restore | 1 Trigger auf `auth.users`. **Ein neues synthetisches Konto erhält sein Profil** (vorher 0) |
+| Schema-ACL `public` | `postgres=UC anon=U authenticated=U service_role=U skyisles_agent=U`, gleich der Quelle. Keine zusätzliche Freigabe, `PUBLIC` ohne `USAGE` wie in der Quelle |
+| Fremdschlüssel und Sequenzen | 133 Fremdschlüssel, alle validiert. Die nächste Verkaufs-ID ist 4 bei bisher höchster ID 3 |
+
+**Fehlerfälle und Abbruchverhalten** (jeweils Exit 1 mit benanntem Abbruch):
+
+- belegtes Ziel
+- falsche Prüfsumme
+- beschädigter Dump
+- abgeschnittener Dump mit stimmigem Manifest: „Restore-Plan lässt sich nicht lesen“
+- falsche Bestätigung
+- eine im Ziel fehlende Rolle: `skyisles_agent`
+- **Abbruch mitten in `pg_restore`:** Ein vorbelegtes Konto lässt `COPY auth.users` scheitern. Danach stehen **0 Objekte in `public`** im Ziel, nur das vorbelegte Konto, der Rollback ist also vollständig.
+- Ziel mit Staging- oder Production-Referenz, Passwort in der URI, ohne `sslmode=require`, falsches `DR_TARGET_REF`, Volume im Repository, `PGPASSFILE` mit Rechten 644
+- `50-verify` gegen eine Staging-Referenz
+- `60-compare` ohne Messung (a)
+
+**Gegenproben für `60-compare`:**
+
+- Trigger deaktiviert: Zeile 9 `f`, Exit 1.
+- anon kann `purchases` lesen (Grant, RLS aus): „NICHT OK anon“, Exit 1.
+
+Das Ersatz-Ziel `drtest_m03b` blieb nach allen Fehlerfällen leer.
+
+**Nicht getestet, Production-spezifisch:**
+
+- `10-baseline.sh`, `20-dump.sh` und `35-shape-check.sh` als Skripte. Sie verlangen Production als Quelle, ihre Befehle liefen nachgestellt.
+- Ein Dump von Production über den Pooler.
+- Ein echtes Supabase-Ziel mit dessen eigenen Supabase-Rollen und Rechten. Das betrifft auch `ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin`: Lokal lief es als Superuser, im Supabase-Ziel ist `postgres` kein Superuser. **Offenes Risiko.**
+- Storage-Bytes, ein Auth-Login nach dem Restore, Edge Functions und Secrets.
+- Der Weg über `data.dump`.
+- Das verschlüsselte Volume.
+
+**Verbleibende Risiken:**
+
+- (1) `ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin` und ACLs auf Supabase-Rollen können in einem echten Supabase-Ziel am Rechtemodell scheitern. Der Restore bräche dann ab, mit Rollback.
+- (2) `skyisles_agent` existiert nur auf Staging. Ein Restore aus Staging in ein frisches Projekt bricht deshalb jetzt **vor** der Bestätigung ab („fehlende Rollen“), statt Rechte zu verlieren. Ein Production-Dump betrifft das nur, falls Production die Rolle ebenfalls trägt.
+- (3) Ohne Belege in der Quelle ist die Belegsperre nur über die Triggerzählung belegt (`60-compare` meldet das als Hinweis).
+- (4) Die Hülle bildet Supabase nur nach: Rollen, `auth.uid()` und Storage-Trigger-Stubs.
+
+**Status M-03 bleibt: lokaler Teilerfolg, nicht bestanden.** Der lokale Restore-Pfad ist jetzt **vollständig grün**. Der Disaster-Recovery-Nachweis braucht weiterhin:
+
+- ein Supabase-Testprojekt als Ziel,
+- eine lesende Production-Verbindung mit eigener Freigabe,
+- den Drill gegen Production mit Protokoll,
+- die Prüfung von Storage-Bytes und Auth-Login.
 
 ### 3.6 Händlername, Handelsname, rechtliche Identität (offene Entscheidung)
 
@@ -429,7 +685,7 @@ Aufwand: **S** < ½ Tag · **M** ½–2 Tage · **L** > 2 Tage.
 |---|---|---|---|---|---|---|---|---|
 | **M-01** | Angewendete Migrationen 0181–0186 und die zugehörige Anwendung sind unversioniert **[NACHGEWIESEN]** | 156 Dateien im Arbeitsbaum | Datenverlust der Schemaquelle. Staging ist nicht mehr reproduzierbar | Nach Freigabe in fachlich getrennten Commits sichern: (1) 0181/0182 Korrekturen mit Backup, (2) 0183/0184, (3) 0185, (4) 0186, (5) Sammelaktionen und UI, (6) Händlerprofil-Fix, (7) Doku. Vorher `verify:sums`, `check` und die Ebene Feature je Commit | M | `npm run check`, `verify:sums`, Feature-Tests Abgleich und Orderbuch | nein / nein | – |
 | **M-02** | `sync-legacy-orderbook.mts` schreibt ohne Guard **[NACHGEWIESEN]** | `tools/sync-legacy-orderbook.mts`, `package.json` | Ein falsches `--env-file` schreibt in die falsche Datenbank, auch Production | `requireStaging()` bzw. ein expliziter Production-Bestätigungsschalter wie bei `catalog:finish:apply`. Werkzeug-Test analog `staging-guard.test.ts` | S | neuer Guard-Test | nein / nein | – |
-| **M-03** | Restore nie erprobt, Production ohne PITR **[NACHGEWIESEN]** | `tools/dr/*`, `supabase/checks/disaster_recovery_pg_dump.md` | Im Ernstfall unbekannt, ob und wie lange eine Wiederherstellung dauert | DR-Drill gegen ein **lokales** Postgres mit einem Staging-Dump durchführen und protokollieren. `RUNBOOK_RESTORE.md`. **Vor** dem nächsten Production-Rollout (0168+) | M | Drill-Protokoll, Zeilenzahlenvergleich | nein / ja (lesender Dump) | M-01 |
+| **M-03** (lokaler Teilerfolg 09.11., nicht bestanden, siehe 3.5a/M-03C) | Restore nie erprobt, Production ohne PITR **[NACHGEWIESEN]** | `tools/dr/*`, `supabase/checks/disaster_recovery_pg_dump.md` | Im Ernstfall unbekannt, ob und wie lange eine Wiederherstellung dauert | DR-Drill gegen ein **lokales** Postgres mit einem Staging-Dump durchführen und protokollieren. `RUNBOOK_RESTORE.md`. **Vor** dem nächsten Production-Rollout (0168+) | M | Drill-Protokoll, Zeilenzahlenvergleich | nein / ja (lesender Dump) | M-01 |
 
 ### P1: Stabilität und nachgewiesene Fehler
 
