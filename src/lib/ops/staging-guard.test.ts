@@ -301,10 +301,12 @@ describe("every staging-only writer is actually guarded", () => {
   it.each(GUARDED_TOOLS)("%s consults the guard", (path) => {
     const source = readFileSync(path, "utf8");
     expect(source).toContain("staging-guard.mts");
-    expect(source).toMatch(/requireStaging(IfRequested)?\(/);
+    // M-04: one entry point for tools serving both environments, always called.
+    expect(source).toMatch(/guardWriteTool\("(catalog|characters):import"/);
+    expect(source).not.toContain("requireStagingIfRequested");
   });
 
-  it("the shared verifiers honour the flag the staging scripts set", () => {
+  it("the writing verifiers run against pinned staging only, whatever the flags (M-04)", () => {
     for (const path of [
       "tools/verify-rls.mts",
       "tools/verify-editorial.mts",
@@ -312,8 +314,9 @@ describe("every staging-only writer is actually guarded", () => {
     ]) {
       const source = readFileSync(path, "utf8");
       expect(source, `${path} is a writer and must consult the guard`).toContain(
-        "requireStagingIfRequested",
+        "requirePinnedStagingWrite(",
       );
+      expect(source, `${path} must not depend on a flag any more`).not.toContain("requireStagingIfRequested");
     }
   });
 
@@ -348,8 +351,11 @@ describe("every staging-only writer is actually guarded", () => {
         expect(command, name).not.toContain("--env-file");
         const quelle = readFileSync(beide, "utf8");
         // 2 — beide Kennungen sind abgeriegelt, bevor eine Verbindung entsteht.
-        expect(quelle).toContain('const STAGING_REF = "qqxcpesbwfxzgytkdsac"');
-        expect(quelle).toContain('const PRODUCTION_REF = "zmiwxswrpkmizvqsgype"');
+        // M-04: the pinned ids and the exact comparison come from the shared guard.
+        expect(quelle).toContain("const STAGING_REF = PINNED_REFS.staging;");
+        expect(quelle).toContain("const PRODUCTION_REF = PINNED_REFS.production;");
+        expect(quelle).toContain('pinnedEnvFile(pfad === ".env.local" ? "production" : "staging")');
+        expect(quelle).not.toContain(".includes(kennung)");
         expect(quelle).toContain('verbinde(".env.staging", STAGING_REF');
         expect(quelle).toContain('verbinde(".env.local", PRODUCTION_REF');
         expect(quelle).toContain("RIEGEL 1");
@@ -371,8 +377,11 @@ describe("every staging-only writer is actually guarded", () => {
         expect(command, name).not.toContain("--apply");
         const quelle = readFileSync(lesend, "utf8");
         // 2 — beide Kennungen sind abgeriegelt, bevor eine Verbindung entsteht.
-        expect(quelle).toContain('const STAGING_REF = "qqxcpesbwfxzgytkdsac"');
-        expect(quelle).toContain('const PRODUCTION_REF = "zmiwxswrpkmizvqsgype"');
+        // M-04: the pinned ids and the exact comparison come from the shared guard.
+        expect(quelle).toContain("const STAGING_REF = PINNED_REFS.staging;");
+        expect(quelle).toContain("const PRODUCTION_REF = PINNED_REFS.production;");
+        expect(quelle).toContain('pinnedEnvFile(pfad === ".env.local" ? "production" : "staging")');
+        expect(quelle).not.toContain(".includes(kennung)");
         expect(quelle).toContain("RIEGEL 1");
         // 3 — die beiden Modi schliessen sich aus.
         expect(quelle).toContain("ANWENDEN && PRUEFEN");
@@ -493,7 +502,10 @@ describe("choosing an environment is an act, not a default", () => {
   });
 
   it("accepts production only when it is named twice", () => {
-    expect(chooseEnvironment([ENVIRONMENT_FLAG, "production", PRODUCTION_CONFIRMATION]))
+    // M-04: the second word carries the project id; a bare flag no longer counts.
+    expect(chooseEnvironment([ENVIRONMENT_FLAG, "production", PRODUCTION_CONFIRMATION]).ok).toBe(false);
+    expect(chooseEnvironment([ENVIRONMENT_FLAG, "production", `${PRODUCTION_CONFIRMATION}=wrongid`]).ok).toBe(false);
+    expect(chooseEnvironment([ENVIRONMENT_FLAG, "production", `${PRODUCTION_CONFIRMATION}=zmiwxswrpkmizvqsgype`]))
       .toEqual({ ok: true, environment: "production" });
   });
 
@@ -527,27 +539,24 @@ describe("the sales importer keeps both guards and every data gate", () => {
   });
 
   it("asks for the environment's own confirmation before an apply", () => {
-    expect(TOOL).toContain('? "confirm-production" : "confirm-staging"');
+    expect(TOOL).toContain('? `confirm-production=${PINNED_REFS.production}` : "confirm-staging"');
+    // and right before the write, the typed id (M-04)
+    expect(TOOL.indexOf("confirmProductionWrite(")).toBeLessThan(TOOL.indexOf("await apply(client"));
     expect(TOOL).toContain("if (!flag(confirmation))");
     expect(TOOL).toContain("Nothing was written");
   });
 
   it("gives each environment its own script, and neither borrows the other", () => {
     const staging = PACKAGE.scripts["orderbook:sales-import:staging"];
-    const production = PACKAGE.scripts["orderbook:sales-import:prod"];
+    // M-04: the historical production script is gone; a production run is typed out.
+    expect(PACKAGE.scripts["orderbook:sales-import:prod"]).toBeUndefined();
     expect(staging).toContain("--env-file=.env.staging");
     expect(staging).toContain("--env staging");
     expect(staging).toContain(`${REQUIRE_STAGING_FLAG}=1`);
     expect(staging).not.toContain(".env.local");
     expect(staging).not.toContain("production");
 
-    expect(production).toContain("--env-file=.env.local");
-    expect(production).toContain("--env production");
-    expect(production).toContain(PRODUCTION_CONFIRMATION);
-    expect(production).not.toContain(".env.staging");
-    expect(production).not.toContain(`${REQUIRE_STAGING_FLAG}=1`);
     // Kein Apply im Skript selbst: das bleibt eine bewusste Eingabe.
-    expect(production).not.toContain("--apply");
     expect(staging).not.toContain("--apply");
   });
 

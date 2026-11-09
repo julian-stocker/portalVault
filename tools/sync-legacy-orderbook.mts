@@ -45,7 +45,7 @@ import {
   classifyPurchaseGroup, importGateOpen, manualDateConflicts, mayRestampPurchase, planGroups, saleDateDiff,
   type GroupFacts, type HeaderDiff, type PurchaseVerdict,
 } from "../src/lib/orderbook/legacy-sync-groups.ts";
-import { requirePinnedStagingWrite, requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { guardWriteTool, requirePinnedStagingWrite } from "./lib/staging-guard.mts";
 
 const WORKBOOK = process.env.SKYISLES_WORKBOOK
   ?? `${process.env.HOME}/Documents/eCommerce/skylanders.xlsx`;
@@ -64,7 +64,9 @@ const APPLY = process.argv.includes("--apply");
  * verlangt dafür Staging.
  */
 if (APPLY) requirePinnedStagingWrite("sync-legacy-orderbook --apply");
-else requireStagingIfRequested("sync-legacy-orderbook");
+// M-04B: the preview, too, without relying on the flag: pinned staging, or a
+// production READ only with `--env production`.
+else guardWriteTool("sync-legacy-orderbook", process.argv.slice(2), { apply: false });
 
 function requireEnv(name: string): string {
   const value = process.env[name];

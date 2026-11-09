@@ -455,8 +455,9 @@ describe("the report command only reads", () => {
     expect(tool).toContain("runId = runs[0].runId");
   });
 
-  it("carries the staging interlock the other dual-environment tools use", () => {
-    expect(tool).toContain('requireStagingIfRequested("perf:report")');
+  it("carries the shared read guard — pinned staging, or production only by name (M-04B)", () => {
+    expect(tool).toContain('guardWriteTool("perf:report", args, { apply: false })');
+    expect(tool).not.toContain("requireStagingIfRequested");
   });
 
   it("resolves without the @/ alias, because bare Node runs it", () => {

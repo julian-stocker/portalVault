@@ -249,6 +249,16 @@ export type EnvironmentChoice =
 export const ENVIRONMENT_FLAG = "--env";
 export const PRODUCTION_CONFIRMATION = "--confirm-production";
 
+/**
+ * The confirmation a production write needs, with the project id written out:
+ * `--confirm-production=zmiwxswrpkmizvqsgype` (M-04, 2026-11-09). A bare flag
+ * is the kind of thing a script or a shell history carries along; the id is
+ * the thing one has to look at to type.
+ */
+export function productionConfirmation(): string {
+  return `${PRODUCTION_CONFIRMATION}=${PRODUCTION_REF}`;
+}
+
 export function chooseEnvironment(argv: readonly string[]): EnvironmentChoice {
   const values: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -280,10 +290,11 @@ export function chooseEnvironment(argv: readonly string[]): EnvironmentChoice {
         "Only staging and production exist.",
     };
   }
-  if (value === "production" && !argv.includes(PRODUCTION_CONFIRMATION)) {
+  if (value === "production" && !argv.includes(productionConfirmation())) {
     return {
       ok: false,
-      message: `production also needs ${PRODUCTION_CONFIRMATION}. ` +
+      message: `production also needs ${productionConfirmation()} — the project id written out ` +
+        `(a bare ${PRODUCTION_CONFIRMATION} no longer counts, M-04). ` +
         "The environment is named twice on purpose.",
     };
   }
@@ -310,7 +321,13 @@ export function referenceFromDisk(): Reference {
  * somebody's catch block.
  */
 export function requireStaging(toolLabel: string): string {
-  const verdict = checkStagingTarget(
+  /*
+   * Since M-04 (2026-11-09) also against the PINNED staging id: a
+   * `.env.staging` that names some third project — or production while
+   * `.env.local` is missing — no longer passes. Every staging-only writer that
+   * calls this gets the stronger check without a change of its own.
+   */
+  const verdict = checkPinnedStagingWrite(
     {
       url: process.env.NEXT_PUBLIC_SUPABASE_URL,
       serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -355,50 +372,28 @@ export function requireStaging(toolLabel: string): string {
  * trusted. The label has to be earned.
  */
 export function requireProduction(toolLabel: string): string {
-  const reference = referenceFromDisk();
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  const targetOrigin = projectOrigin(url);
-  const productionOrigin = projectOrigin(reference.production.NEXT_PUBLIC_SUPABASE_URL);
-  const stagingOrigin = projectOrigin(reference.staging.NEXT_PUBLIC_SUPABASE_URL);
-  const productionKey = reference.production.SUPABASE_SERVICE_ROLE_KEY;
-
-  const refuse = (why: string): never => {
+  /*
+   * Since M-04 (2026-11-09) through `checkProductionTarget`: the same exact
+   * comparison with both env files as before, PLUS the pinned production id.
+   * `.env.local` alone can no longer make some other project "production".
+   */
+  const verdict = checkProductionTarget(
+    { url: process.env.NEXT_PUBLIC_SUPABASE_URL, serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY },
+    referenceFromDisk(),
+  );
+  if (!verdict.ok) {
     console.error("");
     console.error("  ENVIRONMENT GUARD — refusing to run.");
     console.error("");
-    console.error(`  ${toolLabel} reads PRODUCTION on purpose, and ${why}`);
+    console.error(`  ${toolLabel} reads PRODUCTION on purpose, and ${verdict.message}`);
     console.error("");
     console.error(`  Start it with --env-file=${PRODUCTION_ENV_FILE}, or fix that file.`);
     console.error("  Nothing has been read and nothing has been written.");
     console.error("");
     process.exit(1);
-  };
-
-  if (targetOrigin === null) {
-    refuse("no NEXT_PUBLIC_SUPABASE_URL is set, so the target cannot be identified.");
   }
-  if (productionOrigin === null || typeof productionKey !== "string" || productionKey === "") {
-    refuse(`${PRODUCTION_ENV_FILE} does not name a project and a service-role key.`);
-  }
-  if (stagingOrigin !== null && stagingOrigin === targetOrigin) {
-    refuse(`the target project ${projectRef(url)} is the one named in ${STAGING_ENV_FILE}.`);
-  }
-  if (targetOrigin !== productionOrigin) {
-    refuse(
-      `the target project ${projectRef(url)} is not the one named in ${PRODUCTION_ENV_FILE}.`,
-    );
-  }
-  if (key !== productionKey) {
-    refuse(
-      `the SUPABASE_SERVICE_ROLE_KEY in use is not the one in ${PRODUCTION_ENV_FILE}, ` +
-        "so the address and the credential disagree about which project this is.",
-    );
-  }
-
-  console.log(`  environment guard: passed — target is production (${projectRef(url)}).`);
-  return targetOrigin as string;
+  console.log(`  environment guard: passed — target is production (${verdict.ref}).`);
+  return verdict.origin;
 }
 
 /**
@@ -486,4 +481,234 @@ export function requirePinnedStagingWrite(toolLabel: string): string {
   }
   console.log(`  write guard: passed — target is staging (${verdict.ref}).`);
   return verdict.origin;
+}
+
+/* ==========================================================================
+ * PRODUCTION WRITES (M-04, 2026-11-09)
+ *
+ * One rule for every tool that can write to production, in this one module —
+ * no copies, no parallel mechanism:
+ *
+ *   1. explicit choice      `--env production`            (chooseEnvironment)
+ *   2. intent               `--apply`
+ *   3. confirmation         `--confirm-production=<id>`   (the id written out)
+ *   4. pinned identity      the target IS the pinned production project
+ *   5. both env files       URL and key equal `.env.local`, and NOT `.env.staging`
+ *   6. right before the first write: the full project id typed at a terminal.
+ *      No terminal → refused (fail-closed). No environment variable can stand
+ *      in for it.
+ *
+ * Steps 1–5 run before any client exists (`requireProductionWrite`); step 6
+ * runs once the plan is known, immediately before writing
+ * (`confirmProductionWrite`). Nothing here prints a key, a password or a URL
+ * beyond the project id.
+ * ======================================================================== */
+
+export type ProductionRefusal =
+  | "no_target_url" | "pinned_staging" | "not_pinned_production"
+  | "no_production_reference" | "production_file_mismatch" | "production_key_mismatch"
+  | "staging_file_names_target" | "staging_key_on_target";
+
+export type ProductionVerdict =
+  | { ok: true; origin: string; ref: string }
+  | { ok: false; reason: ProductionRefusal; message: string };
+
+/**
+ * Is the target production — by the pinned id AND by both env files? Pure.
+ *
+ * The last two checks are the ones that catch "a coherent production
+ * URL/key pair on a staging path": if `.env.staging` carries the production
+ * project or its key, the configuration is wrong, whichever way round it is
+ * used, and nothing may run on it.
+ */
+export function checkProductionTarget(
+  target: Target, reference: Reference, pins: PinnedRefs = PINNED_REFS,
+): ProductionVerdict {
+  const origin = projectOrigin(target.url);
+  const ref = projectRef(target.url);
+  if (origin === null || ref === null) {
+    return { ok: false, reason: "no_target_url", message: "no NEXT_PUBLIC_SUPABASE_URL is set, so the target cannot be identified." };
+  }
+  if (ref === pins.staging) {
+    return { ok: false, reason: "pinned_staging", message: `the target project ${ref} is STAGING, not production.` };
+  }
+  if (ref !== pins.production) {
+    return { ok: false, reason: "not_pinned_production",
+      message: `the target project ${ref} is not the pinned production project ${pins.production}.` };
+  }
+  const prodOrigin = projectOrigin(reference.production.NEXT_PUBLIC_SUPABASE_URL);
+  const prodKey = reference.production.SUPABASE_SERVICE_ROLE_KEY;
+  if (prodOrigin === null || typeof prodKey !== "string" || prodKey === "") {
+    return { ok: false, reason: "no_production_reference",
+      message: `${PRODUCTION_ENV_FILE} does not name a project and a service-role key.` };
+  }
+  if (prodOrigin !== origin) {
+    return { ok: false, reason: "production_file_mismatch",
+      message: `${PRODUCTION_ENV_FILE} names a different project than the target ${ref}.` };
+  }
+  if (target.serviceRoleKey !== prodKey) {
+    return { ok: false, reason: "production_key_mismatch",
+      message: `the SUPABASE_SERVICE_ROLE_KEY in use is not the one in ${PRODUCTION_ENV_FILE}.` };
+  }
+  if (projectOrigin(reference.staging.NEXT_PUBLIC_SUPABASE_URL) === origin) {
+    return { ok: false, reason: "staging_file_names_target",
+      message: `${STAGING_ENV_FILE} names the production project — the configuration is crossed.` };
+  }
+  const stagingKey = reference.staging.SUPABASE_SERVICE_ROLE_KEY;
+  if (typeof stagingKey === "string" && stagingKey !== "" && stagingKey === target.serviceRoleKey) {
+    return { ok: false, reason: "staging_key_on_target",
+      message: `${STAGING_ENV_FILE} carries the key in use — the configuration is crossed.` };
+  }
+  return { ok: true, origin, ref };
+}
+
+export type IntentVerdict = { ok: true } | { ok: false; message: string };
+
+/** Steps 1–3: `--env production`, `--apply`, `--confirm-production=<id>`. Pure. */
+export function checkProductionWriteIntent(argv: readonly string[]): IntentVerdict {
+  const choice = chooseEnvironment(argv);
+  if (!choice.ok) return { ok: false, message: choice.message };
+  if (choice.environment !== "production") {
+    return { ok: false, message: `${ENVIRONMENT_FLAG} ${choice.environment} is not a production write.` };
+  }
+  if (!argv.includes("--apply")) return { ok: false, message: "a production write needs --apply." };
+  const confirmations = argv.filter((a) => a === PRODUCTION_CONFIRMATION || a.startsWith(`${PRODUCTION_CONFIRMATION}=`));
+  if (confirmations.length !== 1 || confirmations[0] !== productionConfirmation()) {
+    return { ok: false, message: `a production write needs exactly ${productionConfirmation()}.` };
+  }
+  return { ok: true };
+}
+
+function refuseProduction(toolLabel: string, message: string): never {
+  console.error("");
+  console.error("  PRODUCTION WRITE GUARD — refusing to run.");
+  console.error("");
+  console.error(`  ${toolLabel}: ${message}`);
+  console.error("");
+  console.error("  Nothing has been read and nothing has been written.");
+  console.error("");
+  process.exit(1);
+}
+
+/** Production, read-only: pinned id and both env files. Alias kept for clarity. */
+export function requireProductionRead(toolLabel: string): string {
+  return requireProduction(toolLabel);
+}
+
+/** Steps 1–5. Call before the client is built. Exits on any refusal. */
+export function requireProductionWrite(toolLabel: string, argv: readonly string[] = process.argv.slice(2)): string {
+  const intent = checkProductionWriteIntent(argv);
+  if (!intent.ok) refuseProduction(toolLabel, intent.message);
+  const verdict = checkProductionTarget(
+    { url: process.env.NEXT_PUBLIC_SUPABASE_URL, serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY },
+    referenceFromDisk(),
+  );
+  if (!verdict.ok) refuseProduction(toolLabel, verdict.message);
+  console.log(`  production write guard: target is production (${verdict.ref}); `
+    + "the project id will be asked for right before the first write.");
+  return verdict.origin;
+}
+
+/** Step 6, as a pure decision: a terminal, and exactly the project id. */
+export function decideConfirmation(isTTY: boolean, answer: string | null, pins: PinnedRefs = PINNED_REFS): IntentVerdict {
+  if (!isTTY) return { ok: false, message: "not an interactive terminal — a production write is never confirmed non-interactively." };
+  if (answer === null) return { ok: false, message: "no answer was given." };
+  if (answer.trim() !== pins.production) return { ok: false, message: "the project id typed does not match." };
+  return { ok: true };
+}
+
+/**
+ * Step 6: immediately before the first write. Shows what is about to happen
+ * and asks for the full project id at the terminal. Exits on anything else.
+ */
+export async function confirmProductionWrite(toolLabel: string, summary: string): Promise<void> {
+  const tty = Boolean(process.stdin.isTTY);
+  let answer: string | null = null;
+  if (tty) {
+    const { createInterface } = await import("node:readline/promises");
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    process.stderr.write(`\n  ${toolLabel} is about to WRITE to PRODUCTION (${PINNED_REFS.production}).\n  ${summary}\n`);
+    try {
+      answer = await rl.question("  Type the full project id to continue: ");
+    } catch {
+      answer = null;   // Ctrl+D / Ctrl+C at the prompt: not confirmed
+    } finally {
+      rl.close();
+    }
+  }
+  const decision = decideConfirmation(tty, answer);
+  if (!decision.ok) {
+    console.error("");
+    console.error("  PRODUCTION WRITE NOT CONFIRMED — nothing has been written.");
+    console.error(`  ${toolLabel}: ${decision.message}`);
+    console.error("");
+    process.exit(1);
+  }
+  console.log("  production write confirmed.");
+}
+
+/**
+ * The one entry point for tools that serve BOTH environments (M-04).
+ *
+ *   --apply --env production --confirm-production=<id>  → production write (steps 1–5 now, 6 later)
+ *   --apply  [--env staging]                            → pinned staging write
+ *   no --apply, --env production                        → production READ (pinned)
+ *   no --apply, otherwise                               → pinned staging read; a production
+ *                                                         target without --env production is refused
+ *
+ * A coherent production pair on a staging path therefore never runs: the
+ * staging checks refuse the production id outright.
+ */
+export function guardWriteTool(
+  toolLabel: string, argv: readonly string[], options: { apply: boolean },
+): "staging" | "production" {
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === ENVIRONMENT_FLAG) values.push(argv[i + 1] ?? "");
+    else if (argv[i].startsWith(`${ENVIRONMENT_FLAG}=`)) values.push(argv[i].slice(ENVIRONMENT_FLAG.length + 1));
+  }
+  if (values.length > 1) refuseProduction(toolLabel, `${ENVIRONMENT_FLAG} was given ${values.length} times. One run, one environment.`);
+  const environment = values.length === 1 ? values[0].trim().toLowerCase() : null;
+  if (environment !== null && environment !== "staging" && environment !== "production") {
+    refuseProduction(toolLabel, `${ENVIRONMENT_FLAG} ${JSON.stringify(values[0])} is not an environment.`);
+  }
+  if (options.apply) {
+    if (environment === "production") { requireProductionWrite(toolLabel, argv); return "production"; }
+    requirePinnedStagingWrite(toolLabel);
+    return "staging";
+  }
+  if (environment === "production") { requireProductionRead(toolLabel); return "production"; }
+  if (projectRef(process.env.NEXT_PUBLIC_SUPABASE_URL) === PINNED_REFS.production) {
+    refuseProduction(toolLabel, `the target is production; a production run must say so: ${ENVIRONMENT_FLAG} production.`);
+  }
+  requirePinnedStagingWrite(toolLabel);
+  return "staging";
+}
+
+/**
+ * For tools that read BOTH env files themselves (catalog sync/publish/finish,
+ * storage transfer, transfer to production, collision report): the file must
+ * name exactly the pinned project — exact project id, not a substring — and
+ * the two files must not name the same project or carry the same key.
+ * Returns URL and key for `createClient`; prints only the id.
+ */
+export function pinnedEnvFile(environment: "staging" | "production"): { url: string; key: string; ref: string } {
+  const file = environment === "staging" ? STAGING_ENV_FILE : PRODUCTION_ENV_FILE;
+  const other = environment === "staging" ? PRODUCTION_ENV_FILE : STAGING_ENV_FILE;
+  const want = environment === "staging" ? PINNED_REFS.staging : PINNED_REFS.production;
+  const env = readEnvFile(file);
+  const otherEnv = readEnvFile(other);
+  const ref = projectRef(env.NEXT_PUBLIC_SUPABASE_URL);
+  const fail = (why: string): never => {
+    console.error(`\n  RIEGEL 1 — Abbruch. ${why}\n`);
+    process.exit(1);
+  };
+  if (ref !== want) fail(`${file} nennt nicht ${want} (${environment}), sondern ${ref ?? "kein Projekt"}.`);
+  const key = env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (key === "") fail(`${file} traegt keinen SUPABASE_SERVICE_ROLE_KEY.`);
+  if (projectOrigin(otherEnv.NEXT_PUBLIC_SUPABASE_URL) === projectOrigin(env.NEXT_PUBLIC_SUPABASE_URL)) {
+    fail(`${file} und ${other} nennen dasselbe Projekt.`);
+  }
+  if ((otherEnv.SUPABASE_SERVICE_ROLE_KEY ?? "") === key) fail(`${file} und ${other} tragen denselben Schluessel.`);
+  return { url: env.NEXT_PUBLIC_SUPABASE_URL, key, ref: want };
 }

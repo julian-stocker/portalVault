@@ -25,7 +25,7 @@
  */
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { requirePinnedStagingWrite } from "./lib/staging-guard.mts";
 
 type Result = { name: string; passed: boolean; detail: string };
 const results: Result[] = [];
@@ -97,7 +97,10 @@ async function main(): Promise<void> {
    * ohne das Flag startet, bekommt keinen Riegel — deshalb gibt es den
    * umgebungsneutralen Alias nicht (CLAUDE.md).
    */
-  requireStagingIfRequested("verify:calculations");
+  // M-04 (2026-11-09): this verifier WRITES (accounts, fixtures, its own admin
+  // grant), so it runs against the pinned staging project only — unconditionally,
+  // not only when a flag is set. `verify:calculations:prod` no longer exists.
+  requirePinnedStagingWrite("verify:calculations");
 
   console.log(`purchase_calculations auf ${new URL(URL_).host}\n`);
 

@@ -81,7 +81,9 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { projectOrigin, projectRef, readEnvFile } from "./lib/staging-guard.mts";
+import {
+  confirmProductionWrite, PINNED_REFS, productionConfirmation, projectOrigin, projectRef, readEnvFile,
+} from "./lib/staging-guard.mts";
 
 const flag = (name: string) => process.argv.includes(`--${name}`);
 const APPLY = flag("apply");
@@ -104,11 +106,19 @@ function guard(): { S: SupabaseClient; P: SupabaseClient } {
   if (s === null) fail(".env.staging names no project.");
   if (t === null) fail(".env.local names no project.");
   if (s === t) fail("source and target are the SAME project.");
+  // M-04 (2026-11-09): both ends by the PINNED ids, not only "different".
+  // Swapped or rewritten env files no longer turn staging into "production".
+  if (projectRef(source.NEXT_PUBLIC_SUPABASE_URL) !== PINNED_REFS.staging) {
+    fail(`.env.staging does not name the pinned staging project ${PINNED_REFS.staging}.`);
+  }
+  if (projectRef(target.NEXT_PUBLIC_SUPABASE_URL) !== PINNED_REFS.production) {
+    fail(`.env.local does not name the pinned production project ${PINNED_REFS.production}.`);
+  }
   if (source.SUPABASE_SERVICE_ROLE_KEY === target.SUPABASE_SERVICE_ROLE_KEY) {
     fail("both env files carry the same service-role key.");
   }
-  if (APPLY && !flag("confirm-production")) {
-    fail("writing to PRODUCTION requires --confirm-production as well as --apply.");
+  if (APPLY && !process.argv.includes(productionConfirmation())) {
+    fail(`writing to PRODUCTION requires ${productionConfirmation()} as well as --apply.`);
   }
   const mk = (e: Record<string, string>) =>
     createClient(e.NEXT_PUBLIC_SUPABASE_URL, e.SUPABASE_SERVICE_ROLE_KEY,
@@ -377,11 +387,14 @@ if (!APPLY) {
   console.log(`  inventory_movements      0`);
   console.log(`  shop_inventory           0`);
   console.log(`  auth.users               0`);
-  console.log("\nVorschau. Es wurde nichts geschrieben. Mit --apply --confirm-production übertragen.\n");
+  console.log(`\nVorschau. Es wurde nichts geschrieben. Mit --apply ${productionConfirmation()} übertragen.\n`);
   process.exit(0);
 }
 
 /* ------------------------------------------------------------------ write */
+
+await confirmProductionWrite("transfer:apply",
+  `${newPurchases.length} purchases, ${newSales.length} sales and their rows to Production.`);
 
 async function insert(table: string, rows: Row[], drop: readonly string[]): Promise<Row[]> {
   const written: Row[] = [];

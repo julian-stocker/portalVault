@@ -103,8 +103,11 @@ describe("checkPinnedStagingWrite — the decision", () => {
 describe("the tool — the guard runs before the client exists", () => {
   const TOOL = readFileSync("tools/sync-legacy-orderbook.mts", "utf8");
 
-  it("--apply calls the pinned write guard, the preview honours the staging flag", () => {
-    expect(TOOL).toMatch(/if \(APPLY\) requirePinnedStagingWrite\("sync-legacy-orderbook --apply"\);\nelse requireStagingIfRequested\("sync-legacy-orderbook"\);/);
+  it("--apply calls the pinned write guard, the preview the shared read guard", () => {
+    expect(TOOL).toContain('if (APPLY) requirePinnedStagingWrite("sync-legacy-orderbook --apply");');
+    // M-04B: the preview no longer relies on the optional flag either.
+    expect(TOOL).toContain('else guardWriteTool("sync-legacy-orderbook", process.argv.slice(2), { apply: false });');
+    expect(TOOL).not.toContain("requireStagingIfRequested");
   });
 
   it("…and that line comes before createClient and before any rpc", () => {
@@ -173,10 +176,12 @@ describe("the tool, started for real — refused before any connection", () => {
     expect(r.status).not.toBe(0);
   }, 30_000); // supabase-js retries the refused fetch with backoff (~7 s), all offline
 
-  it("the :staging preview refuses production through the flag that used to be ignored", () => {
-    const r = run(BOTH, { ...env(PROD, PROD_KEY), SKYISLES_REQUIRE_STAGING: "1" }, []);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("PRODUCTION GUARD — refusing to run.");
-    expect(r.stdout).not.toContain("Ziel ");
+  it("the preview refuses production unless it is named — flag or no flag (M-04B)", () => {
+    for (const extra of [{ SKYISLES_REQUIRE_STAGING: "1" }, {}] as EnvMap[]) {
+      const r = run(BOTH, { ...env(PROD, PROD_KEY), ...extra }, []);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("PRODUCTION WRITE GUARD — refusing to run.");
+      expect(r.stdout).not.toContain("Ziel ");
+    }
   });
 });

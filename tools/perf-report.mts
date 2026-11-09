@@ -61,7 +61,7 @@ import {
   type InteractionRow,
   type NavigationRow,
 } from "../src/lib/perf/report.ts";
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { guardWriteTool } from "./lib/staging-guard.mts";
 
 /** The columns the interaction report needs. No figure identity exists to ask for. */
 const INTERACTION_COLUMNS =
@@ -161,7 +161,9 @@ async function main(): Promise<void> {
   // The `:staging` script sets the flag; `:prod` does not, and then this is a
   // no-op. The same interlock every dual-environment tool in `tools/` uses, and
   // it runs before a connection exists.
-  requireStagingIfRequested("perf:report");
+  // M-04B: read-only, but the target is decided without relying on a flag —
+  // pinned staging, or production only with `--env production`.
+  guardWriteTool("perf:report", args, { apply: false });
 
   const client: SupabaseClient = createClient(
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),

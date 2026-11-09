@@ -192,7 +192,8 @@ describe("offene Bildtransfers → der bisherige sichere Apply-Pfad", () => {
   it("der Runner wählt je Richtung, und zwar aus dem Plan", () => {
     expect(R).toContain("const bildschritte = (p: Plan, ziel: string)");
     expect(R).toContain('x.feld === "image_override_path" && x.ziel === ziel');
-    expect(R).toContain('["--ziel", ziel, "--apply"]');
+    // M-04: production carries the id-bearing confirmation into the child.
+    expect(R).toContain('["--ziel", ziel, "--apply", ...(ziel === "production" ? [productionConfirmation()] : [])]');
     expect(R).toContain('["--ziel", ziel, "--pruefen"]');
     // und nicht mehr unbedingt
     expect(R).not.toContain('["--ziel", "staging", "--apply"]');

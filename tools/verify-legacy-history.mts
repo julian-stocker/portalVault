@@ -12,7 +12,7 @@
 import { openAsBlob } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { guardWriteTool } from "./lib/staging-guard.mts";
 import { readWorkbookParts } from "../src/lib/import/xlsx-reader.ts";
 import { parseSharedStrings } from "../src/lib/import/sheet-rows.ts";
 import { readCellGrid } from "../src/lib/import/cell-grid.ts";
@@ -31,7 +31,11 @@ const STOCK_SHEETS = ["SA", "G", "SF", "T", "SC", "I", "ZB", "DI A"] as const;
 const todayArg = process.argv.indexOf("--today");
 const TODAY = todayArg >= 0 ? process.argv[todayArg + 1] : new Date().toISOString().slice(0, 10);
 
-requireStagingIfRequested("verify-legacy-history");
+// M-04B: read-only; pinned staging, or production only with `--env production`.
+const TARGET = guardWriteTool("verify-legacy-history", process.argv.slice(2), { apply: false });
+// The calls to WRITING functions below (with ids that cannot exist) run on
+// staging only; on production they are reported as skipped, never sent.
+const WRITE_PROBES = TARGET === "staging";
 
 const need = (name: string): string => {
   const value = process.env[name];
@@ -169,15 +173,18 @@ check(serviceRpc.error !== null, "a caller without an operator session is refuse
  * row: permission is checked before the body, so `42501` means shut and
  * `P0002` means the body ran.
  */
-for (const internal of ["apply_reconciled_legacy_settlement"]) {
+for (const internal of WRITE_PROBES ? ["apply_reconciled_legacy_settlement"] : []) {
   const direct = await db.rpc(internal, { p_item_id: -1 });
   check(direct.error?.code === "42501", `${internal}() is internal to every role`,
     direct.error?.code ?? "CALL SUCCEEDED");
 }
-for (const [wrapper, args] of [
+if (!WRITE_PROBES) {
+  console.log("  SKIP  apply_/system_/seller_settle_reconciled_legacy_item probes  — write probe, staging only (M-04B)");
+}
+for (const [wrapper, args] of WRITE_PROBES ? [
   ["system_settle_reconciled_legacy_item", { p_item_id: -1 }],
   ["seller_settle_reconciled_legacy_item", { p_item_id: -1 }],
-] as const) {
+] as const : []) {
   const asAnon = await anon.rpc(wrapper, args);
   check(asAnon.error !== null && asAnon.error.code !== "P0002",
     `anon cannot call ${wrapper}()`, asAnon.error?.code ?? "CALL SUCCEEDED");

@@ -1,10 +1,21 @@
 /**
  * Grants and revokes the SkyIsles administrator permission.
  *
- *   npm run admin:grant -- --list                      who is an admin today
- *   npm run admin:grant -- --email <address>           dry run, writes nothing
- *   npm run admin:grant -- --email <address> --apply   writes
- *   npm run admin:grant -- --revoke <user-id> --apply  takes it back
+ *   npm run admin:grant -- --env production --list                      who is an admin today
+ *   npm run admin:grant -- --env production --email <address>           dry run, writes nothing
+ *   npm run admin:grant -- --env production --email <address> --apply \
+ *                          --confirm-production=zmiwxswrpkmizvqsgype     writes, after typing the id
+ *   npm run admin:grant -- --env production --revoke <user-id> --apply \
+ *                          --confirm-production=zmiwxswrpkmizvqsgype     takes it back
+ *
+ * THE PRODUCTION WRITE GUARD (M-04, 2026-11-09). Until then `--apply` and the
+ * `--env-file` of the npm script were the only protection for granting an
+ * administrator permission. Now `guardWriteTool` decides before any client
+ * exists: a production run must be named (`--env production`), a write needs
+ * `--confirm-production=<id>`, the pinned production id and both env files —
+ * and right before the write the full id is typed at a terminal
+ * (`confirmProductionWrite`; no terminal, no write). Without `--env` the
+ * target must be the pinned staging project.
  *
  * The permission is a row in `shop_admins`, keyed by the auth user id. Despite
  * its name that table is the general administrator permission today
@@ -27,7 +38,11 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { confirmProductionWrite, guardWriteTool } from "./lib/staging-guard.mts";
+
 type Options = {
+  env: string | null;
+  confirm: string | null;
   email: string | null;
   revoke: string | null;
   list: boolean;
@@ -35,11 +50,15 @@ type Options = {
 };
 
 function parseArgs(argv: readonly string[]): Options {
-  const options: Options = { email: null, revoke: null, list: false, apply: false };
+  const options: Options = { env: null, confirm: null, email: null, revoke: null, list: false, apply: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--apply") options.apply = true;
     else if (arg === "--list") options.list = true;
+    // Read here only so that they are not "unknown"; the guard reads argv itself.
+    else if (arg === "--env") options.env = argv[++i] ?? null;
+    else if (arg.startsWith("--env=")) options.env = arg.slice("--env=".length);
+    else if (arg.startsWith("--confirm-production")) options.confirm = arg;
     else if (arg === "--email") options.email = argv[++i] ?? null;
     else if (arg === "--revoke") options.revoke = argv[++i] ?? null;
     else if (arg.startsWith("--email=")) options.email = arg.slice("--email=".length);
@@ -109,6 +128,12 @@ async function currentAdmins(client: SupabaseClient) {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
+  // Before any client exists (M-04). Reads (`--list`, dry runs) need the
+  // environment named; writes need the full production rule.
+  const target = guardWriteTool("admin:grant", process.argv.slice(2), { apply: options.apply });
+  const confirmWrite = async (what: string) => {
+    if (target === "production") await confirmProductionWrite("admin:grant", what);
+  };
   const client = serviceClient();
 
   if (options.list) {
@@ -135,6 +160,7 @@ async function main(): Promise<void> {
       console.log("\n  DRY RUN - nothing was written. Re-run with --apply.");
       return;
     }
+    await confirmWrite(`delete from shop_admins where user_id = '${options.revoke}'`);
     const { error } = await client.from("shop_admins").delete().eq("user_id", options.revoke);
     if (error) throw new Error(`revoke: ${error.message}`);
     console.log("\n  Revoked.");
@@ -144,9 +170,9 @@ async function main(): Promise<void> {
   if (!options.email) {
     console.error(
       "Usage:\n" +
-        "  npm run admin:grant -- --list\n" +
-        "  npm run admin:grant -- --email <address> [--apply]\n" +
-        "  npm run admin:grant -- --revoke <user-id> --apply",
+        "  npm run admin:grant -- --env production --list\n" +
+        "  npm run admin:grant -- --env production --email <address> [--apply --confirm-production=<id>]\n" +
+        "  npm run admin:grant -- --env production --revoke <user-id> --apply --confirm-production=<id>",
     );
     process.exit(1);
   }
@@ -191,6 +217,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  await confirmWrite(`insert into shop_admins (user_id) values ('${user.id}')`);
   const { error } = await client
     .from("shop_admins")
     .upsert(

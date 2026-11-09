@@ -26,7 +26,7 @@ import { readFileSync } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { validateCuratedFile, type CuratedCharacter } from "../src/lib/catalog/character.ts";
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { confirmProductionWrite, guardWriteTool } from "./lib/staging-guard.mts";
 
 const DEFAULT_INPUT = "data/characters/characters.json";
 
@@ -86,13 +86,15 @@ async function main(): Promise<void> {
 
   let knownSkyIds = new Set<string>();
   let client: SupabaseClient | null = null;
+  let target: "staging" | "production" = "staging";
 
   if (!validateOnly) {
     // Before the connection exists, not before the write: a staging-only run
     // has no business reading production either, and failing here costs the
     // operator nothing but the validation they were about to run anyway.
     // `--validate-only` opens nothing and is therefore not guarded.
-    requireStagingIfRequested("characters:import");
+    // Since M-04 always, not only with the staging flag (see guardWriteTool).
+    target = guardWriteTool("characters:import", process.argv.slice(2), { apply });
     client = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
       requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
@@ -245,6 +247,9 @@ async function main(): Promise<void> {
   }
 
   // -------------------------------------------------------------- 4. apply
+  if (target === "production") {
+    await confirmProductionWrite("characters:import", "characters and figure links as planned above.");
+  }
   heading("4. Apply");
 
   // Upsert on the case-insensitive name index, so a re-run updates rather

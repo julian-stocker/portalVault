@@ -3,7 +3,7 @@
  *
  *   npm run catalog:sync:apply -- --target=staging
  *   npm run catalog:sync:apply -- --target=staging    --apply
- *   npm run catalog:sync:apply -- --target=production --apply --confirm-production
+ *   npm run catalog:sync:apply -- --target=production --apply --confirm-production=zmiwxswrpkmizvqsgype
  *
  * ===========================================================================
  * OHNE `--apply` SCHREIBT ER NICHTS. Das ist der Vorgabewert, nicht eine
@@ -35,6 +35,10 @@
  *   3  Postflight misst nach, statt zu glauben.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+import {
+  confirmProductionWrite, PINNED_REFS, pinnedEnvFile, productionConfirmation, projectRef,
+} from "./lib/staging-guard.mts";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -46,8 +50,9 @@ import { SPALTE, bewerteFamilienbild, planwert, pruefeNachher, pruefeVorher, typ
   from "../src/lib/catalog/publish-cas.ts";
 import { createInterface } from "node:readline";
 
-const STAGING_REF = "qqxcpesbwfxzgytkdsac";
-const PRODUCTION_REF = "zmiwxswrpkmizvqsgype";
+// M-04: the pinned ids and the production rule come from the shared guard.
+const STAGING_REF = PINNED_REFS.staging;
+const PRODUCTION_REF = PINNED_REFS.production;
 const PLAN = "resources/analysis/sync-dryrun.json";
 /*
  * ZWEI KONTEN, ZWEI DIENSTE — EINS JE UMGEBUNG.
@@ -89,9 +94,16 @@ function abbruch(warum: string): never {
 if (ZIEL !== "staging" && ZIEL !== "production") {
   abbruch("--target=staging oder --target=production fehlt.");
 }
-if (APPLY && ZIEL === "production" && !flag("confirm-production")) {
-  abbruch("Schreiben auf PRODUCTION verlangt --confirm-production zusaetzlich zu --apply.");
+/*
+ * M-04 (2026-11-09): Production verlangt die Bestaetigung MIT der Projekt-ID
+ * (`--confirm-production=zmiwxswrpkmizvqsgype`), die beiden Env-Dateien muessen
+ * genau die festen Projekte nennen (`pinnedEnvFile`), und unmittelbar vor dem
+ * ersten Schreiben wird die ID am Terminal eingegeben.
+ */
+if (APPLY && ZIEL === "production" && !process.argv.includes(productionConfirmation())) {
+  abbruch(`Schreiben auf PRODUCTION verlangt ${productionConfirmation()} zusaetzlich zu --apply.`);
 }
+if (ZIEL === "staging" || ZIEL === "production") pinnedEnvFile(ZIEL);
 
 /* --------------------------------------------------- Verbindungen und Pfade */
 
@@ -130,7 +142,7 @@ const ENV = ZIEL === "staging"
 
 function serviceClient(datei: string, ref: string): SupabaseClient {
   const e = envDatei(datei);
-  if (!String(e.NEXT_PUBLIC_SUPABASE_URL).includes(ref)) {
+  if (projectRef(e.NEXT_PUBLIC_SUPABASE_URL) !== ref) {
     abbruch(`TOR 0 — ${datei} nennt nicht das Projekt ${ref}.`);
   }
   return createClient(e.NEXT_PUBLIC_SUPABASE_URL, e.SUPABASE_SERVICE_ROLE_KEY,
@@ -193,7 +205,7 @@ async function adminClient(
   if (!konto) {
     abbruch(`${variable} (die Adresse des ${umgebung}-Adminkontos) ist nicht gesetzt.`);
   }
-  if (!String(e.NEXT_PUBLIC_SUPABASE_URL).includes(ref)) abbruch("falsches Projekt fuer W.");
+  if (projectRef(e.NEXT_PUBLIC_SUPABASE_URL) !== ref) abbruch("falsches Projekt fuer W.");
   const c = createClient(e.NEXT_PUBLIC_SUPABASE_URL, e.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     { auth: { persistSession: false, autoRefreshToken: true } });
   const { error } = await c.auth.signInWithPassword({
@@ -682,6 +694,9 @@ function schreibeProtokoll(extra: Record<string, unknown>): string {
   return datei;
 }
 
+if (APPLY && ZIEL === "production") {
+  await confirmProductionWrite("catalog:sync:apply", `${schritte.length} Schritte auf Production.`);
+}
 try {
 for (const s of schritte) {
   const zeile = jetzt._zeilen.get(s.sky_id);

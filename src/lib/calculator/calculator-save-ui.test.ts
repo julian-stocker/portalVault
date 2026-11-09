@@ -587,7 +587,9 @@ describe("8. der Weg nach Staging ist vorbereitet, nicht gegangen", () => {
      * beweisen (dieselbe Trennung wie in `verify-rls.mts`).
      */
     const tool = code("tools/verify-calculations.mts");
-    expect(tool).toContain("requireStagingIfRequested");
+    // M-04: a writer, so the pinned staging guard — unconditionally, not by flag.
+    expect(tool).toContain('requirePinnedStagingWrite("verify:calculations")');
+    expect(tool).not.toContain("requireStagingIfRequested");
     expect(tool).toContain("createSignedInUser");
     expect(tool).toContain("B sieht die von A NICHT");
     expect(tool).toContain("B kann KEINE Zeile für A anlegen");

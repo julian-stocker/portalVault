@@ -40,9 +40,10 @@
  * The production project is refused outright, by comparing the target URL
  * against the one in `.env.local`.
  */
-import { readFileSync } from "node:fs";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+import { requireStaging } from "./lib/staging-guard.mts";
 
 type Result = { name: string; passed: boolean; detail: string };
 const results: Result[] = [];
@@ -89,22 +90,10 @@ function maskUrl(url: string): string {
 
 const URL_ = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
 
-function productionUrl(): string | null {
-  try {
-    const line = readFileSync(".env.local", "utf8")
-      .split("\n")
-      .find((l) => l.startsWith("NEXT_PUBLIC_SUPABASE_URL="));
-    return line ? line.slice("NEXT_PUBLIC_SUPABASE_URL=".length).trim() : null;
-  } catch {
-    return null;
-  }
-}
 
-const production = productionUrl();
-if (production && production.replace(/\/+$/, "") === URL_.replace(/\/+$/, "")) {
-  console.error("Refusing to run: this is the production project (it matches .env.local).");
-  process.exit(1);
-}
+// M-04B: the shared guard instead of a local URL comparison — pinned staging id,
+// both env files, origin and key. Read-only tool; no production path at all.
+requireStaging("verify:payment-smoke");
 
 const service: SupabaseClient = createClient(URL_, requireEnv("SUPABASE_SERVICE_ROLE_KEY"), {
   auth: { persistSession: false, autoRefreshToken: false },

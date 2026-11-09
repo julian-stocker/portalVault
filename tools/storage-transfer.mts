@@ -78,13 +78,15 @@
  * ===========================================================================
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+import { confirmProductionWrite, PINNED_REFS, pinnedEnvFile, productionConfirmation } from "./lib/staging-guard.mts";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { beurteile, noetigeMenge, zusammenfassung, type Bedarf, type Objekt, type Urteil }
   from "../src/lib/catalog/storage-verify.ts";
 
-const STAGING_REF = "qqxcpesbwfxzgytkdsac";
-const PRODUCTION_REF = "zmiwxswrpkmizvqsgype";
+const STAGING_REF = PINNED_REFS.staging;
+const PRODUCTION_REF = PINNED_REFS.production;
 const BUCKET = "catalog";
 const PLAN = "resources/analysis/sync-dryrun.json";
 const BERICHT_BASIS = "resources/analysis/STORAGE-TRANSFER";
@@ -123,6 +125,16 @@ const ZIEL_ARG = (() => {
  * schreiben. Zwei Richtungen sind zwei Freigaben; eine Datei, die beides in
  * einem Zug kann, macht daraus eine.
  */
+/*
+ * RIEGEL 0b (M-04, 2026-11-09) — PRODUCTION BRAUCHT DIE BESTAETIGUNG MIT ID.
+ * `npm run storage:transfer:apply:production` allein schreibt nicht mehr:
+ * dazu `--confirm-production=zmiwxswrpkmizvqsgype`, und unmittelbar vor dem
+ * ersten Upload die ID am Terminal.
+ */
+if (ANWENDEN && ZIEL_ARG === "production" && !process.argv.includes(productionConfirmation())) {
+  console.error(`\n  RIEGEL 0b — Abbruch. \`--ziel production --apply\` verlangt ${productionConfirmation()}.\n`);
+  process.exit(1);
+}
 if (ANWENDEN && ZIEL_ARG === null) {
   console.error("\n  RIEGEL 0 — Abbruch. `--apply` verlangt `--ziel staging` oder "
     + "`--ziel production`.\n\n  Zwei Richtungen sind zwei Freigaben. Es gibt "
@@ -132,24 +144,20 @@ if (ANWENDEN && ZIEL_ARG === null) {
 
 /* ------------------------------------------------------------- Verbindung */
 
-function envDatei(pfad: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const z of readFileSync(pfad, "utf8").split("\n")) {
-    const m = /^([A-Z0-9_]+)=(.*)$/.exec(z.trim());
-    if (m) out[m[1]] = m[2];
-  }
-  return out;
-}
 
 /** Riegel 1: jede Verbindung muss das Projekt sein, das ihre Datei nennt. */
+/*
+ * M-04 (2026-11-09): kein eigener Teilstring-Vergleich mehr. `pinnedEnvFile`
+ * (tools/lib/staging-guard.mts) verlangt die EXAKTE Projekt-ID und dass die
+ * beiden Env-Dateien weder dasselbe Projekt noch denselben Schluessel nennen.
+ */
 function verbinde(pfad: string, kennung: string, name: string): SupabaseClient {
-  const e = envDatei(pfad);
-  const url = e.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  if (!url.includes(kennung)) {
+  const z = pinnedEnvFile(pfad === ".env.local" ? "production" : "staging");
+  if (z.ref !== kennung) {
     console.error(`\n  RIEGEL 1 — Abbruch. ${pfad} nennt nicht ${kennung} (${name}).\n`);
     process.exit(1);
   }
-  return createClient(url, e.SUPABASE_SERVICE_ROLE_KEY, {
+  return createClient(z.url, z.key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -351,6 +359,9 @@ type Ergebnis = Schritt & {
 };
 const ergebnisse: Ergebnis[] = [];
 
+if (ANWENDEN && ZIEL_ARG === "production") {
+  await confirmProductionWrite("storage:transfer", `${schritte.length} Objekt(e) nach Production uebertragen.`);
+}
 for (const s of schritte) {
   const quelle = s.ziel === "production" ? S : P;
   const ziel = s.ziel === "production" ? P : S;

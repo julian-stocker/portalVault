@@ -28,7 +28,7 @@ describe("catalog-sync-apply.mts — die Tore", () => {
   });
 
   it("verlangt --confirm-production zusätzlich zu --apply", () => {
-    expect(CODE).toContain('ZIEL === "production" && !flag("confirm-production")');
+    expect(CODE).toContain('ZIEL === "production" && !process.argv.includes(productionConfirmation())');
   });
 
   it("prüft die Projektkennung, bevor eine Verbindung benutzt wird", () => {

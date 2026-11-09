@@ -28,7 +28,7 @@ import { readFileSync } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { assignSlugs, seriesSlug } from "../src/lib/catalog/slug.ts";
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { confirmProductionWrite, guardWriteTool } from "./lib/staging-guard.mts";
 import { OVP_REMOVED_SKY_IDS } from "../src/lib/catalog/ovp-removal.ts";
 
 const DEFAULT_INPUT = "data/catalog/products.json";
@@ -238,12 +238,15 @@ function requireEnv(name: string): string {
  * only this function returns one. `--validate-only` never calls it and needs no
  * guard, because it never opens a connection at all.
  *
- * The guard only applies when the caller asked for it — `catalog:import:staging`
- * sets the flag. The unguarded `catalog:import:prod` is the deliberate
- * production path and stays exactly as it was.
+ * SINCE M-04 (2026-11-09) THE GUARD ALWAYS APPLIES. `catalog:import:prod`
+ * is gone; the tool stays for a deliberate run. Without `--env production` the
+ * target must be the pinned staging project; a production write needs
+ * `--env production --apply --confirm-production=<id>`, the pinned id, both
+ * env files and, right before the first write, the id typed at a terminal.
  */
+let TARGET: "staging" | "production" = "staging";
 function serviceClient(): SupabaseClient {
-  requireStagingIfRequested("catalog:import");
+  TARGET = guardWriteTool("catalog:import", process.argv.slice(2), { apply: process.argv.includes("--apply") });
   return createClient(
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
     requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
@@ -493,6 +496,9 @@ async function main(): Promise<void> {
   }
 
   // ----------------------------------------------------------------- 5. apply
+  if (TARGET === "production") {
+    await confirmProductionWrite("catalog:import", "series, categories and catalog rows as planned above.");
+  }
   heading("5. Apply");
 
   if (newSeries.length > 0 || changedSeries.length > 0) {

@@ -14,6 +14,8 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
+import { guardWriteTool } from "./lib/staging-guard.mts";
+
 type Result = { name: string; passed: boolean; detail: string };
 const results: Result[] = [];
 const check = (name: string, passed: boolean, detail = ""): void => {
@@ -33,6 +35,17 @@ function requireEnv(name: string): string {
 
 const URL_ = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
 const ANON = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+/*
+ * M-04B (2026-11-09): WHICH PROJECT, AND WHETHER IT MAY BE WRITTEN TO.
+ * `--env production` → production, READ-ONLY (pinned id and both env files).
+ * Otherwise the target must be the pinned staging project — a production pair
+ * on a staging path is refused before any client exists, by npm and by `node`.
+ * The anonymous WRITE probes (which must be refused, but would write if a
+ * grant or a policy were broken) run on staging only; on production they are
+ * reported as skipped, never sent.
+ */
+const TARGET = guardWriteTool("verify:seller", process.argv.slice(2), { apply: false });
+const WRITE_PROBES = TARGET === "staging";
 const anon = createClient(URL_, ANON, { auth: { persistSession: false } });
 
 /** Exactly the keys the allow-list names. */
@@ -175,6 +188,14 @@ async function main(): Promise<void> {
    * Gegenprobe: mit einem falschen Parameternamen MUSS `PGRST202` kommen.
    * Ohne sie waere `42501` auch von einer anderen Overload zu haben.
    */
+  if (!WRITE_PROBES) {
+    for (const name of ["anon cannot execute seller_create_catalog_item()", "anon cannot execute seller_import_catalog()"]) {
+      console.log(`  SKIP  ${name}  — write probe, staging only (M-04B)`);
+    }
+    const failed = results.filter((r) => !r.passed);
+    console.log(`\n${results.length - failed.length}/${results.length} passed (2 write probes skipped on production)`);
+    process.exit(failed.length === 0 ? 0 : 1);
+  }
   const anlegen = await anon.rpc("seller_create_catalog_item",
     { p_name: "", p_series_code: "", p_item_type: "" });
   const steht = anlegen.error?.code !== "PGRST202";

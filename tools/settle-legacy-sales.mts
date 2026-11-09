@@ -25,7 +25,7 @@
 import { openAsBlob } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { confirmProductionWrite, guardWriteTool } from "./lib/staging-guard.mts";
 import { readWorkbookParts } from "../src/lib/import/xlsx-reader.ts";
 import { parseSharedStrings } from "../src/lib/import/sheet-rows.ts";
 import { readCellGrid } from "../src/lib/import/cell-grid.ts";
@@ -39,7 +39,9 @@ const WORKBOOK = process.env.SKYISLES_WORKBOOK
 const APPLY = process.argv.includes("--apply");
 const SKIP_STOCK_GATE = process.argv.includes("--without-stock-gate");
 
-requireStagingIfRequested("settle-legacy-sales");
+// M-04 (2026-11-09): always guarded; production only with --env production,
+// --apply, --confirm-production=<id>, the pinned id and a typed confirmation.
+const TARGET = guardWriteTool("settle-legacy-sales", process.argv.slice(2), { apply: APPLY });
 
 const need = (name: string): string => {
   const value = process.env[name];
@@ -161,6 +163,9 @@ if (!APPLY) {
 
 /* ------------------------------------------------------------------- the apply */
 
+if (TARGET === "production") {
+  await confirmProductionWrite("settle-legacy-sales", `${open.length} legacy items to settle.`);
+}
 const movementsBefore = await db.from("inventory_movements").select("*", { count: "exact", head: true });
 let closed = 0;
 for (const item of open) {

@@ -36,7 +36,7 @@
 import { openAsBlob } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { confirmProductionWrite, guardWriteTool } from "./lib/staging-guard.mts";
 import { readWorkbookParts } from "../src/lib/import/xlsx-reader.ts";
 import { parseSharedStrings } from "../src/lib/import/sheet-rows.ts";
 import { readCellGrid } from "../src/lib/import/cell-grid.ts";
@@ -66,7 +66,9 @@ const APPLY = process.argv.includes("--apply");
 const todayArg = process.argv.indexOf("--today");
 const TODAY = todayArg >= 0 ? process.argv[todayArg + 1] : new Date().toISOString().slice(0, 10);
 
-requireStagingIfRequested("import-legacy-history");
+// M-04 (2026-11-09): always guarded; production only with --env production,
+// --apply, --confirm-production=<id>, the pinned id and a typed confirmation.
+const TARGET = guardWriteTool("import-legacy-history", process.argv.slice(2), { apply: APPLY });
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -315,6 +317,9 @@ if (withoutPrice.length > 0) {
 if (!APPLY) {
   console.log("\nPreview only. Re-run with --apply to write.");
   process.exit(0);
+}
+if (TARGET === "production") {
+  await confirmProductionWrite("import-legacy-history", `${pending.length} legacy_stock_events rows to insert.`);
 }
 
 let written = 0;

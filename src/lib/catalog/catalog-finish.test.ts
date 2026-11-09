@@ -56,9 +56,11 @@ describe("der Runner reiht, er implementiert nicht nach", () => {
     }
   });
 
-  it("ohne --apply und --confirm-production schreibt er nichts", () => {
+  it("ohne --apply und --confirm-production=<id> schreibt er nichts", () => {
     expect(RUNNER).toContain('const APPLY = process.argv.includes("--apply")');
-    expect(RUNNER).toContain('const BESTAETIGT = process.argv.includes("--confirm-production")');
+    // M-04: die Bestaetigung traegt die Projekt-ID; ein blankes Flag zaehlt nicht mehr.
+    expect(RUNNER).toContain("const BESTAETIGT = process.argv.includes(productionConfirmation())");
+    expect(RUNNER).not.toContain('process.argv.includes("--confirm-production")');
     expect(RUNNER).toContain("if (APPLY && !BESTAETIGT)");
     expect(RUNNER).toContain("RIEGEL 0");
   });
@@ -90,7 +92,7 @@ describe("die Voraussetzungen werden VOR dem ersten Schreibzugriff geprüft", ()
      * uebertragen wird. Die Zusage ist dieselbe: der erste Upload darf nicht
      * vor der Pruefung stehen.
      */
-    const a = c.indexOf('["--ziel", ziel, "--apply"]');
+    const a = c.indexOf('["--ziel", ziel, "--apply", ...(ziel === "production" ? [productionConfirmation()] : [])]');
     expect(vor).toBeGreaterThan(-1);
     expect(a).toBeGreaterThan(-1);
     expect(vor, "die Pruefung muss VOR dem ersten Upload stehen").toBeLessThan(a);
@@ -132,9 +134,9 @@ describe("die Reihenfolge und ihre Abbruchbedingungen", () => {
   it("B vor A vor C vor D", () => {
     const c = code(RUNNER);
     const b = c.indexOf('"--target=production"]');          // Anmeldeprobe
-    const a = c.indexOf('["--ziel", ziel, "--apply"]');       // erster Upload
+    const a = c.indexOf('["--ziel", ziel, "--apply", ...(ziel === "production" ? [productionConfirmation()] : [])]'); // erster Upload
     const cc = c.indexOf('"--target=staging", "--apply"');
-    const d = c.indexOf('"--target=production", "--apply", "--confirm-production"');
+    const d = c.indexOf('"--target=production", "--apply", productionConfirmation()');
     for (const [n, v] of [["B", b], ["A", a], ["C", cc], ["D", d]] as const) {
       expect(v, `Etappe ${n} nicht gefunden`).toBeGreaterThan(-1);
     }

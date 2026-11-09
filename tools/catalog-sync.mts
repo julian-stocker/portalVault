@@ -34,6 +34,8 @@
  *      ist kein Konflikt (ADR-0030), ein abweichendes BILD wird berichtet.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+import { PINNED_REFS, pinnedEnvFile } from "./lib/staging-guard.mts";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { riegel3, type Ausschluss, type Figur }
@@ -49,8 +51,8 @@ import { liesModus, pruefeEinwegrichtung, type Modus }
 import { driftBericht, pruefeDrift, pruefeLedger, standAbdruck,
          type Ledger, type Stand } from "../src/lib/catalog/publish-drift.ts";
 
-const STAGING_REF = "qqxcpesbwfxzgytkdsac";
-const PRODUCTION_REF = "zmiwxswrpkmizvqsgype";
+const STAGING_REF = PINNED_REFS.staging;
+const PRODUCTION_REF = PINNED_REFS.production;
 const ENTSCHEIDUNGEN = "resources/sync/bootstrap-decisions.json";
 
 /* ------------------------------------------------------------------ Typen */
@@ -117,24 +119,19 @@ const klasse = (f: string): "A" | "B" | "C" => {
 
 /* ------------------------------------------------------------- Verbindung */
 
-function envDatei(pfad: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const z of readFileSync(pfad, "utf8").split("\n")) {
-    const m = /^([A-Z0-9_]+)=(.*)$/.exec(z.trim());
-    if (m) out[m[1]] = m[2];
-  }
-  return out;
-}
 
-function verbinde(pfad: string, erwarteteKennung: string, name: string): SupabaseClient {
-  const e = envDatei(pfad);
-  const url = e.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  if (!url.includes(erwarteteKennung)) {
-    console.error(`\n  RIEGEL 1 — Abbruch.\n\n  ${pfad} nennt nicht das Projekt `
-      + `${erwarteteKennung}, das fuer ${name} erwartet wird.\n`);
+/*
+ * M-04 (2026-11-09): kein eigener Teilstring-Vergleich mehr. `pinnedEnvFile`
+ * (tools/lib/staging-guard.mts) verlangt die EXAKTE Projekt-ID und dass die
+ * beiden Env-Dateien weder dasselbe Projekt noch denselben Schluessel nennen.
+ */
+function verbinde(pfad: string, kennung: string, name: string): SupabaseClient {
+  const z = pinnedEnvFile(pfad === ".env.local" ? "production" : "staging");
+  if (z.ref !== kennung) {
+    console.error(`\n  RIEGEL 1 — Abbruch. ${pfad} nennt nicht ${kennung} (${name}).\n`);
     process.exit(1);
   }
-  return createClient(url, e.SUPABASE_SERVICE_ROLE_KEY, {
+  return createClient(z.url, z.key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }

@@ -50,6 +50,8 @@
  * ===========================================================================
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+import { PINNED_REFS, pinnedEnvFile, productionConfirmation } from "./lib/staging-guard.mts";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -58,8 +60,8 @@ import { LEDGER_MARKE, pruefeLedger, standAbdruck,
          type Ledger, type Stand } from "../src/lib/catalog/publish-drift.ts";
 import { OVP_REMOVED_SKY_IDS, ledgerOhneEntfernte } from "../src/lib/catalog/ovp-removal.ts";
 
-const STAGING_REF = "qqxcpesbwfxzgytkdsac";
-const PRODUCTION_REF = "zmiwxswrpkmizvqsgype";
+const STAGING_REF = PINNED_REFS.staging;
+const PRODUCTION_REF = PINNED_REFS.production;
 const PLAN = "resources/analysis/sync-dryrun.json";
 const LEDGER = "resources/sync/publish-ledger.json";
 const BERICHT = "resources/analysis/CATALOG-PUBLISH.md";
@@ -72,8 +74,9 @@ const APPLY = process.argv.includes("--apply");
  * anderen: ein halber Lauf soll nicht daran scheitern, dass die Freigabe
  * fehlt.
  */
-if (APPLY && !process.argv.includes("--confirm-production")) {
-  console.error("\n  RIEGEL 0 — Abbruch. `--apply` verlangt `--confirm-production`.\n\n"
+// M-04: die Bestaetigung MIT Projekt-ID; ein blankes --confirm-production zaehlt nicht mehr.
+if (APPLY && !process.argv.includes(productionConfirmation())) {
+  console.error(`\n  RIEGEL 0 — Abbruch. \`--apply\` verlangt \`${productionConfirmation()}\`.\n\n`
     + "  Dieser Lauf schreibt in die Production-Datenbank. Die Freigabe steht\n"
     + "  im Befehl, nicht in einer Voreinstellung.\n");
   process.exit(1);
@@ -130,22 +133,18 @@ function werkzeug(stufe: string, was: string, argumente: string[]): void {
 
 /* ------------------------------------------------------------- Verbindung */
 
-function envDatei(pfad: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const z of readFileSync(pfad, "utf8").split("\n")) {
-    const m = /^([A-Z0-9_]+)=(.*)$/.exec(z.trim());
-    if (m) out[m[1]] = m[2];
-  }
-  return out;
-}
+/*
+ * M-04 (2026-11-09): kein eigener Teilstring-Vergleich mehr. `pinnedEnvFile`
+ * (tools/lib/staging-guard.mts) verlangt die EXAKTE Projekt-ID und dass die
+ * beiden Env-Dateien weder dasselbe Projekt noch denselben Schluessel nennen.
+ */
 function verbinde(pfad: string, kennung: string, name: string): SupabaseClient {
-  const e = envDatei(pfad);
-  const url = e.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  if (!url.includes(kennung)) {
+  const z = pinnedEnvFile(pfad === ".env.local" ? "production" : "staging");
+  if (z.ref !== kennung) {
     console.error(`\n  RIEGEL 1 — Abbruch. ${pfad} nennt nicht ${kennung} (${name}).\n`);
     process.exit(1);
   }
-  return createClient(url, e.SUPABASE_SERVICE_ROLE_KEY, {
+  return createClient(z.url, z.key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -316,14 +315,14 @@ if (bilder === 0) {
    * der Pruefmodus danach ist die unabhaengige Nachkontrolle, und er faellt
    * ueber ein Objekt, das der Transfer nicht hinbekommen hat.
    */
-  werkzeug("2-5", "tools/storage-transfer.mts", ["--ziel", "production", "--apply"]);
+  werkzeug("2-5", "tools/storage-transfer.mts", ["--ziel", "production", "--apply", productionConfirmation()]);
   werkzeug("2-5", "tools/storage-transfer.mts", ["--ziel", "production", "--pruefen"]);
 }
 
 /* ---- 6. Die Katalogaenderungen ---- */
 sage("\n  [6] Katalogaenderungen anwenden — TOR 0 bis 4, Compare-and-Set");
 werkzeug("6", "tools/catalog-sync-apply.mts",
-  ["--target=production", "--apply", "--confirm-production"]);
+  ["--target=production", "--apply", productionConfirmation()]);
 
 /* ---- Nachkontrolle: der Plan muss auf 0 stehen ---- */
 sage("\n  [NACHHER] Plan neu rechnen");

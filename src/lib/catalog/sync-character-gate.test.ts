@@ -321,7 +321,7 @@ describe("der Apply-Pfad — am Quelltext festgenagelt", () => {
     expect(CODE).toContain("TOR 1b —");
     expect(CODE).toContain("TOR 2 — Precondition verletzt");
     expect(CODE).toContain("TOR 3");
-    expect(CODE).toContain('ZIEL === "production" && !flag("confirm-production")');
+    expect(CODE).toContain('ZIEL === "production" && !process.argv.includes(productionConfirmation())');
     // und es gibt weiterhin keinen Fluchtweg aus TOR 2
     for (const flucht of ["--force", "skip-tor", "no-cas", "--ohne-tor"]) {
       expect(CODE).not.toContain(flucht);

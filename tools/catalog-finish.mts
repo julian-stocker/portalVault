@@ -61,6 +61,8 @@
  * ===========================================================================
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+import { PINNED_REFS, pinnedEnvFile, productionConfirmation } from "./lib/staging-guard.mts";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -68,14 +70,15 @@ import { beurteileEtappeE, charakterIdentitaet, charakterMetadaten, feldAbweichu
          geregelteProjektion, GEREGELT, type Erwartung, type Messung, type Zeile as PZeile }
   from "../src/lib/catalog/publish-compare.ts";
 
-const STAGING_REF = "qqxcpesbwfxzgytkdsac";
-const PRODUCTION_REF = "zmiwxswrpkmizvqsgype";
+const STAGING_REF = PINNED_REFS.staging;
+const PRODUCTION_REF = PINNED_REFS.production;
 const PLAN = "resources/analysis/sync-dryrun.json";
 const BASELINE = "resources/sync/catalog-baseline.json";
 const BERICHT = "resources/analysis/CATALOG-FINISH.md";
 
 const APPLY = process.argv.includes("--apply");
-const BESTAETIGT = process.argv.includes("--confirm-production");
+// M-04: die Bestaetigung MIT Projekt-ID; ein blankes --confirm-production zaehlt nicht mehr.
+const BESTAETIGT = process.argv.includes(productionConfirmation());
 
 /*
  * RIEGEL 0 — Schreiben verlangt BEIDE Flaggen. `--apply` allein genuegt
@@ -84,29 +87,25 @@ const BESTAETIGT = process.argv.includes("--confirm-production");
  */
 if (APPLY && !BESTAETIGT) {
   console.error("\n  RIEGEL 0 — Abbruch. `--apply` verlangt zusaetzlich "
-    + "`--confirm-production`.\n\n  Etappe D schreibt auf Production.\n");
+    + `\`${productionConfirmation()}\`.\n\n  Etappe D schreibt auf Production.\n`);
   process.exit(1);
 }
 
 /* ------------------------------------------------------------- Verbindung */
 
-function envDatei(pfad: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const z of readFileSync(pfad, "utf8").split("\n")) {
-    const m = /^([A-Z0-9_]+)=(.*)$/.exec(z.trim());
-    if (m) out[m[1]] = m[2];
-  }
-  return out;
-}
 
+/*
+ * M-04 (2026-11-09): kein eigener Teilstring-Vergleich mehr. `pinnedEnvFile`
+ * (tools/lib/staging-guard.mts) verlangt die EXAKTE Projekt-ID und dass die
+ * beiden Env-Dateien weder dasselbe Projekt noch denselben Schluessel nennen.
+ */
 function verbinde(pfad: string, kennung: string, name: string): SupabaseClient {
-  const e = envDatei(pfad);
-  const url = e.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  if (!url.includes(kennung)) {
+  const z = pinnedEnvFile(pfad === ".env.local" ? "production" : "staging");
+  if (z.ref !== kennung) {
     console.error(`\n  RIEGEL 1 — Abbruch. ${pfad} nennt nicht ${kennung} (${name}).\n`);
     process.exit(1);
   }
-  return createClient(url, e.SUPABASE_SERVICE_ROLE_KEY, {
+  return createClient(z.url, z.key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -519,7 +518,8 @@ for (const ziel of ["staging", "production"] as const) {
   const offen = bildschritte(p0, ziel);
   if (offen > 0) {
     sage(`      ${ziel}: ${offen} offene(r) Bildtransfer(e) — Apply-Pfad`);
-    werkzeug("A", "tools/storage-transfer.mts", ["--ziel", ziel, "--apply"]);
+    werkzeug("A", "tools/storage-transfer.mts",
+      ["--ziel", ziel, "--apply", ...(ziel === "production" ? [productionConfirmation()] : [])]);
   } else {
     sage(`      ${ziel}: 0 offene Bildtransfers — nur verifizieren, nichts schreiben`);
     werkzeug("A", "tools/storage-transfer.mts", ["--ziel", ziel, "--pruefen"]);
@@ -554,7 +554,7 @@ sage(`      ${nach(p1, "production")} Schritte, darunter `
   + `${zaehle(p1, "figur-anlegen")} neue Figuren und `
   + `${zaehle(p1, "charakter-anlegen")} Charaktere`);
 werkzeug("D", "tools/catalog-sync-apply.mts",
-  ["--target=production", "--apply", "--confirm-production"]);
+  ["--target=production", "--apply", productionConfirmation()]);
 
 /* ------- E: der Vollvergleich ----------------------------------------- */
 sage("\n  [E] vollstaendiger Katalogvergleich");

@@ -24,7 +24,9 @@
 import { openAsBlob } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { chooseEnvironment, requireProduction, requireStaging } from "./lib/staging-guard.mts";
+import {
+  chooseEnvironment, confirmProductionWrite, PINNED_REFS, requireProduction, requireStaging,
+} from "./lib/staging-guard.mts";
 import { readWorkbookParts } from "../src/lib/import/xlsx-reader.ts";
 import { parseSharedStrings, parseSheet } from "../src/lib/import/sheet-rows.ts";
 import { STOCK_SHEETS, groupRows, indexCatalog, parseOrderSheet, type CatalogEntry } from "../src/lib/orderbook/order-2026.ts";
@@ -497,8 +499,9 @@ async function main(): Promise<void> {
    * previous one. Auf Production ist dieses Wort bereits gefallen —
    * `--confirm-production` wählt die Umgebung überhaupt erst aus.
    */
+  // M-04 (2026-11-09): on production the confirmation carries the project id.
   const confirmation = choice.environment === "production"
-    ? "confirm-production" : "confirm-staging";
+    ? `confirm-production=${PINNED_REFS.production}` : "confirm-staging";
   if (!flag(confirmation)) {
     console.error(`\n  Apply requires --${confirmation} as well as --apply.`);
     console.error(`  Target would be: ${new URL(url).hostname.split(".")[0]}`);
@@ -506,6 +509,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  if (choice.environment === "production") {
+    await confirmProductionWrite("orderbook:sales-import", `${plans.filter((p) => p.status === "eligible").length} sale groups to import.`);
+  }
   await apply(client, plans, factor);
   console.log("\nApply abgeschlossen.\n");
 }

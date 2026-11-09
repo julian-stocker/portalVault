@@ -29,6 +29,8 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { guardWriteTool } from "./lib/staging-guard.mts";
+
 type Result = { name: string; passed: boolean; detail: string };
 const results: Result[] = [];
 const check = (name: string, passed: boolean, detail = ""): void => {
@@ -48,6 +50,18 @@ function requireEnv(name: string): string {
 
 const URL_ = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
 const ANON = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+/*
+ * M-04B (2026-11-09): WHICH PROJECT, AND WHETHER IT MAY BE WRITTEN TO.
+ * `--env production` → production, READ-ONLY (pinned id and both env files).
+ * Otherwise the target must be the pinned staging project — a production pair
+ * on a staging path is refused before any client exists, by npm and by `node`.
+ * The anonymous WRITE probes (which must be refused, but would write if a
+ * grant or a policy were broken) run on staging only; on production they are
+ * reported as skipped, never sent.
+ */
+const TARGET = guardWriteTool("verify:commerce", process.argv.slice(2), { apply: false });
+const WRITE_PROBES = TARGET === "staging";
+const skipped = (name: string) => console.log(`  SKIP  ${name}  — write probe, staging only (M-04B)`);
 const anonClient = () => createClient(URL_, ANON, { auth: { persistSession: false } });
 const serviceClient = () =>
   createClient(URL_, requireEnv("SUPABASE_SERVICE_ROLE_KEY"), {
@@ -272,6 +286,7 @@ async function main(): Promise<void> {
   }
 
   for (const table of ["orders", "order_lines", "order_reservations"]) {
+    if (!WRITE_PROBES) { skipped(`anon cannot write ${table}`); continue; }
     const write = await anon.from(table).insert({});
     check(
       `anon cannot write ${table}`,
@@ -303,6 +318,7 @@ async function main(): Promise<void> {
     "next_order_number",
   ];
   for (const name of internals) {
+    if (!WRITE_PROBES) { skipped(`anon cannot call ${name}()`); continue; }
     const args = name.startsWith("reservation_ttl") || name.startsWith("next_order_number")
       ? {}
       : { p_order_id: 1 };
@@ -315,6 +331,7 @@ async function main(): Promise<void> {
   }
 
   for (const internal of ["enforce_checkout_limits", "request_client_hash"]) {
+    if (!WRITE_PROBES) { skipped(`anon cannot call ${internal}()`); continue; }
     const call = await anon.rpc(internal, {});
     check(
       `anon cannot call ${internal}()`,
@@ -330,12 +347,16 @@ async function main(): Promise<void> {
     salt.error ? `rejected: ${salt.error.code}` : "empty result",
   );
 
-  const sweep = await anon.rpc("release_expired_reservations", {});
-  check(
-    "anon cannot sweep reservations",
-    sweep.error !== null,
-    sweep.error ? `rejected: ${sweep.error.code}` : "RPC SUCCEEDED",
-  );
+  if (WRITE_PROBES) {
+    const sweep = await anon.rpc("release_expired_reservations", {});
+    check(
+      "anon cannot sweep reservations",
+      sweep.error !== null,
+      sweep.error ? `rejected: ${sweep.error.code}` : "RPC SUCCEEDED",
+    );
+  } else {
+    skipped("anon cannot sweep reservations");
+  }
 
   const rawIp = await admin.from("orders").select("client_hash").not("client_hash", "is", null).limit(50);
   const looksLikeAddress = (rawIp.data ?? []).filter(

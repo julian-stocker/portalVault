@@ -1490,7 +1490,7 @@ describe("the historical apply gate", () => {
      * the end of the previous command — and it is the flag of the environment
      * actually chosen, so a staging confirmation never authorises production.
      */
-    expect(TOOL).toContain('? "confirm-production" : "confirm-staging"');
+    expect(TOOL).toContain('? `confirm-production=${PINNED_REFS.production}` : "confirm-staging"');
     expect(TOOL).toMatch(/if \(!flag\(confirmation\)\) \{/);
     expect(TOOL).toContain("Apply requires --${confirmation} as well as --apply");
     // And the refusal exits non-zero rather than falling through to a write.

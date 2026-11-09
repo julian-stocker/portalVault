@@ -24,20 +24,20 @@ describe("die drei vorgesehenen Befehle", () => {
       .toBe("node tools/catalog-sync.mts --modus=publish");
   });
 
-  it("catalog:publish ruft den Sequenzer mit ausdrücklicher Freigabe", () => {
-    expect(PKG.scripts["catalog:publish"])
-      .toBe("node tools/catalog-publish.mts --apply --confirm-production");
+  it("catalog:publish ruft den Sequenzer — die Freigabe tippt der Betreiber (M-04)", () => {
+    // Eine Bestaetigung im Skript waere keine: `-- --confirm-production=<id>` gibt man selbst an.
+    expect(PKG.scripts["catalog:publish"]).toBe("node tools/catalog-publish.mts --apply");
+    expect(PKG.scripts["catalog:publish"]).not.toContain("confirm-production");
   });
 
   it("der Bootstrap behält seinen eigenen Befehl, mit eigenem Modus", () => {
     expect(PKG.scripts["catalog:sync:plan"])
       .toBe("node tools/catalog-sync.mts --modus=bootstrap");
-    expect(PKG.scripts["catalog:finish:apply"])
-      .toBe("node tools/catalog-finish.mts --apply --confirm-production");
+    expect(PKG.scripts["catalog:finish:apply"]).toBe("node tools/catalog-finish.mts --apply");
   });
 
   it("es gibt keinen Publish ohne Freigabe", () => {
-    expect(C).toContain('APPLY && !process.argv.includes("--confirm-production")');
+    expect(C).toContain("APPLY && !process.argv.includes(productionConfirmation())");
     expect(C).toContain("RIEGEL 0");
     const ab = C.indexOf("RIEGEL 0");
     expect(C.slice(ab, ab + 400)).toContain("process.exit(1)");
@@ -58,7 +58,7 @@ describe("die sechs Stufen, in genau dieser Folge", () => {
   it("Plan vor Bildobjekten vor Katalogänderungen", () => {
     const plan = pos('["--modus=publish"]');
     const bild = pos('["--ziel", "production", "--pruefen"]');
-    const kat = pos('["--target=production", "--apply", "--confirm-production"]');
+    const kat = pos('["--target=production", "--apply", productionConfirmation()]');
     expect(plan).toBeLessThan(bild);
     expect(bild).toBeLessThan(kat);
   });
@@ -66,7 +66,7 @@ describe("die sechs Stufen, in genau dieser Folge", () => {
   it("fehlende Objekte werden übertragen und DANACH erneut geprüft", () => {
     const ab = pos("if (bilder === 0) {");
     const block = C.slice(ab, pos("[6] Katalogaenderungen"));
-    const uebertragen = block.indexOf('["--ziel", "production", "--apply"]');
+    const uebertragen = block.indexOf('["--ziel", "production", "--apply", productionConfirmation()]');
     const nachpruefen = block.indexOf('["--ziel", "production", "--pruefen"]', uebertragen);
     expect(uebertragen).toBeGreaterThan(-1);
     expect(nachpruefen).toBeGreaterThan(uebertragen);

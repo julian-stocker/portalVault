@@ -694,7 +694,8 @@ describe("the interaction section of the report", () => {
     const verbs = tool.match(/\.(select|insert|update|delete|upsert|rpc)\(/g) ?? [];
     expect(new Set(verbs)).toEqual(new Set([".select("]));
     expect(tool).toContain('.from("perf_interactions")');
-    expect(tool).toContain('requireStagingIfRequested("perf:report")');
+    // M-04B: the shared read guard, independent of any flag.
+    expect(tool).toContain('guardWriteTool("perf:report", args, { apply: false })');
   });
 
   it("survives a database where 0038 has not been applied", () => {

@@ -27,7 +27,7 @@
 import { openAsBlob } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { confirmProductionWrite, guardWriteTool } from "./lib/staging-guard.mts";
 import { readWorkbookParts } from "../src/lib/import/xlsx-reader.ts";
 import { parseSharedStrings } from "../src/lib/import/sheet-rows.ts";
 import { readCellGrid } from "../src/lib/import/cell-grid.ts";
@@ -40,7 +40,9 @@ const WORKBOOK = process.env.SKYISLES_WORKBOOK
   ?? `${process.env.HOME}/Documents/eCommerce/skylanders.xlsx`;
 const APPLY = process.argv.includes("--apply");
 
-requireStagingIfRequested("reconcile-inventory");
+// M-04 (2026-11-09): always guarded; production only with --env production,
+// --apply, --confirm-production=<id>, the pinned id and a typed confirmation.
+const TARGET = guardWriteTool("reconcile-inventory", process.argv.slice(2), { apply: APPLY });
 
 const need = (name: string): string => {
   const value = process.env[name];
@@ -209,6 +211,9 @@ if (!APPLY) {
 
 /* ------------------------------------------------------------------- the apply */
 
+if (TARGET === "production") {
+  await confirmProductionWrite("reconcile-inventory", `${steps.length} correction movements to write.`);
+}
 let written = 0;
 for (const step of steps) {
   const { error } = await db.rpc("system_record_inventory_movement", {

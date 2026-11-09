@@ -73,7 +73,7 @@ import { resolve } from "node:path";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { confirmProductionWrite, guardWriteTool } from "./lib/staging-guard.mts";
 
 import { readWorkbook, type Workbook } from "./lib/xlsx.mts";
 import {
@@ -130,6 +130,9 @@ function parseArgs(argv: readonly string[]): Options {
     const arg = argv[i];
     if (arg === "--apply") options.apply = true;
     else if (arg === "--file") options.file = argv[++i] ?? options.file;
+    // Read by the guard from argv; accepted here so they are not "unknown" (M-04).
+    else if (arg === "--env") i += 1;
+    else if (arg.startsWith("--env=") || arg.startsWith("--confirm-production")) continue;
     else if (arg.startsWith("--file=")) options.file = arg.slice("--file=".length);
     else {
       console.error(`Unknown argument: ${arg}`);
@@ -394,9 +397,9 @@ async function main(): Promise<void> {
    * `.env.local`, i.e. Production, with nothing to stop it. `:staging` sets
    * the flag, `:prod` does not: the same bargain every verifier strikes.
    */
-  requireStagingIfRequested("inventory:import-legacy");
-
+  // M-04 (2026-11-09): always guarded, no longer only with the staging flag.
   const options = parseArgs(process.argv.slice(2));
+  const target = guardWriteTool("inventory:import-legacy", process.argv.slice(2), { apply: options.apply });
   const path = resolve(process.cwd(), options.file);
 
   console.log("Legacy inventory import");
@@ -509,6 +512,9 @@ async function main(): Promise<void> {
     process.exit(plan.conflicts.length > 0 ? 1 : 0);
   }
 
+  if (target === "production") {
+    await confirmProductionWrite("inventory:import-legacy", `${plan.movements.length} inventory movements (${planned} pieces) to book.`);
+  }
   heading("Applying");
   let booked = 0;
   let bookedPieces = 0;
