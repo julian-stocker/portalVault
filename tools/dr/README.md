@@ -1,8 +1,13 @@
 # `tools/dr` — Sicherung und Restore-Test
 
 Die Skripte zum Plan in `supabase/checks/disaster_recovery_pg_dump.md`.
-**Keines davon ist ausgeführt.** Jedes verbindet erst, wenn alle Wächter
-halten, und keines schreibt nach Production oder Staging.
+**Gegen Production ist keines ausgeführt.** Lokal (M-03C/M-03D, 2026-11-09)
+liefen `30`, `40`, `50` und `60` unverändert gegen Wegwerf-Cluster mit dem
+Staging-Schema und synthetischen Daten; `10`, `20` und `35` verlangen
+Production als Quelle und liefen nur nachgestellt. Ergebnis und Grenzen:
+`docs/stability/2026-11-09-stability-baseline-1-bestandsaufnahme.md`, 3.5a.
+Jedes Skript verbindet erst, wenn alle Wächter halten, und keines schreibt
+nach Production oder Staging.
 
 | Datei | tut |
 |---|---|
@@ -12,9 +17,9 @@ halten, und keines schreibt nach Production oder Staging.
 | `20-dump.sh` | die drei Dumps, das Inhaltsverzeichnis, Mindestprüfungen auf die Datei, `MANIFEST.txt` |
 | `30-filter-toc.mts` | entscheidet Eintrag für Eintrag, was in ein **initialisiertes** Projekt darf → `toc.keep` + Bericht |
 | `35-shape-check.sh` | vergleicht die Spaltenform von `auth`/`storage` zwischen Quelle und Ziel **vor** dem Restore |
-| `40-restore.sh` | `pg_restore --use-list --single-transaction --exit-on-error` |
+| `40-restore.sh` | prüft vorher, dass jede Rolle aus den Rechten im Ziel besteht; dann `pg_restore --use-list --single-transaction --exit-on-error` |
 | `50-verify.sh` | Messung **(b)** im Ziel plus die Zielprüfungen |
-| `60-compare.sh` | (a) gegen (b). **Hier** wird bestanden oder nicht |
+| `60-compare.sh` | (a) gegen (b), dazu das Urteil jeder Zielprüfung (`ok`) und der Rechteproben. **Hier** wird bestanden oder nicht |
 | `../../supabase/checks/dr/` | die sechs Abfragen, die auf beiden Seiten gleich laufen |
 
 ## Die drei Regeln, die in den Skripten stehen und nicht nur im Plan

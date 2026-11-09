@@ -4,8 +4,14 @@
 -- heissen, dass einer fehlt und ein anderer doppelt da ist. Diese Abfrage
 -- bildet je Objekt einen Abdruck der DEFINITION. Verglichen wird Zeile fuer
 -- Zeile zwischen Quelle und Ziel.
+--
+-- `objekt` IST `text`, NICHT `name` (M-03D). `c.table_name` ist ein
+-- `sql_identifier` und gibt der ganzen Union den Typ `name` — abgeschnitten
+-- nach 63 Zeichen. Zwei Ueberladungen einer Funktion mit langer Signatur
+-- bekamen so denselben Schluessel, sortierten zufaellig, und der Vergleich
+-- meldete eine Abweichung, wo keine war.
 select 'spalten' as art,
-       c.table_name as objekt,
+       c.table_name::text as objekt,
        md5(string_agg(c.column_name || ':' || c.data_type || ':'
                       || c.is_nullable || ':' || coalesce(c.column_default, '-'),
                       ',' order by c.ordinal_position)) as abdruck

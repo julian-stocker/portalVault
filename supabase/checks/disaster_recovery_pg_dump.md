@@ -420,8 +420,14 @@ die die Plattformdienste selbst lesen**:
 Würde man den Dump als Ganzes einspielen, ersetzten die Register der Quelle
 die des Ziels. **Das wirft keinen Fehler.** Es bricht den Dienst später und
 still, wenn er auf eine Migration trifft, die er für erledigt hält oder für
-offen. Dasselbe gilt für Supabase-eigene Trigger (`on_auth_user_created`),
+offen. Dasselbe gilt für Supabase-eigene Trigger,
 interne Storage-Policies und Funktionen wie `storage.extension()`.
+
+**Ausnahme, korrigiert am 2026-11-09 (M-03D):** `on_auth_user_created` auf `auth.users` ist
+**nicht** Supabase-eigen, sondern unser Trigger aus Migration 0001 (er ruft
+`public.handle_new_user()` und legt jedem neuen Konto sein Profil an). `30-filter-toc.mts`
+behält genau diesen einen Trigger, dazu die Rechte auf das Schema `public`, und ordnet
+die Fracht Elternteil vor Kind (`users` vor `identities`, `buckets` vor `objects`).
 
 Deshalb wird **nicht der Dump restauriert, sondern eine geprüfte Auswahl
 daraus:**
@@ -728,7 +734,7 @@ Mit ⚠ markierte Schritte brauchen vorher deine ausdrückliche Entscheidung.
 | 16 | ⚠ Restore in das Testprojekt, eine Transaktion | `bash tools/dr/40-restore.sh` |
 | 17 | **Messung (b)** im Ziel, plus RLS- und Unveränderlichkeitsprobe | `bash tools/dr/50-verify.sh` |
 | 18 | **Der Vergleich.** Hier wird bestanden oder nicht | `bash tools/dr/60-compare.sh` |
-| 19 | `verify-target.csv` von Hand lesen — `cron.job = 0`, vier Policies, Bucket, `auth.users` | — |
+| 19 | `verify-target.csv` lesen — jede Zeile trägt `ok`, `60-compare.sh` wertet sie seit M-03D selbst aus; hier nur erklären | — |
 | 20 | Testprojekt **löschen**, Volume abmelden, Protokoll ablegen, mir die Zahlen geben | — |
 
 Keinen dieser Schritte kann ich übernehmen: ich darf Production nicht

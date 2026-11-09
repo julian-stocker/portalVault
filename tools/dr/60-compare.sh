@@ -68,18 +68,54 @@ mindestens baseline-grants.csv '^tabelle,' 40 "Tabellen mit ACL-Zeile"
 mindestens baseline-business.csv '^[0-9]+,' 20 "Geschaeftsinvarianten"
 
 note "--- die Zielpruefungen aus verify-target.csv"
+# Bis M-03C wurde die Datei nur ausgegeben: eine verfehlte Zielpruefung liess
+# den Vergleich trotzdem bestehen. Jetzt traegt jede Zeile ihr Urteil (`ok`,
+# letzte Spalte), und jedes `f` ist ein Befund (M-03D).
 if [ -f "$B/verify-target.csv" ]; then
   cat "$B/verify-target.csv"
+  head -1 "$B/verify-target.csv" | grep -qE ',ok$' \
+    || { printf '  FEHLT    Spalte ok in verify-target.csv\n'; befunde=$((befunde + 1)); }
+  n_ziel="$(awk -F, 'NR > 1' "$B/verify-target.csv" | grep -c . || true)"
+  [ "${n_ziel:-0}" -ge 9 ] \
+    || { printf '  ZU WENIG Zielpruefungen: %s, erwartet 9\n' "${n_ziel:-0}"; befunde=$((befunde + 1)); }
+  n_rot="$(awk -F, 'NR > 1 && $NF != "t"' "$B/verify-target.csv" | grep -c . || true)"
+  if [ "${n_rot:-0}" -gt 0 ]; then
+    printf '  NICHT OK %s Zielpruefung(en)\n' "$n_rot"; befunde=$((befunde + n_rot))
+  else
+    printf '  ok       alle Zielpruefungen\n'
+  fi
 else
   printf '  FEHLT    verify-target.csv\n'; befunde=$((befunde + 1))
 fi
 
+note "--- die Rechteproben aus 50-verify.sh"
+# Auch sie wurden bisher nur ausgegeben. anon darf `purchases` nicht lesen:
+# erwartet ist ein Rechtefehler oder 0 Zeilen, alles andere ist ein Befund.
+if [ -f "$B/rls-anon-purchases.txt" ] \
+   && grep -qiE '^0$|permission denied|keine Berechtigung' "$B/rls-anon-purchases.txt"; then
+  printf '  ok       anon liest public.purchases nicht\n'
+else
+  printf '  NICHT OK anon und public.purchases: %s\n' \
+    "$(tr -d '\n' < "$B/rls-anon-purchases.txt" 2>/dev/null | head -c 120)"
+  befunde=$((befunde + 1))
+fi
+# Die Belegsperre: Gibt es Belege, MUSS das update abbrechen. Ohne Belege
+# trifft es nichts — dann bleibt nur die Triggerzeile 4 in verify-target.csv.
+belege="$(grep -E '^public,purchase_receipts,' "$B/baseline-rows.csv" | cut -d, -f3 || true)"
+if grep -qiE "unveraender|immutable|cannot be changed|P0001" "$B/immutability.txt" 2>/dev/null; then
+  printf '  ok       Belegsperre hat gegriffen\n'
+elif [ "${belege:-0}" = "0" ]; then
+  printf '  hinweis  keine Belege im Ziel — die Sperre ist nur ueber Zielpruefung 4 belegt\n'
+else
+  printf '  NICHT OK Belegsperre griff nicht, obwohl %s Belege im Ziel stehen\n' "$belege"
+  befunde=$((befunde + 1))
+fi
+
 printf '\n'
 if [ "$befunde" -eq 0 ]; then
-  note "KEIN BEFUND. Damit ist der Restore in allen gemessenen Punkten gleich."
-  note "Das Urteil 'bestanden' setzt zusaetzlich voraus, dass die Zeilen aus"
-  note "verify-target.csv von Hand gelesen und erklaert wurden — insbesondere"
-  note "cron.job = 0, die vier Policies, der Bucket und auth.users."
+  note "KEIN BEFUND. Damit ist der Restore in allen gemessenen Punkten gleich,"
+  note "und jede Zielpruefung und Rechteprobe hat bestanden. Die Ausgabe oben"
+  note "gehoert trotzdem ins Protokoll — gelesen, nicht nur gezaehlt."
   exit 0
 fi
 fail "$befunde Befund(e). Der Restore ist NICHT bestanden. Teilweise gelungen zaehlt nicht."

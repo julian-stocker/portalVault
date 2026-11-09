@@ -37,7 +37,8 @@ note "--- 3/3 nur Daten (fuer ein Ziel, das auth und storage schon mitbringt)"
 
 note "--- Inhaltsverzeichnis, ohne Datenbank gelesen"
 "$PGBIN/pg_restore" --list "$OUT/full.dump" > "$OUT/full.toc"
-grep -c ';' "$OUT/full.toc" | xargs -I{} note "{} Zeilen im Inhaltsverzeichnis"
+# `note` ist eine Shell-Funktion; `xargs` kann sie nicht aufrufen (M-03C).
+note "$(grep -c ';' "$OUT/full.toc") Zeilen im Inhaltsverzeichnis"
 
 note "--- Mindestpruefungen auf die Datei selbst"
 for s in public storage auth; do

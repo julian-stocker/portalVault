@@ -32,6 +32,7 @@ const TOC = [
   "212; 1259 16434 SEQUENCE public order_number_seq postgres",
   "300; 1255 16500 FUNCTION public seller_business_backup() postgres",
   "301; 1255 16501 FUNCTION public seller_save_purchase_edit(bigint, jsonb, jsonb, bigint[], timestamptz) postgres",
+  "302; 1255 16502 FUNCTION public handle_new_user() postgres",
   "400; 0 0 TABLE DATA public purchases postgres",
   "401; 0 0 TABLE DATA public purchase_receipts postgres",
   "402; 0 0 SEQUENCE SET public order_number_seq postgres",
@@ -43,6 +44,8 @@ const TOC = [
   "505; 0 0 ROW SECURITY public skylanders postgres",
   "506; 0 0 ACL public TABLE skylanders postgres",
   "507; 0 0 COMMENT public FUNCTION seller_business_backup() postgres",
+  "508; 0 0 COMMENT - SCHEMA public postgres",
+  "509; 0 0 ACL - SCHEMA public postgres",
   "600; 1259 16600 TABLE auth users supabase_auth_admin",
   "601; 1259 16601 TABLE auth schema_migrations supabase_auth_admin",
   "602; 0 0 TABLE DATA auth users supabase_auth_admin",
@@ -163,7 +166,11 @@ describe("der ganze Durchlauf", () => {
     expect(namen).toContain("storage/POLICY/objects catalog_images_read");
     expect(namen).not.toContain("auth/TABLE DATA/schema_migrations");
     expect(namen).not.toContain("storage/TABLE DATA/migrations");
-    expect(r.behalten.filter((e) => e.schema === "auth")).toHaveLength(2);
+    // Konten, Identitäten und unser eigener Registrierungstrigger (M-03D).
+    expect(r.behalten.filter((e) => e.schema === "auth")).toHaveLength(3);
+    expect(namen).toContain("auth/TRIGGER/users on_auth_user_created");
+    expect(namen).toContain("-/ACL/SCHEMA public");
+    expect(namen).not.toContain("-/COMMENT/SCHEMA public");
     expect(r.behalten.filter((e) => e.schema === "storage")).toHaveLength(6);
     expect(r.behalten.filter((e) => e.schema === "public").length)
       .toBeGreaterThanOrEqual(13);
@@ -224,7 +231,9 @@ describe("POSITIVKONTROLLEN: der Filter schlägt an, wenn er zu viel durchlässt
     const uebrig = filterToc(TOC).behalten
       .filter((e) => e.schema === "auth" || e.schema === "storage")
       .filter((e) => struktur.has(e.desc));
-    expect(uebrig).toEqual([]);
+    // Die eine, benannte Ausnahme: unser Trigger aus 0001 (M-03D).
+    expect(uebrig.map((e) => `${e.schema} ${e.desc} ${e.name}`))
+      .toEqual(["auth TRIGGER users on_auth_user_created"]);
   });
 
   it("ohne Sequenzstände ist der Plan unzulässig", () => {
@@ -252,8 +261,93 @@ describe("POSITIVKONTROLLEN: der Filter schlägt an, wenn er zu viel durchlässt
      * Netz, falls jemand die Regel einmal lockert.
      */
     const r3 = filterToc(TOC);
-    expect(r3.behalten.every((e) => ["public", "auth", "storage"].includes(e.schema)))
-      .toBe(true);
+    // Einzige Ausnahme: die Rechte auf `public`, die pg_restore ohne Schema führt (M-03D).
+    expect(r3.behalten.filter((e) => !["public", "auth", "storage"].includes(e.schema))
+      .map((e) => `${e.schema} ${e.desc} ${e.name}`)).toEqual(["- ACL SCHEMA public"]);
     expect(r3.verstoesse.join(" ")).not.toContain("fremden Schemata");
+  });
+});
+
+/*
+ * M-03D (2026-11-09) — die drei Korrekturen am Filter, die der lokale
+ * Restore-Test M-03C verlangt hat.
+ */
+describe("M-03D: Reihenfolge der Fracht", () => {
+  const umgedreht = TOC.split("\n").map((z) =>
+    z.startsWith("602;") ? "603; 0 0 TABLE DATA auth identities supabase_auth_admin"
+    : z.startsWith("603;") ? "602; 0 0 TABLE DATA auth users supabase_auth_admin"
+    : z.startsWith("701;") ? "702; 0 0 TABLE DATA storage objects supabase_storage_admin"
+    : z.startsWith("702;") ? "701; 0 0 TABLE DATA storage buckets supabase_storage_admin" : z).join("\n");
+  const pos = (zeilen: string[], s: string) => zeilen.findIndex((z) => z.includes(s));
+
+  it("wie pg_restore --list es liefert (alphabetisch): identities vor users — der Plan dreht es um", () => {
+    const r = filterToc(umgedreht);
+    expect(pos(r.zeilen, "TABLE DATA auth users")).toBeLessThan(pos(r.zeilen, "TABLE DATA auth identities"));
+    expect(pos(r.zeilen, "TABLE DATA storage buckets")).toBeLessThan(pos(r.zeilen, "TABLE DATA storage objects"));
+    expect(r.verstoesse).toEqual([]);
+  });
+
+  it("nichts geht verloren, nichts kommt dazu — nur zwei Zeilen tauschen den Platz", () => {
+    const r = filterToc(umgedreht);
+    expect([...r.zeilen].sort()).toEqual([...filterToc(umgedreht).zeilen].sort());
+    expect(r.zeilen).toHaveLength(umgedreht.split("\n").length);
+    expect(new Set(r.zeilen)).toEqual(new Set(filterToc(TOC).zeilen));
+  });
+
+  it("schon richtig geordnet bleibt alles, wie es ist", () => {
+    const r = filterToc(TOC);
+    const ohneKommentar = (z: string[]) => z.filter((x) => !x.startsWith(";"));
+    expect(ohneKommentar(r.zeilen)).toEqual(ohneKommentar(TOC.split("\n")).filter((x) =>
+      r.behalten.some((e) => x.startsWith(`${e.id};`)) || x.trim() === ""));
+  });
+});
+
+describe("M-03D: unser Registrierungstrigger in auth", () => {
+  const u = (line: string) => decide(parseLine(line)!);
+
+  it("genau on_auth_user_created auf users wird behalten", () => {
+    const urteil = u("608; 2620 16610 TRIGGER auth users on_auth_user_created supabase_auth_admin");
+    expect(urteil.keep).toBe(true);
+    expect(urteil.grund).toContain("0001");
+  });
+
+  it("jeder andere Trigger in auth bleibt Systemobjekt — auch ein ähnlicher Name oder eine andere Tabelle", () => {
+    for (const l of ["608; 2620 16610 TRIGGER auth users t supabase_auth_admin",
+                     "608; 2620 16610 TRIGGER auth users on_auth_user_created_v2 supabase_auth_admin",
+                     "608; 2620 16610 TRIGGER auth identities on_auth_user_created supabase_auth_admin",
+                     "608; 2620 16610 FUNCTION auth on_auth_user_created() supabase_auth_admin"]) {
+      expect(u(l).keep, l).toBe(false);
+    }
+  });
+
+  it("zweimal im Plan ist ein Verstoß", () => {
+    const r = filterToc(TOC + "\n610; 2620 16611 TRIGGER auth users on_auth_user_created x");
+    expect(r.verstoesse.join(" ")).toContain("mehrfach");
+  });
+
+  it("ohne public.handle_new_user() ist der Trigger ein Verstoß", () => {
+    const r = filterToc(TOC.split("\n").filter((z) => !z.includes("handle_new_user")).join("\n"));
+    expect(r.verstoesse.join(" ")).toContain("handle_new_user");
+  });
+});
+
+describe("M-03D: Rechte auf das Schema public", () => {
+  const u = (line: string) => decide(parseLine(line)!);
+
+  it("die ACL von public wird behalten, Kommentar und CREATE SCHEMA nicht", () => {
+    expect(u("509; 0 0 ACL - SCHEMA public postgres").keep).toBe(true);
+    expect(u("508; 0 0 COMMENT - SCHEMA public postgres").keep).toBe(false);
+    expect(u("5; 2615 16388 SCHEMA - public postgres").keep).toBe(false);
+  });
+
+  it("die ACL eines anderen Schemas bleibt draußen", () => {
+    for (const l of ["509; 0 0 ACL - SCHEMA auth postgres", "509; 0 0 ACL - SCHEMA storage postgres",
+                     "509; 0 0 ACL - SCHEMA cron postgres", "509; 0 0 ACL - SCHEMA extensions postgres"]) {
+      expect(u(l).keep, l).toBe(false);
+    }
+  });
+
+  it("und sie löst die Fremd-Schema-Zusicherung nicht aus", () => {
+    expect(filterToc(TOC).verstoesse.join(" ")).not.toContain("fremden Schemata");
   });
 });

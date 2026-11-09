@@ -27,8 +27,29 @@ LEER="$("$PGBIN/psql" "$DR_TARGET_URI" --no-psqlrc --set=ON_ERROR_STOP=1 -tA \
   --command="select count(*) from pg_class where relnamespace = 'public'::regnamespace and relkind = 'r'")"
 [ "$LEER" = "0" ] || fail "im Ziel stehen schon $LEER Tabellen in public — dieses Skript schreibt nur in ein leeres Projekt"
 
+note "--- Jede Rolle, der der Plan Rechte gibt, muss im Ziel schon bestehen"
+# Die Rechte werden so wiederhergestellt, wie die Quelle sie hatte — nicht
+# mehr. Fehlt eine Rolle im Ziel, scheiterte der Restore erst mitten in der
+# Transaktion; hier faellt es vorher auf, und angelegt wird nichts (M-03D).
+ROLLEN="$("$PGBIN/pg_restore" --use-list="$DR_DUMP_DIR/toc.keep" --file=- "$DR_DUMP_DIR/full.dump" \
+  | grep -E '^(GRANT|REVOKE|ALTER DEFAULT PRIVILEGES) ' \
+  | sed -nE 's/^ALTER DEFAULT PRIVILEGES FOR ROLE ([a-z_][a-z0-9_]*) .*/\1/p; s/.* (TO|FROM) ([^;]*)( WITH GRANT OPTION)?;$/\2/p' \
+  | tr ',' '\n' | sed -E 's/^ +//; s/ +$//; s/ WITH GRANT OPTION$//; s/"//g' | awk 'NF && $0 != "PUBLIC"' | sort -u)" \
+  || fail "der Restore-Plan laesst sich nicht lesen — full.dump ist unvollstaendig oder beschaedigt; das Ziel ist unveraendert"
+FEHLT=""
+for r in $ROLLEN; do
+  case "$r" in *[!a-z0-9_]*) fail "unerwarteter Rollenname im Plan: '$r'";; esac
+  DA="$("$PGBIN/psql" "$DR_TARGET_URI" --no-psqlrc --set=ON_ERROR_STOP=1 -tA \
+    --command="select count(*) from pg_roles where rolname = '$r'")"
+  [ "$DA" = "1" ] || FEHLT="$FEHLT $r"
+done
+[ -z "$FEHLT" ] || fail "im Ziel fehlen Rollen, denen der Plan Rechte gibt:$FEHLT"
+note "$(printf '%s\n' $ROLLEN | grep -c .) Rollen aus den Rechten, alle im Ziel vorhanden"
+
 note "--- Was der gefilterte Plan anwenden wird"
-grep -cE '^[0-9]+;' "$DR_DUMP_DIR/toc.keep" | xargs -I{} note "{} aktive Eintraege"
+# `note` ist eine Shell-Funktion; `xargs` kann sie nicht aufrufen (Exit 127,
+# unter `set -e` brach das Skript hier immer ab — M-03C).
+note "$(grep -cE '^[0-9]+;' "$DR_DUMP_DIR/toc.keep") aktive Eintraege"
 note "davon aus auth/storage:"
 grep -E '^[0-9]+;' "$DR_DUMP_DIR/toc.keep" | grep -E ' (auth|storage) ' || note "  (keine)"
 

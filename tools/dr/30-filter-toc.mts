@@ -19,9 +19,15 @@
  *
  * WHAT IT KEEPS
  *   * everything in `public` — that is our own schema
- *   * `auth`: ONLY the rows of `users` and `identities`
+ *   * `auth`: ONLY the rows of `users` and `identities`, plus our own
+ *     trigger `on_auth_user_created` from migration 0001 (M-03D)
  *   * `storage`: ONLY the rows of `buckets` and `objects`, plus our four
  *     `catalog_images_*` policies from migration 0007
+ *   * the ACL of the schema `public` (M-03D) — the source's USAGE grants
+ *
+ * AND IT ORDERS the rows parent before child (`users` before `identities`,
+ * `buckets` before `objects`): the target already enforces those foreign
+ * keys, and `pg_restore --use-list` follows the order of the list.
  *
  * WHAT IT DROPS, ALWAYS
  *   * every `CREATE SCHEMA` (all three exist in the target)
@@ -67,6 +73,42 @@ export function parseLine(line: string): Entry | null {
 const AUTH_DATEN = new Set(["users", "identities"]);
 const STORAGE_DATEN = new Set(["buckets", "objects"]);
 
+/*
+ * UNSER EINZIGES OBJEKT IN `auth` (M-03D, 2026-11-09). Der Trigger
+ * `on_auth_user_created` auf `auth.users` stammt aus Migration 0001 und ruft
+ * `public.handle_new_user()` — er legt jedem neuen Konto sein Profil an. Er
+ * ist NICHT Supabase-eigen (das stand bis M-03C falsch im DR-Plan), und ein
+ * frisches Projekt hat ihn nicht. Ohne ihn bekaeme nach einem Restore jede
+ * Neuregistrierung kein Profil; im lokalen Restore-Test nachgewiesen.
+ * Behalten wird genau dieser eine Name auf genau dieser Tabelle — jeder
+ * andere Trigger in `auth` bleibt Systemobjekt und wird verworfen.
+ */
+const EIGENER_AUTH_TRIGGER = "users on_auth_user_created";
+const EIGENE_TRIGGERFUNKTION = "handle_new_user()";
+
+/*
+ * Die Rechte auf das Schema `public` (M-03D). `pg_restore --list` fuehrt sie
+ * ohne Schema (`ACL - SCHEMA public`), deshalb fielen sie bis M-03C unter
+ * "fremdes Schema" weg — und mit ihnen die USAGE-Freigaben, die die Quelle
+ * hatte. Behalten wird genau dieser eine Eintrag: er stellt den Stand der
+ * Quelle her, nicht mehr. Kommentar und CREATE SCHEMA bleiben draussen.
+ */
+const PUBLIC_SCHEMA_ACL = "SCHEMA public";
+
+/*
+ * DIE REIHENFOLGE DER FRACHT (M-03D). Im Ziel bestehen die Fremdschluessel
+ * `auth.identities → auth.users` und `storage.objects → storage.buckets`
+ * schon (sie gehoeren der Plattform). `pg_restore --list` ordnet die Daten
+ * aber alphabetisch — `identities` vor `users` —, und der Restore brach am
+ * Fremdschluessel ab. `pg_restore --use-list` haelt sich an die Reihenfolge
+ * der Liste; also ordnet der Filter jedes Paar: erst der Elternteil, dann das
+ * Kind. Zwischen den beiden Zeilen aendert sich nichts sonst.
+ */
+const FRACHT_REIHENFOLGE: readonly (readonly [string, string, string])[] = [
+  ["auth", "users", "identities"],
+  ["storage", "buckets", "objects"],
+];
+
 export type Urteil = { keep: boolean; grund: string };
 
 export function decide(e: Entry): Urteil {
@@ -94,9 +136,31 @@ export function decide(e: Entry): Urteil {
     if (e.desc === "TABLE DATA" && AUTH_DATEN.has(e.name)) {
       return { keep: true, grund: "Konten und Identitaeten" };
     }
+    if (e.desc === "TRIGGER" && e.name === EIGENER_AUTH_TRIGGER) {
+      return { keep: true, grund: "eigener Registrierungstrigger aus 0001" };
+    }
     return { keep: false, grund: "Supabase-Systemobjekt in auth" };
   }
+  if (e.schema === "-" && e.desc === "ACL" && e.name === PUBLIC_SCHEMA_ACL) {
+    return { keep: true, grund: "Rechte auf das Schema public" };
+  }
   return { keep: false, grund: `fremdes Schema ${e.schema}` };
+}
+
+/** Elternteil vor Kind, je Paar aus FRACHT_REIHENFOLGE — siehe dort. */
+function ordneFracht(zeilen: string[]): string[] {
+  const out = [...zeilen];
+  for (const [schema, eltern, kind] of FRACHT_REIHENFOLGE) {
+    const ist = (z: string, tabelle: string) =>
+      new RegExp(`^[0-9]+; .* TABLE DATA ${schema} ${tabelle} `).test(z);
+    const e = out.findIndex((z) => ist(z, eltern));
+    const k = out.findIndex((z) => ist(z, kind));
+    if (e >= 0 && k >= 0 && k < e) {
+      const [zeile] = out.splice(k, 1);
+      out.splice(out.findIndex((z) => ist(z, eltern)) + 1, 0, zeile);
+    }
+  }
+  return out;
 }
 
 export type Ergebnis = {
@@ -159,13 +223,28 @@ export function filterToc(toc: string): Ergebnis {
   const systemArten = new Set(["TABLE", "FUNCTION", "TRIGGER", "CONSTRAINT",
                                "FK CONSTRAINT", "INDEX", "ACL", "DEFAULT ACL",
                                "SEQUENCE", "VIEW", "TYPE"]);
+  const eigenerTrigger = (e: Entry) =>
+    e.schema === "auth" && e.desc === "TRIGGER" && e.name === EIGENER_AUTH_TRIGGER;
   if (zahl((e) => (e.schema === "auth" || e.schema === "storage")
-                  && systemArten.has(e.desc)) > 0) {
+                  && systemArten.has(e.desc) && !eigenerTrigger(e)) > 0) {
     verstoesse.push("ein Strukturobjekt aus auth oder storage wuerde angelegt oder geaendert");
   }
+  /* Der eigene Trigger hoechstens einmal, und nie ohne seine Funktion — ein
+     Trigger, der eine fehlende Funktion ruft, liesse den Restore scheitern
+     oder jede Registrierung. */
+  if (zahl(eigenerTrigger) > 1) {
+    verstoesse.push("der Trigger on_auth_user_created stuende mehrfach im Plan");
+  }
+  if (zahl(eigenerTrigger) === 1
+      && zahl((e) => e.schema === "public" && e.desc === "FUNCTION"
+                     && e.name === EIGENE_TRIGGERFUNKTION) !== 1) {
+    verstoesse.push("on_auth_user_created ohne public.handle_new_user() im Plan");
+  }
   /* Nichts aus einem vierten Schema. `cron`, `realtime`, `vault`,
-     `extensions`, `supabase_functions` gehoeren der Plattform. */
-  const fremd = behalten.filter((e) => !["public", "auth", "storage"].includes(e.schema));
+     `extensions`, `supabase_functions` gehoeren der Plattform. Einzige
+     Ausnahme: die Rechte auf `public`, die ohne Schema gefuehrt werden. */
+  const fremd = behalten.filter((e) => !["public", "auth", "storage"].includes(e.schema)
+    && !(e.schema === "-" && e.desc === "ACL" && e.name === PUBLIC_SCHEMA_ACL));
   if (fremd.length > 0) {
     verstoesse.push(`${fremd.length} Eintrag/Eintraege aus fremden Schemata behalten: `
       + [...new Set(fremd.map((e) => e.schema))].join(", "));
@@ -176,7 +255,17 @@ export function filterToc(toc: string): Ergebnis {
     verstoesse.push(`${ungeparst.length} Zeile(n) im Inhaltsverzeichnis haben eine `
       + "unbekannte Form — erst klaeren, welcher Objekttyp das ist");
   }
-  return { zeilen, behalten, verworfen, ungeparst, verstoesse };
+  const geordnet = ordneFracht(zeilen);
+  /* Und nachgerechnet, nicht nur behauptet: im fertigen Plan steht jedes
+     Kind hinter seinem Elternteil. */
+  for (const [schema, eltern, kind] of FRACHT_REIHENFOLGE) {
+    const pos = (t: string) => geordnet.findIndex((z) =>
+      new RegExp(`^[0-9]+; .* TABLE DATA ${schema} ${t} `).test(z));
+    if (pos(kind) >= 0 && pos(eltern) >= 0 && pos(kind) < pos(eltern)) {
+      verstoesse.push(`${schema}.${kind} wuerde vor ${schema}.${eltern} eingespielt`);
+    }
+  }
+  return { zeilen: geordnet, behalten, verworfen, ungeparst, verstoesse };
 }
 
 export function bericht(r: Ergebnis): string {
