@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   SYNCABLE_HEADER_FIELDS, UNPERSISTED_FIELDS, VERIFIABLE_HEADER_FIELDS,
   classifyGroup, classifyPurchaseGroup, importGateOpen, mayRestamp, mayRestampPurchase,
-  needsSoldAt, planGroups, saleDateDiff,
+  manualDateConflicts, needsSoldAt, planGroups, saleDateDiff,
   type GroupFacts, type PurchaseFacts,
 } from "./legacy-sync-groups";
 
@@ -412,5 +412,53 @@ describe("a purchase whose date was applied after the import", () => {
     expect(classifyPurchaseGroup(facts({ fingerprintMatches: true })).kind).toBe("in_sync");
     expect(classifyPurchaseGroup(facts({ fingerprintMatches: true, itemsChanged: true })).kind)
       .toBe("unexplained");
+  });
+});
+
+/**
+ * A header corrected in the Orderbuch survives the next sync (0181).
+ *
+ * The date is the one header field the workbook writes (0089); a hand
+ * correction of it must stop the run before any write. Every other editable
+ * header field has no write path and is already a stop (`unexplained`).
+ */
+describe("manual corrections and the sync", () => {
+  const g = (over: Partial<GroupFacts>): GroupFacts => ({
+    saleId: 1, headerRow: 100, fingerprintMatches: false,
+    headerDiffs: [], itemsChanged: false, allVerifiableCompared: true, ...over,
+  });
+
+  it("a planned date write on a hand-dated sale is a conflict; the others are not", () => {
+    const plan = planGroups([
+      g({ saleId: 64, headerDiffs: [{ field: "date", from: "2026-03-02", to: "2026-03-01" }] }),
+      g({ saleId: 65, headerDiffs: [{ field: "date", from: "2026-03-05", to: "2026-03-04" }] }),
+    ]);
+    expect(manualDateConflicts(plan.soldAtWrites, new Set([64, 999]))).toEqual([{ saleId: 64, soldAt: "2026-03-01" }]);
+    expect(manualDateConflicts(plan.soldAtWrites, new Set())).toEqual([]);
+  });
+
+  it("the workbook brought in line with the correction: no write is planned, so no conflict", () => {
+    const plan = planGroups([g({ saleId: 64, fingerprintMatches: true })]);
+    expect(plan.soldAtWrites).toEqual([]);
+    expect(manualDateConflicts(plan.soldAtWrites, new Set([64]))).toEqual([]);
+  });
+
+  it("buyer or goods value corrected by hand: no write path — the group is a stop, not an overwrite", () => {
+    for (const field of ["buyer", "moneyU"] as const) {
+      const plan = planGroups([g({ saleId: 64, headerDiffs: [{ field, from: "corrected", to: "workbook" }] })]);
+      expect(plan.unexplained.map((u) => u.saleId)).toEqual([64]);
+      expect(plan.soldAtWrites).toEqual([]);
+      expect(plan.restamp).toEqual([]);
+    }
+  });
+
+  it("both workbook tools check it BEFORE writing, and the sync plan is not clean with a conflict", () => {
+    const sync = readFileSync("tools/sync-legacy-orderbook.mts", "utf8");
+    expect(sync).toMatch(/dateConflicts = manualDateConflicts\(groupPlan\.soldAtWrites/);
+    expect(sync).toMatch(/&& overwrites\.length === 0 && dateConflicts\.length === 0;/);
+    expect(sync.indexOf("dateConflicts = manualDateConflicts")).toBeLessThan(sync.indexOf("client.rpc(\"system_sync_legacy_sale_group\""));
+    const dates = readFileSync("tools/apply-workbook-dates.mts", "utf8");
+    expect(dates.indexOf("manualDateConflicts(")).toBeGreaterThan(-1);
+    expect(dates.indexOf("manualDateConflicts(")).toBeLessThan(dates.indexOf("db.rpc(\"seller_set_sale_date\""));
   });
 });

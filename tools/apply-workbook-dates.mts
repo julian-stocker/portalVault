@@ -40,6 +40,7 @@ import { readWorkbookParts } from "../src/lib/import/xlsx-reader.ts";
 import { parseSharedStrings } from "../src/lib/import/sheet-rows.ts";
 import { groupRows, parseOrderSheet } from "../src/lib/orderbook/order-2026.ts";
 import { groupSales, parseSalesSheet } from "../src/lib/orderbook/sales-2026.ts";
+import { manualDateConflicts } from "../src/lib/orderbook/legacy-sync-groups.ts";
 
 const ORDER_SHEET = "Order 2026";
 const WORKBOOK = process.env.SKYISLES_WORKBOOK
@@ -157,6 +158,28 @@ async function main(): Promise<void> {
     }
     changes.push({ kind: "Verkauf", id: Number(row.id), header: g.headerRow, from: current, to: g.date });
   }
+
+  /*
+   * EIN IM ORDERBUCH KORRIGIERTES DATUM BLEIBT (0181). Hat `orderbook_audit`
+   * für diesen Verkauf eine Änderung von `sold_at`, war das eine bewusste
+   * Korrektur in SkyIsles — oder ein früherer Lauf dieses Werkzeugs, und dann
+   * hat die Mappe sich seither erneut geändert. Beides entscheidet der
+   * Betreiber im Orderbuch, nicht dieses Werkzeug: der Verkauf bleibt
+   * unverändert und wird genannt.
+   */
+  const handDated = new Set<number>();
+  for (const c of changes.filter((x) => x.kind === "Verkauf")) {
+    const audit = await db.rpc("seller_sale_audit", { p_sale_id: c.id });
+    if (audit.error) throw new Error(`seller_sale_audit: ${audit.error.message}`);
+    if (((audit.data ?? []) as { entity_type: string; action: string; field: string | null }[])
+      .some((a) => a.entity_type === "sale" && a.action === "update" && a.field === "sold_at")) handDated.add(c.id);
+  }
+  const kept = new Set(manualDateConflicts(changes.filter((x) => x.kind === "Verkauf").map((c) => ({ ...c, saleId: c.id })), handDated)
+    .map((c) => c.id));
+  for (const c of changes.filter((x) => x.kind === "Verkauf" && kept.has(x.id))) {
+    refused.push(`Verkauf #${c.id} (Kopfzeile ${c.header}): Datum im Orderbuch korrigiert (${c.from ?? "kein Datum"}) — Arbeitsbuch ${c.to} wird nicht übernommen`);
+  }
+  changes.splice(0, changes.length, ...changes.filter((x) => !(x.kind === "Verkauf" && kept.has(x.id))));
 
   // ------------------------------------------------------------- Bericht
   console.log(`Zu ändern: ${changes.length}`);

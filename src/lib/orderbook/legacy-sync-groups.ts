@@ -319,3 +319,25 @@ export function importGateOpen(after: {
   return after.existingStillEligible === 0
     && after.newGroupsEligible === after.expectedNewGroups;
 }
+
+/**
+ * EIN IN SKYISLES KORRIGIERTES DATUM SCHREIBT DIE MAPPE NICHT ZURÜCK (0181).
+ *
+ * `handDated` sind die Verkäufe, deren `sold_at` laut `orderbook_audit` im
+ * Orderbuch geändert wurde (eine `update`-Zeile für `sold_at` — der Sync
+ * schreibt keine, der Import nur `insert`). Jeder geplante Datums-Schreibvorgang
+ * auf einen davon ist ein Konflikt: die Mappe sagt etwas anderes als die
+ * bewusste Korrektur. Der Aufrufer schreibt dann NICHTS — dieselbe Regel wie
+ * für korrigierte Positionen — und nennt die Verkäufe. Aufgelöst wird der
+ * Konflikt in der Arbeitsmappe (Datum angleichen) oder im Orderbuch; ein
+ * stilles Überspringen gibt es nicht, weil der Fingerabdruck dann eine
+ * Übereinstimmung behauptete, die nicht besteht.
+ *
+ * `system_sync_legacy_sale_group` lehnt dasselbe in der Datenbank ab; dieser
+ * Plan sorgt nur dafür, dass der Lauf vor dem ersten Schreibvorgang anhält.
+ */
+export function manualDateConflicts<T extends { saleId: number }>(
+  writes: readonly T[], handDated: ReadonlySet<number>,
+): T[] {
+  return writes.filter((w) => handDated.has(w.saleId));
+}

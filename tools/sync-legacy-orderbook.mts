@@ -42,7 +42,7 @@ import {
   type StoredLine, type SyncPlan, type WorkbookLine,
 } from "../src/lib/orderbook/legacy-sync.ts";
 import {
-  classifyPurchaseGroup, importGateOpen, mayRestampPurchase, planGroups, saleDateDiff,
+  classifyPurchaseGroup, importGateOpen, manualDateConflicts, mayRestampPurchase, planGroups, saleDateDiff,
   type GroupFacts, type HeaderDiff, type PurchaseVerdict,
 } from "../src/lib/orderbook/legacy-sync-groups.ts";
 
@@ -409,8 +409,67 @@ if (purchaseUnexplained.length > 0) {
 }
 console.log("");
 
+/*
+ * IN SKYISLES KORRIGIERTE POSITIONEN (0181). Der Betreiber hat die Figur
+ * einer Arbeitsmappenzeile von Hand korrigiert (`sale_item_corrections`).
+ * Die Mappe würde den alten Wert zurückschreiben — `system_sync_legacy_sale_item`
+ * lehnt das ab. Damit der Lauf nicht mitten im Schreiben abbricht, steht es
+ * schon hier im Plan, und der Plan gilt dann als nicht konfliktfrei. Vor 0181
+ * gibt es die Tabelle nicht; dann gibt es auch keine Korrektur.
+ */
+async function correctedSaleItems(): Promise<Set<number>> {
+  const out = new Set<number>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await client.from("sale_item_corrections").select("sale_item_id").order("id").range(from, from + 999);
+    if (error) {
+      if (error.code === "PGRST205" || error.code === "42P01") return out;
+      console.error(`sale_item_corrections: ${error.message}`); process.exit(1);
+    }
+    for (const r of data ?? []) out.add(Number((r as { sale_item_id: number }).sale_item_id));
+    if ((data ?? []).length < 1000) break;
+  }
+  return out;
+}
+const corrected = await correctedSaleItems();
+const overwrites = salePlan.updates.filter((u) => corrected.has(u.id)).map((u) => u.id);
+if (overwrites.length > 0) {
+  console.log(`  IN SKYISLES KORRIGIERT — die Mappe darf diese Zeilen nicht zurückschreiben:`);
+  console.log(`     ! ${overwrites.slice(0, 20).map((i) => `sale_item #${i}`).join(" ")}${overwrites.length > 20 ? " …" : ""}`);
+  console.log(`     Erst die Arbeitsmappe an die Korrektur anpassen, dann erneut planen.\n`);
+}
+
+/*
+ * IM ORDERBUCH KORRIGIERTE VERKAUFSDATEN (0181). Ein `sold_at`, das der
+ * Betreiber von Hand geändert hat, steht in `orderbook_audit`; Schritt D würde
+ * es mit dem Datum der Mappe überschreiben. `system_sync_legacy_sale_group`
+ * lehnt das ab — hier steht es schon im Plan, und der Lauf schreibt nichts.
+ * Käufer, Beträge, Referenz, Land und Notiz haben keinen Schreibpfad; eine
+ * Abweichung dort ist bereits `unexplained` (oben) und hält den Lauf ebenso an.
+ */
+async function handDatedSales(): Promise<Set<number>> {
+  const out = new Set<number>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await client.from("orderbook_audit").select("sale_id")
+      .eq("entity_type", "sale").eq("action", "update").eq("field", "sold_at")
+      .order("id").range(from, from + 999);
+    if (error) { console.error(`orderbook_audit: ${error.message}`); process.exit(1); }
+    for (const r of data ?? []) out.add(Number((r as { sale_id: number }).sale_id));
+    if ((data ?? []).length < 1000) break;
+  }
+  return out;
+}
+const dateConflicts = manualDateConflicts(groupPlan.soldAtWrites, await handDatedSales());
+if (dateConflicts.length > 0) {
+  console.log(`  IM ORDERBUCH KORRIGIERTES DATUM — die Mappe darf es nicht zurückschreiben:`);
+  for (const w of dateConflicts.slice(0, 20)) {
+    console.log(`     ! sale #${w.saleId}: SkyIsles ${txt(saleById.get(w.saleId)?.sold_at).slice(0, 10)}, Mappe ${w.soldAt}`);
+  }
+  console.log(`     Erst die Arbeitsmappe an die Korrektur anpassen, dann erneut planen.\n`);
+}
+
 const clean = planIsClean(salePlan) && planIsClean(purchasePlan)
-  && groupPlan.unexplained.length === 0 && purchaseUnexplained.length === 0;
+  && groupPlan.unexplained.length === 0 && purchaseUnexplained.length === 0
+  && overwrites.length === 0 && dateConflicts.length === 0;
 const empty = planIsEmpty(salePlan) && planIsEmpty(purchasePlan)
   && groupPlan.restamp.length === 0 && groupPlan.soldAtWrites.length === 0
   && purchaseRestamp.length === 0;
