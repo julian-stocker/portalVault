@@ -99,12 +99,28 @@ selbst: sie werden **vor** der Migration erhoben, in `supabase/baselines/`
 eingefroren und danach **nie** neu erhoben. Keine Prüfsumme von Hand kopieren,
 keinen Platzhalter ersetzen.
 
-**Jedes datenbankschreibende Werkzeug nennt seine Umgebung im Namen.** Es gibt keinen
-umgebungsneutralen Alias mehr: `:prod` zielt auf Production, `:staging` auf Staging. Die
-`:staging`-Varianten setzen `SKYISLES_REQUIRE_STAGING=1`, und `tools/lib/staging-guard.mts`
-bricht ab — **bevor eine Verbindung entsteht** —, wenn das Ziel nicht genau das in `.env.staging`
-genannte Projekt ist. Der Guard vergleicht Origin und Service-Role-Key exakt; er rät nicht an
-Projektnamen.
+**Jedes datenbankschreibende Werkzeug prüft sein Ziel selbst, bevor eine Verbindung entsteht**
+(`tools/lib/staging-guard.mts`, seit M-04 am 2026-11-09). Der Skriptname allein schützt nichts.
+Ein Flag braucht der Schutz nicht, und ein direkter `node`-Aufruf ist genauso geschützt.
+
+- **Staging-Schreiben:** Das Ziel muss die fest hinterlegte Staging-ID `qqxcpesbwfxzgytkdsac` sein
+  und mit `.env.staging` übereinstimmen (`requireStaging`, `requirePinnedStagingWrite`).
+- **Production-Schreiben** gibt es nur mit **allem** davon:
+  - `--env production --apply --confirm-production=zmiwxswrpkmizvqsgype`,
+  - die fest hinterlegte Production-ID,
+  - URL und Key gleich `.env.local` und nicht `.env.staging`,
+  - **unmittelbar vor dem ersten Schreiben die Projekt-ID am Terminal getippt**
+    (`guardWriteTool`, `requireProductionWrite`, `confirmProductionWrite`).
+
+  Ohne Terminal wird nicht geschrieben. Kein npm-Skript trägt eine Bestätigung; man tippt sie selbst
+  (`npm run … -- --env production --apply --confirm-production=…`).
+- **Lesen in Production** (`verify:shop|seller|commerce|legacy-history:prod`, `perf:report:prod`,
+  `images:export:prod`, Vorschauen mit `--env production`) bleibt möglich.
+- Die schreibenden Prüfer (`verify:rls|editorial|inventory|calculations`) laufen **nur** auf Staging.
+
+Der Guard vergleicht Origin, Service-Role-Key und Projekt-ID exakt; er rät nicht an Projektnamen.
+`src/lib/ops/production-write-guard.test.ts` lässt jedes neue Schreibwerkzeug ohne Guard scheitern.
+Überblick: `docs/CREDENTIALS_MAP.md`, Audit: `docs/stability/2026-11-09-m04-production-write-audit.md`.
 
 ---
 

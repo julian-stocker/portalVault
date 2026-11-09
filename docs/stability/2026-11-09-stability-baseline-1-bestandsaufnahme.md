@@ -505,6 +505,36 @@ Das Ersatz-Ziel `drtest_m03b` blieb nach allen Fehlerfällen leer.
 - den Drill gegen Production mit Protokoll,
 - die Prüfung von Storage-Bytes und Auth-Login.
 
+### 3.5b M-04 (2026-11-09): Audit der Production-Schreibwerkzeuge
+
+Vollständiger Bericht: `docs/stability/2026-11-09-m04-production-write-audit.md`. Kernpunkte:
+
+- **[P0] Zehn Production-Schreibpfade ohne Abgleich mit der Projekt-ID und ohne zweite Bestätigung.** Geschützt sind sie nur durch `--apply` und das `--env-file` im Skriptnamen:
+  - `admin:grant` (Admin-Recht),
+  - `catalog:import:prod`, `characters:import:prod`,
+  - `legacy:history:prod`, `inventory:import-legacy:prod`, `reconcile:inventory:prod` (Lagerbewegungen),
+  - `settle:legacy-sales:prod`,
+  - dazu die **immer schreibenden** Prüfer `verify:rls:prod`, `verify:editorial:prod` und `verify:inventory:prod`. Sie legen Konten und Fixtures an und vergeben sich selbst shop-admin, ohne Vorschau.
+- **[P1] Uneinheitliche Bestätigung.** `storage:transfer:apply:production` hat kein `--confirm-production`. `requireProduction()` und `transfer-to-production` kennen die feste Production-ID nicht. Sechs kopierte `verbinde()` vergleichen die ID nur als Teilstring. Die Staging-Guards haben keine feste ID, und 11 Werkzeuge sind nur mit Flag geschützt.
+- **[P2]** Bedienung und Doku: `npm run dev` arbeitet mit Production-Daten, `sync:orderbook:prod` heißt irreführend so, Einmalwerkzeuge liegen noch in `tools/`, und der Guard-Satz in `CLAUDE.md` stimmt nicht.
+- **Secrets:** Kein Werkzeug gibt Keys, Passwörter oder Tokens aus.
+- **Vorschlag:** ein gemeinsames Modul (`staging-guard.mts`) mit `requirePinnedStagingWrite` (gibt es), neu `requireProductionWrite` und `requireProductionRead`.
+  - Production-Schreiben verlangt `--env production`, `--apply` und `--confirm-production=<ID>`, die feste Production-ID, den Abgleich beider Env-Dateien und direkt vor dem Schreiben die Eingabe der ID.
+  - Die kopierten `verbinde()` entfallen.
+  - Ein Abdeckungswächter-Test verhindert neue ungeschützte Schreibwerkzeuge.
+- **Status: umgesetzt am 2026-11-09 (nicht committet).** Alle zehn P0-Pfade und die P1-Werkzeuge laufen über den gemeinsamen Guard.
+  - Production-Schreiben verlangt `--env production --apply --confirm-production=zmiwxswrpkmizvqsgype`, die feste ID, den Abgleich beider Env-Dateien und die getippte ID unmittelbar vor dem ersten Schreiben. Ohne Terminal wird nicht geschrieben.
+  - Entfernt sind zehn `:prod`-Skripte (die drei schreibenden Prüfer, sechs Cutover-Importe, `orderbook:sales-import:prod`), außerdem die eingebauten Bestätigungen in `catalog:finish:apply` und `catalog:publish`.
+  - `requireStaging()` prüft jetzt die feste Staging-ID.
+  - 114 neue Tests, darunter ein Abdeckungswächter, und 1 904 Tests in 49 betroffenen Dateien sind grün.
+  - Einzelheiten und Restrisiken: Audit-Bericht, Abschnitt 7.
+- **M-04B, abgeschlossen am 2026-11-09 (nicht committet):**
+  - `verify-commerce`, `verify-seller` und das neu gefundene `verify-legacy-history` senden ihre Schreibproben (anonym bzw. mit Service-Key) nur noch an die feste Staging-ID. Auf Production prüfen sie nur lesend und melden die Proben als übersprungen.
+  - `perf-report`, `verify-legacy-history` und die Vorschau von `sync-legacy-orderbook` hängen nicht mehr am Flag. Ein Production-Paar auf dem Staging-Pfad wird abgelehnt.
+  - `verify-payment-smoke` ist nachweislich schreibfrei und läuft jetzt über `requireStaging`.
+  - 139 Guard-Tests und 2 324 Tests in 59 betroffenen Dateien sind grün, alles offline.
+  - Einzelheiten: Audit-Bericht, Abschnitt 8.
+
 ### 3.6 Händlername, Handelsname, rechtliche Identität (offene Entscheidung)
 
 | Feld | Inhalt auf Staging | wirkt auf |

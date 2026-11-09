@@ -21,7 +21,7 @@ Beide Referenzen sind öffentlich (sie stehen in jeder Projekt-URL) und als Kons
 
 | Ort | Umgebung | Enthält (nur Namen) | Wer benutzt es | Rechte |
 |---|---|---|---|---|
-| `skyisles/.env.local` | **Production** | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (öffentlich), **`SUPABASE_SERVICE_ROLE_KEY`** | `npm run dev` (**Production-Daten!**) und jedes `:prod`-Werkzeug: Importe, `verify:*:prod`, `admin:grant`, Katalog-Sync/-Publish, `transfer:*` als Ziel | 600 |
+| `skyisles/.env.local` | **Production** | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (öffentlich), **`SUPABASE_SERVICE_ROLE_KEY`** | `npm run dev` (**Production-Daten!**), lesende `:prod`-Prüfer (`verify:shop|seller|commerce|legacy-history:prod`, `perf:report:prod`, `images:export:prod`), `admin:grant`, Katalog-Sync/-Publish, `storage:transfer`, `transfer:*` als Ziel. **Schreiben nur mit der Production-Regel aus Abschnitt 6** | 600 |
 | `skyisles/.env.staging` | **Staging** | dieselben drei Namen für Staging | `dev:staging`, `dev:staging:lan`, jedes `:staging`-Werkzeug, die Staging-Guards (`tools/lib/staging-guard.mts` vergleicht Ziel gegen diese Datei), `transfer:*` als Quelle | 600 |
 | `~/.skyisles/staging-db.env` | **Staging-Datenbank** | `SKYISLES_STAGING_DB_URL`: Rolle **`skyisles_agent`**, Session-Pooler | `db:check:staging`, `db:privileges:staging`, die lesenden Schritte von `db:migrate:staging`, M-03A-Probe. **Nur lesend** (ADR-0140): Die Rolle darf 12 von 78 Tabellen lesen und nichts schreiben | 600, Ordner 700 |
 | `~/.skyisles/staging-operator.env` | **Staging-App-Konto** | `SKYISLES_STAGING_OPERATOR_EMAIL`, `…_PASSWORD`: ein Betreiber-Login der **Website** (Supabase Auth), **kein** Datenbankkonto | `verify:sales-reconciliation`, `verify:recon-refusals`, `verify:recon-0180`, `probe:recon-0180` | 600, Ordner 700 |
@@ -97,7 +97,10 @@ Anmeldungen für die Vercel-, GitHub- oder Supabase-CLI, irgendein Datenbankpass
 4. **Passwörter werden interaktiv eingegeben**, nicht in eine URI oder Kommandozeile geschrieben
    (sie stünden in `ps` und in der Shell-History). `tools/dr/lib.sh` lehnt eine URI mit Passwort ab.
 5. **Jedes schreibende Werkzeug prüft sein Ziel**, bevor eine Verbindung entsteht
-   (`tools/lib/staging-guard.mts`, festgelegte Projekt-IDs).
+   (`tools/lib/staging-guard.mts`, festgelegte Projekt-IDs). **Production-Schreiben** verlangt seit
+   M-04 `--env production --apply --confirm-production=zmiwxswrpkmizvqsgype`, die feste ID, den
+   Abgleich beider Env-Dateien und unmittelbar vor dem Schreiben die **am Terminal getippte**
+   Projekt-ID. Ohne Terminal wird nicht geschrieben, und kein npm-Skript trägt die Bestätigung.
 6. **Der lesende Prüfzugang bleibt lesend.** Seine Rechte werden für einen Test nicht erweitert.
 7. **Editor-Kopien sind Zugangsdaten.** vim-`.swp` und nano-`.save` neben einer `.env`-Datei
    enthalten dieselben Werte und werden nach dem Bearbeiten gelöscht.
