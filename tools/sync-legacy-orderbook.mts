@@ -45,12 +45,26 @@ import {
   classifyPurchaseGroup, importGateOpen, manualDateConflicts, mayRestampPurchase, planGroups, saleDateDiff,
   type GroupFacts, type HeaderDiff, type PurchaseVerdict,
 } from "../src/lib/orderbook/legacy-sync-groups.ts";
+import { requirePinnedStagingWrite, requireStagingIfRequested } from "./lib/staging-guard.mts";
 
 const WORKBOOK = process.env.SKYISLES_WORKBOOK
   ?? `${process.env.HOME}/Documents/eCommerce/skylanders.xlsx`;
 const ORDER_SHEET = "Order 2026";
 const LEGACY_SOURCE = "excel_order_2026";
 const APPLY = process.argv.includes("--apply");
+
+/*
+ * DER SCHREIBPFAD NUR GEGEN STAGING (2026-11-09, Stability Baseline 1 / M-02).
+ * Vorher entschied allein das `--env-file` im Skriptnamen über das Ziel, und
+ * `SKYISLES_REQUIRE_STAGING` wurde gesetzt, aber nie gelesen. Jetzt, BEVOR der
+ * Client entsteht: mit `--apply` nur die festgelegte Staging-Projekt-ID
+ * (`requirePinnedStagingWrite`) — Production und jedes unbekannte Projekt
+ * werden abgelehnt, gleich was Skriptname oder Env-Datei sagen. Die Vorschau
+ * bleibt lesend gegen beide Umgebungen möglich; das `:staging`-Skript
+ * verlangt dafür Staging.
+ */
+if (APPLY) requirePinnedStagingWrite("sync-legacy-orderbook --apply");
+else requireStagingIfRequested("sync-legacy-orderbook");
 
 function requireEnv(name: string): string {
   const value = process.env[name];

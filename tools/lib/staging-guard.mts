@@ -44,6 +44,8 @@
  */
 import { readFileSync } from "node:fs";
 
+import { PRODUCTION_REF, STAGING_REF } from "./staging-db.mts";
+
 /** The two environment files this repository uses, by convention. */
 export const PRODUCTION_ENV_FILE = ".env.local";
 export const STAGING_ENV_FILE = ".env.staging";
@@ -410,4 +412,78 @@ export function requireProduction(toolLabel: string): string {
  */
 export function requireStagingIfRequested(toolLabel: string): void {
   if (process.env[REQUIRE_STAGING_FLAG] === "1") requireStaging(toolLabel);
+}
+
+/**
+ * THE WRITE GUARD WITH A PINNED PROJECT (2026-11-09, Stability Baseline 1 / M-02).
+ *
+ * `checkStagingTarget` trusts `.env.staging` to name staging. For a tool whose
+ * write path must only ever reach ONE project, that leaves a gap: a
+ * `.env.staging` edited to name some third project — or a checkout where
+ * `.env.local` is missing, so production cannot be recognised by comparison —
+ * would pass. This check adds the two project refs the repository already pins
+ * (`tools/lib/staging-db.mts`, the same constants the migration runner uses):
+ *
+ *   1. the target is the pinned PRODUCTION ref        → refused, whatever the files say
+ *   2. everything `checkStagingTarget` checks          → must pass
+ *   3. the target is exactly the pinned STAGING ref    → otherwise refused
+ *
+ * Pure, like `checkStagingTarget`, so every refusal is testable without env
+ * files, a database or a process that exits.
+ */
+export type PinnedRefs = { staging: string; production: string };
+export const PINNED_REFS: PinnedRefs = { staging: STAGING_REF, production: PRODUCTION_REF };
+
+export type WriteGuardRefusal = GuardRefusal | "pinned_production" | "not_pinned_staging";
+export type WriteGuardVerdict =
+  | { ok: true; origin: string; ref: string }
+  | { ok: false; reason: WriteGuardRefusal; message: string };
+
+export function checkPinnedStagingWrite(
+  target: Target, reference: Reference, pins: PinnedRefs = PINNED_REFS,
+): WriteGuardVerdict {
+  const ref = projectRef(target.url);
+  if (ref !== null && ref === pins.production) {
+    return {
+      ok: false,
+      reason: "pinned_production",
+      message: `the target project ${ref} is PRODUCTION. This write path only ever runs against staging.`,
+    };
+  }
+  const verdict = checkStagingTarget(target, reference);
+  if (!verdict.ok) return verdict;
+  if (ref !== pins.staging) {
+    return {
+      ok: false,
+      reason: "not_pinned_staging",
+      message:
+        `the target project ${ref} is not the released staging project ${pins.staging}, ` +
+        `even though ${STAGING_ENV_FILE} names it.`,
+    };
+  }
+  return { ok: true, origin: verdict.origin, ref };
+}
+
+/**
+ * The shell around `checkPinnedStagingWrite`: called before the client is
+ * built, exits with code 1 on any refusal. Nothing has been read or written
+ * at that point.
+ */
+export function requirePinnedStagingWrite(toolLabel: string): string {
+  const verdict = checkPinnedStagingWrite(
+    { url: process.env.NEXT_PUBLIC_SUPABASE_URL, serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY },
+    referenceFromDisk(),
+  );
+  if (!verdict.ok) {
+    console.error("");
+    console.error("  WRITE GUARD — refusing to run.");
+    console.error("");
+    console.error(`  ${toolLabel} writes only to staging ${PINNED_REFS.staging}, and ${verdict.message}`);
+    console.error("");
+    console.error("  Nothing has been read and nothing has been written.");
+    console.error("");
+    process.exit(1);
+  }
+  console.log(`  write guard: passed — target is staging (${verdict.ref}).`);
+  return verdict.origin;
 }
