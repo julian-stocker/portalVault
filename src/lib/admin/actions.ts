@@ -1323,7 +1323,8 @@ export async function setSellerDetails(fields: {
       p_vat_id: fields.vatId ?? null,
       p_w_id: fields.wId ?? null,
     },
-    ["/admin"],
+    // The form lives under Geschäftsdaten & Kontakt (`/business/legal`) since ADR-0077.
+    ["/admin", "/business/legal"],
     "seller",
   );
 }
@@ -1472,7 +1473,17 @@ export async function setSellerContact(
   });
   if (error) return { ok: false, message: de.admin.seller.saveFailed };
 
-  revalidatePath("/admin");
+  /*
+   * THE TRADE NAME IS SHOWN ALL OVER THE SITE (2026-11-09). `display_name`
+   * reaches the catalog's quick view, the shop, the checkout, the favourites,
+   * "Über SkyIsles" and the business overview — all through
+   * `fetchSellerPublic()`. Revalidating only `/admin` (where this form lived
+   * before ADR-0077 moved it to `/business/profile`) left every other page in
+   * the client cache with the old name until it happened to be refetched.
+   * The whole tree, once: the form is used rarely, and every page reading the
+   * name is dynamic anyway.
+   */
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 

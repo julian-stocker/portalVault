@@ -16,6 +16,7 @@
  */
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
@@ -42,14 +43,18 @@ export function SellerSettings({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   function save() {
     setSaved(false);
     setError(null);
     startTransition(async () => {
       const result = await setSellerContact(name, contact, reply);
-      if (result.ok) setSaved(true);
-      else setError(result.message);
+      if (result.ok) {
+        setSaved(true);
+        // The page around the form (and the layout) read the seller on the server: show the saved state now.
+        router.refresh();
+      } else setError(result.message);
     });
   }
 
