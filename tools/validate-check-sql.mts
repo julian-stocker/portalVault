@@ -542,7 +542,9 @@ async function main(): Promise<void> {
    * lässt solche späteren Ersetzungen deshalb ebenfalls aus; sie legen keine
    * Spalte und keine neue Funktion an, die der Probelauf zurücknehmen müsste.
    */
-  const SPAETER_ERSETZT = ["0174_backup_sales_reconciliation.sql"] as const;
+  const SPAETER_ERSETZT = ["0174_backup_sales_reconciliation.sql",
+                           /* `0182` ersetzt dieselben zwei Ruempfe noch einmal (Handkorrekturen). */
+                           "0182_backup_sale_item_corrections.sql"] as const;
   const VORSTAND_AUSSER = [...PROBELAUF, ...SPAETER_ERSETZT] as const;
   const vorstand = funktionsfaltung(VORSTAND_AUSSER);
   const zurueck: string[] = [];
@@ -12622,6 +12624,176 @@ async function main(): Promise<void> {
         + "all seven areas in each export with lines left out, and R0174",
       ok: ok74,
       sagt: `0174: ${befund74.join(" · ")}`,
+    });
+  }
+
+  /* =====================================================================
+   * P82 — 0182: the hand corrections of `0181` in BOTH backups.
+   *
+   * WHAT ONLY THIS RUN CAN SHOW: that PostgreSQL creates both bodies with
+   * exactly the fingerprints 0182 promises, that the latches hold (0181
+   * missing, a foreign body, a second run), that a correction goes out
+   * through both exports — the workbook's original figure included, the
+   * account identity and the workbook row number not — that it comes back
+   * from each archive column for column (the round trip of P74), and that
+   * R0182 turns both bodies back while every correction stays.
+   *
+   * The world is the bare stub schema plus the two bodies of 0174.
+   * ===================================================================== */
+  {
+    const befund82: string[] = [];
+    let ok82 = true;
+    const sag82 = (was: string, gut: boolean, text: string): void => {
+      befund82.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok82 = false;
+    };
+    const M182 = join(MIG_DIR, "0182_backup_sale_item_corrections.sql");
+    const R182 = "supabase/rollback/R0182_backups_without_sale_item_corrections.sql";
+    const B0174 = "3a798f506f5f43e5b1b69dc242a1b16f";
+    const P0174 = "23be72d581589b063d6938a863757b31";
+    const B0182 = "b42609b64d8771f1792a09b344ba80de";
+    const P0182 = "307e1c10a99afdaa683292e2a495e8ad";
+
+    const db = new PGlite();
+    await stubAnwenden(db);
+    const w82 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const abdruck82 = async (fn: string): Promise<string> => w82(
+      `select md5(p.prosrc) as w from pg_proc p where p.oid = to_regprocedure('public.${fn}()')`);
+    const anweisungVon82 = (datei: string, fn: string): string => {
+      const sql = readFileSync(datei, "utf8");
+      const von = sql.indexOf(`create or replace function public.${fn}()`);
+      const bis = sql.indexOf("\n$$;", von) + "\n$$;".length;
+      return sql.slice(von, bis);
+    };
+    const kurz82 = (f: string | null): string => (f ?? "DURCHGELAUFEN").slice(0, 70);
+    const M174_82 = join(MIG_DIR, "0174_backup_sales_reconciliation.sql");
+
+    /* ---- The world: both gates open, both bodies of 0174, Staging's rights. */
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                     language sql as $stub$ select true $stub$;
+                   create or replace function public.can_operate_active_seller() returns boolean
+                     language sql as $stub$ select true $stub$;`);
+    await db.exec(anweisungVon82(M174_82, "seller_business_backup"));
+    await db.exec(anweisungVon82(M174_82, "system_platform_export"));
+    await db.exec(`
+      revoke all on function public.seller_business_backup() from public, anon, authenticated, service_role;
+      revoke all on function public.system_platform_export() from public, anon, authenticated, service_role;
+      grant execute on function public.seller_business_backup() to authenticated;
+      grant execute on function public.seller_business_backup() to service_role;
+      grant execute on function public.system_platform_export() to authenticated;`);
+    const rechte82 = async (): Promise<string> => w82(
+      `select string_agg(coalesce(p.proacl::text, '(default)'), ' / ' order by p.proname) as w from pg_proc p
+        where p.oid in (to_regprocedure('public.seller_business_backup()'), to_regprocedure('public.system_platform_export()'))`);
+    const rechteVorher82 = await rechte82();
+    sag82("Aufbau: the bodies from 0174",
+          (await abdruck82("seller_business_backup")) === B0174 && (await abdruck82("system_platform_export")) === P0174,
+          `${(await abdruck82("seller_business_backup")).slice(0, 8)}… / ${(await abdruck82("system_platform_export")).slice(0, 8)}…`);
+
+    /* ---- A: without the table of 0181 it aborts, and nothing changes. */
+    await db.exec("alter table public.sale_item_corrections rename to z82_corrections;");
+    const ohne0181 = await fahre(db, M182);
+    await db.exec("alter table public.z82_corrections rename to sale_item_corrections;");
+    sag82("without 0181 it aborts", ohne0181 !== null && ohne0181.includes("0182 needs 0181")
+          && (await abdruck82("seller_business_backup")) === B0174, kurz82(ohne0181));
+
+    /* ---- B: a foreign platform body (0164) — neither function is replaced. */
+    await db.exec(anweisungVon82(join(MIG_DIR, "0164_platform_export_types.sql"), "system_platform_export"));
+    const fremd = await fahre(db, M182);
+    sag82("against the platform body from 0164 it aborts, the business body stays 0174's",
+          fremd !== null && fremd.includes("not the body from 0174")
+            && (await abdruck82("seller_business_backup")) === B0174, kurz82(fremd));
+    await db.exec(anweisungVon82(M174_82, "system_platform_export"));
+
+    /* ---- C: the run, the promised fingerprints, the rights unchanged. */
+    const lauf = await fahre(db, M182);
+    const bNeu = await abdruck82("seller_business_backup");
+    const pNeu = await abdruck82("system_platform_export");
+    const reste82 = await w82(`select count(*) as w from (values
+        (current_setting('skyisles.acl_0182_business', true)),
+        (current_setting('skyisles.acl_0182_platform', true))) s(v) where coalesce(v, '') <> ''`);
+    sag82("0182 runs; both fingerprints are the promised ones; the rights byte for byte those from before",
+          lauf === null && bNeu === B0182 && pNeu === P0182 && (await rechte82()) === rechteVorher82 && reste82 === "0",
+          `${lauf ?? "durch"} · ${bNeu.slice(0, 8)}… / ${pNeu.slice(0, 8)}…`);
+
+    /* ---- D: a second run bounces off its own latch. */
+    const zweiter = await fahre(db, M182);
+    sag82("a second run bounces", zweiter !== null && zweiter.includes("applied here already"), kurz82(zweiter));
+
+    /* ---- E: sale 152, corrected by hand: one replace, one add, one remove — through both exports. */
+    await db.exec(`
+      insert into public.sales (id, channel) values (9152, 'ebay');
+      insert into public.sale_items (id, sale_id, position, sky_id, raw_name, source_row)
+        values (9520, 9152, 3, 'SKY-0598', 'Fire Reactor', 653);
+      insert into public.sale_item_corrections (id, sale_id, sale_item_id, action, position, source_row,
+          old_sky_id, old_raw_name, new_sky_id, new_raw_name, corrected_at, corrected_by) values
+        (1, 9152, 9520, 'replace', 3, 653, 'SKY-0597', 'Fire Reactor', 'SKY-0598', 'Fire Reactor', now(), gen_random_uuid()),
+        (2, 9152, 9530, 'add', 4, null, null, null, 'SKY-0598', null, now(), gen_random_uuid()),
+        (3, 9152, 9530, 'remove', 4, null, 'SKY-0598', null, null, null, now(), gen_random_uuid());`);
+    const FELDER82 = ["id", "sale_id", "sale_item_id", "action", "position", "old_sky_id", "old_raw_name",
+                      "new_sky_id", "new_raw_name", "corrected_at"];
+    const archive82: Record<string, Record<string, unknown>[]> = {};
+    for (const [fn, bereiche, version] of [["seller_business_backup", 36, 1], ["system_platform_export", 62, 4]] as const) {
+      const d = ((await db.query(`select public.${fn}() as d`)) as
+        { rows: { d: { format_version: number; data: Record<string, Record<string, unknown>[]> } }[] }).rows[0].d;
+      const spur = d.data.sale_item_corrections ?? [];
+      archive82[fn] = spur;
+      sag82(`${fn}: ${bereiche} areas, version ${version}, all three corrections with the workbook's original, `
+            + "no corrected_by, no source_row",
+            Object.keys(d.data).length === bereiche && d.format_version === version && spur.length === 3
+              && JSON.stringify(Object.keys(spur[0] ?? {}).sort()) === JSON.stringify([...FELDER82].sort())
+              && spur[0].old_sky_id === "SKY-0597" && spur[0].old_raw_name === "Fire Reactor"
+              && spur.map((r) => r.action).join(",") === "replace,add,remove",
+            `${Object.keys(d.data).length} areas · v${d.format_version} · ${spur.length} rows · `
+              + `keys ${Object.keys(spur[0] ?? {}).length}`);
+    }
+
+    /* ---- E2: THE ROUND TRIP — emptied, refilled from each archive, every exported column identical,
+     * and the original of the corrected line reads the same. corrected_by and source_row come back empty. */
+    const spalten82 = FELDER82.map((c) => `t.${c}`).join(", ");
+    const abdruckSpur82 = async (): Promise<string> => w82(
+      `select coalesce(md5(string_agg(x::text, chr(10) order by x::text)), '-') as w
+         from (select ${spalten82} from public.sale_item_corrections t) x`);
+    const original82 = `select old_sky_id || '|' || old_raw_name || '>' || new_sky_id as w
+                          from public.sale_item_corrections where sale_item_id = 9520 and action = 'replace' order by id limit 1`;
+    const vorher82 = await abdruckSpur82();
+    for (const fn of ["seller_business_backup", "system_platform_export"] as const) {
+      await db.exec("delete from public.sale_item_corrections;");
+      const leer = await w82("select count(*) as w from public.sale_item_corrections");
+      await db.exec(`insert into public.sale_item_corrections (${FELDER82.join(", ")})
+                       select ${FELDER82.join(", ")} from jsonb_populate_recordset(null::public.sale_item_corrections,
+                         $archiv82$${JSON.stringify(archive82[fn])}$archiv82$::jsonb);`);
+      const nachher = await abdruckSpur82();
+      const ohne = await w82(`select count(*) as w from public.sale_item_corrections
+                               where corrected_by is not null or source_row is not null`);
+      sag82(`${fn}: round trip — emptied, refilled from the archive, every exported column identical, `
+            + "the original reads the same",
+            leer === "0" && nachher === vorher82 && (await w82(original82)) === "SKY-0597|Fire Reactor>SKY-0598" && ohne === "0",
+            `geleert ${leer} · Spalten ${nachher === vorher82 ? "gleich" : "VERSCHIEDEN"} · ${await w82(original82)}`);
+    }
+
+    /* ---- F: R0182 refuses a third version, then turns both back; every correction stays. */
+    await db.exec(anweisungVon82(join(MIG_DIR, "0164_platform_export_types.sql"), "system_platform_export"));
+    const rueckFremd = await fahre(db, R182);
+    sag82("R0182 refuses a third platform body", rueckFremd !== null && rueckFremd.includes("neither 0174"), kurz82(rueckFremd));
+    await db.exec(anweisungVon82(M182, "system_platform_export"));
+    const rueck = await fahre(db, R182);
+    sag82("R0182 restores both bodies of 0174, leaves every correction and the rights as they were",
+          rueck === null && (await abdruck82("seller_business_backup")) === B0174
+            && (await abdruck82("system_platform_export")) === P0174
+            && (await w82("select count(*) as w from public.sale_item_corrections")) === "3"
+            && (await rechte82()) === rechteVorher82,
+          rueck ?? "durch");
+    const rueck2 = await fahre(db, R182);
+    sag82("a second R0182 changes nothing", rueck2 === null, rueck2 ?? "durch");
+
+    probe.push({
+      name: "P82 0182: the hand corrections of 0181 in BOTH backups — the promised "
+        + "fingerprints, the latches (0181 missing, foreign body, second run), the rights "
+        + "kept, every correction with its original in each export, back from the archive "
+        + "column for column, and R0182",
+      ok: ok82,
+      sagt: `0182: ${befund82.join(" · ")}`,
     });
   }
 

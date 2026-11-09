@@ -174,7 +174,7 @@ describe("ein Rumpfmuster muss seinen Rumpf treffen können", () => {
     /* Ohne diese Zusage könnte die Ausnahme oben still alles durchwinken. */
     expect(RUMPFE_VOR_0174.get("system_platform_export/0"))
       .toContain("'format_version', 2,");
-    expect(RUMPFE.get("system_platform_export/0")).toContain("'format_version', 3,");
+    expect(RUMPFE.get("system_platform_export/0")).toContain("'format_version', 4,");
   });
 
   it("die Rümpfe der Migrationen lassen sich überhaupt lesen", () => {

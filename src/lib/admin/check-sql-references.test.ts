@@ -34,7 +34,7 @@ import { join } from "node:path";
 import {
   allMigrations, columnsOf, migrationFiles, migrationSource,
 } from "@/test-support/migrations";
-import { BACKUP_SECTIONS, SALES_RECONCILIATION_SECTIONS } from "@/lib/backup/manifest";
+import { BACKUP_SECTIONS, SALE_ITEM_CORRECTIONS_SECTIONS, SALES_RECONCILIATION_SECTIONS } from "@/lib/backup/manifest";
 
 const CHECK_DIR = "supabase/checks";
 const checkSql = readdirSync(join(process.cwd(), CHECK_DIR))
@@ -239,8 +239,9 @@ describe("die Export-Baseline zählt genau die Bereiche des Manifests", () => {
    * Manifest sie trotzdem; verglichen wird deshalb mit dem Manifest OHNE die
    * sieben. Eine Baseline nach `0174` wäre eine eigene, neue Prüfdatei.
    */
+  /* Dasselbe für den einen Bereich aus `0182` (Handkorrekturen, `0181`). */
   const quellen = BACKUP_SECTIONS
-    .filter((s) => !SALES_RECONCILIATION_SECTIONS.includes(s))
+    .filter((s) => !SALES_RECONCILIATION_SECTIONS.includes(s) && !SALE_ITEM_CORRECTIONS_SECTIONS.includes(s))
     .map((s) => s.source);
 
   it("jeder Bereich des Manifests hat eine Zeile", () => {

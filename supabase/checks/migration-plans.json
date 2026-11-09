@@ -626,6 +626,114 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0181": {
+      "zweck": "Gruppe 0181/0182, Teil 0181 — EIN gemeinsamer Lauf mit 0182: Positionen importierter Verkaeufe von Hand korrigieren (ADR-0179): Spur sale_item_corrections (append-only), Figur korrigieren, fehlende Position ergaenzen, ergaenzte entfernen; der Arbeitsmappen-Sync weist korrigierte Zeilen und im Orderbuch korrigierte Verkaufsdaten ab; aendert keine Daten",
+      "preflight": "0181-0182_preflight.sql",
+      "lauf": "staging-0181-0182.sql",
+      "postflight": "0181-0182_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Die Tabelle sale_item_corrections steht UND die Plattformsicherung ist die Fassung aus 0182. Beides entsteht nur gemeinsam (eine Transaktion); ein halber Stand ist nicht moeglich.",
+        "sql": "select (to_regclass('public.sale_item_corrections') is not null and coalesce((select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')), '') = '307e1c10a99afdaa683292e2a495e8ad') as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0182": {
+      "zweck": "Gruppe 0181/0182, Teil 0182: sale_item_corrections in Betriebs- und Plattformsicherung (Formatversion 4) — EIN gemeinsamer Lauf fuer 0181 und 0182, beide Nummern starten denselben; aendert selbst keine Daten",
+      "preflight": "0181-0182_preflight.sql",
+      "lauf": "staging-0181-0182.sql",
+      "postflight": "0181-0182_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Die Tabelle sale_item_corrections steht UND die Plattformsicherung ist die Fassung aus 0182. Beides entsteht nur gemeinsam (eine Transaktion); ein halber Stand ist nicht moeglich.",
+        "sql": "select (to_regclass('public.sale_item_corrections') is not null and coalesce((select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')), '') = '307e1c10a99afdaa683292e2a495e8ad') as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0183": {
+      "zweck": "Eine nicht zugeordnete Bestellung des CSV-Abgleichs als offene Bestellung anlegen (seller_recon_create_sale): Kopf und Geld aus dem gespeicherten Bericht, je Stueck eine bestaetigte Figur, keine Reservierung, keine Lagerbewegung; aendert keine Daten",
+      "preflight": "0183_preflight.sql",
+      "lauf": "staging-0183.sql",
+      "postflight": "0183_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Die Funktion seller_recon_create_sale(bigint, jsonb) steht. Die Migration legt sie an; Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select to_regprocedure('public.seller_recon_create_sale(bigint,jsonb)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0184": {
+      "zweck": "seller_create_sale_with_details mit p_hold boolean default true: einen externen Verkauf auf ausdruecklichen Wunsch ohne Reservierung anlegen; Standard unveraendert; alte Signatur entfernt, keine Overload; aendert keine Daten",
+      "preflight": "0184_preflight.sql",
+      "lauf": "staging-0184.sql",
+      "postflight": "0184_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Die 16-Argument-Fassung von seller_create_sale_with_details (mit p_hold) steht. Die Migration legt sie an; Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select to_regprocedure('public.seller_create_sale_with_details(text,date,text,text,text,text,boolean,numeric,numeric,numeric,jsonb,jsonb,jsonb,numeric,text,boolean)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0185": {
+      "zweck": "Eine nicht zugeordnete Bestellung des CSV-Abgleichs ausdruecklich einem bestehenden Verkauf zuordnen (seller_recon_assign_sale): nur die Bestellnummer, nie ueberschrieben, Version Pflicht, bestehende Zuordnungen und die Konkurrenzregel aus 0180 unveraendert; aendert keine Daten",
+      "preflight": "0185_preflight.sql",
+      "lauf": "staging-0185.sql",
+      "postflight": "0185_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Die Funktion seller_recon_assign_sale(bigint, bigint, timestamptz) steht. Die Migration legt sie an; Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select to_regprocedure('public.seller_recon_assign_sale(bigint,bigint,timestamptz)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0186": {
+      "zweck": "Eine Bestellnummer des CSV-Abgleichs trotz konkurrierender Verkaeufe zuordnen (seller_recon_confirm_order_ref), wenn der Betrieb jeden Konkurrenten einzeln mit dem gesehenen Stand ausgeschlossen und eine Begruendung angegeben hat: nur die Bestellnummer, nie ueberschrieben, je Konkurrent eine Journalzeile; 0180 und 0185 unveraendert; aendert keine Daten",
+      "preflight": "0186_preflight.sql",
+      "lauf": "staging-0186.sql",
+      "postflight": "0186_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Die Funktion seller_recon_confirm_order_ref(bigint, bigint, timestamptz, jsonb, text) steht. Die Migration legt sie an; Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select to_regprocedure('public.seller_recon_confirm_order_ref(bigint,bigint,timestamptz,jsonb,text)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }
