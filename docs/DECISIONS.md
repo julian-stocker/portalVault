@@ -12,7 +12,9 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-11-02 (ADR-0171, die Variante erbt die Familie ihrer Basisfigur,
+Letzte Aktualisierung: 2026-11-09 (ADR-0183, Bestellzuordnung und finanzieller Abgleich getrennt, Zuordnung trotz Konkurrenz `0186` auf Staging angewendet; ADR-0182, Kandidaten und ausdrückliche Zuordnung, `0185`; ADR-0181, CSV-Abgleich öffnet den bestehenden Verkaufsdialog, `0184`; ADR-0180, nicht zugeordnete Bestellung als offene Bestellung anlegen, `0183`; ADR-0179 ergänzt: korrigiertes Datum vor dem Sync geschützt,
+Korrekturspur in beiden Sicherungen, `0182`; davor 2026-11-08 ADR-0179, Positionen importierter Verkäufe korrigieren; davor
+ADR-0171, die Variante erbt die Familie ihrer Basisfigur,
 leere Familien auf Staging; davor ADR-0170, Familie im kompakten Editor und SKY-ID-Suche).
 
 ---
@@ -17066,6 +17068,314 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0183 · Bestellzuordnung und finanzieller Abgleich getrennt — Zuordnung trotz Konkurrenz nur mit Einzelausschluss
+
+**Status:** angenommen (Betreiber, 2026-11-09). Oberfläche umgesetzt (lokal, nicht committet). **Migration `0186`
+auf Staging angewendet am 2026-11-09** (Nachkontrolle 9999 = 0; Nachweis in `supabase/migrations/APPLIED.md`;
+berechtigter Postflight und Oberflächentest mit 155/157 offen). **Production: NICHT angewendet.** **Betrifft:** ADR-0178 (Abgleich), ADR-0182 (Abschnitt „Offen“), `0180` (Konkurrenzregel),
+`0185`
+
+### Kontext
+
+Der Sammeldialog mischte die Bestellnummer in die finanzielle Bestätigung. Bei den Paaren 155/157 lehnte
+`0180` die Nummer wegen der Mai-Verkäufe 158/160 ab (`rival_sale`) — und mit ihr die ganze Bestätigung; die
+Ablehnungsliste wiederholte sich, ein abgelehnter Wert blieb ausgewählt. Bestellzuordnung (welcher Verkauf
+ist diese Bestellung?) und finanzieller Abgleich (stimmen die Beträge?) sind zwei verschiedene Fragen.
+
+### Entscheidung
+
+1. **„Angaben abgleichen“ nur finanziell.** Der Dialog zeigt Datum (nur Anzeige), Warenwert, Versand; die
+   Bestellnummer gehört nie dazu (`CONFIRM_FIELDS = items_net, shipping`, `financialPlan`). Abgelehnte
+   Werte stehen kompakt in ihrer Zeile („Nicht übernommen: …“), sind abgewählt und werden nicht gesendet;
+   der Rest braucht eine neue, ausdrückliche Bestätigung „Ausgewählte Angaben übernehmen“.
+2. **Bestellzuordnung als eigene Handlung.**
+   - (A) nicht zugeordnete Bestellung → bestehender Verkauf: „Diesem Verkauf zuordnen“ (`0185`, unverändert).
+   - (B) sicheres Paar ohne Nummer: „Bestellnummer übernehmen“ (`takeOrderNumber`) — genau EIN Befund über den
+     geprüften Weg aus `0180` (entscheiden, Vorschau, Übernahme mit dem Token der Vorschau). Der Befund wird aus
+     der gespeicherten Sitzung gelesen; der Browser nennt nur die Karte. Trägt der Verkauf inzwischen eine
+     Nummer, wird nichts gesendet.
+3. **Zuordnung trotz Konkurrenz (`0186`, `seller_recon_confirm_order_ref`) — eine eigene Funktion,
+   keine Abschwächung.** `sales_recon_take_check` (`0180`) und `seller_recon_assign_sale` (`0185`) bleiben Wort
+   für Wort; der Sammelabgleich und die einfache Zuordnung kennen keine Übersteuerung. Die neue Funktion:
+   - gilt für beide Wege (nicht zugeordnete Bestellung + Verkauf; genau das sichere Paar), nur in einer nicht
+     verworfenen Sitzung;
+   - verlangt, dass es Konkurrenten gibt (`no_rivals` sonst — dann entscheiden `0180`/`0185`);
+   - ermittelt die Konkurrenten unter Sperre NEU, mit den Prädikaten aus `0180`; der Betrieb muss **jeden
+     einzeln** ausgeschlossen haben, jeden Verkauf mit dem gesehenen Stand (`updated_at`), gelesen `for share`.
+     Neu, entfallen oder geändert → `rivals_changed`, nichts geschrieben;
+   - verlangt eine Begründung (höchstens 500 Zeichen);
+   - behält alles andere: Betriebskonto, Sperren, Pflicht-Version (PT409), nie überschreiben (`ref_present`,
+     gleiche Nummer `exists`), keine doppelte Nummer (`ref_taken`), nie eine andere Paarung verdrängen
+     (`paired`);
+   - schreibt nur `sales.external_order_ref` und das Journal: eine Zeile für die Nummer, je Konkurrent eine
+     Zeile `rival_excluded` (welcher Konkurrent mit welchem Stand, welche Nummer, Paar oder nicht zugeordnet,
+     Begründung; wer und wann trägt das Journal). Die Konkurrenten selbst bleiben unberührt.
+4. **Oberfläche:** mit Konkurrenten ersetzt die Ausschlussliste den einfachen Knopf — jeder Konkurrent mit
+   Datum und Figuren als eigenes Häkchen, Begründung Pflicht; ohne bekannten Stand eines Konkurrenten ist
+   nichts bestätigbar. In einer geschlossenen Sitzung ohne Konkurrenten gibt es nichts zu drücken (`0180`
+   übernimmt nur in offenen Sitzungen).
+
+### Ergänzung 2026-11-09 — Sammelaktionen (ohne Migration)
+
+Oben auf der Ergebnisseite zwei getrennte Sammelaktionen, beide über **alle** Bestellungen der Sitzung (nie
+nur Filter oder Seite); die Einzelaktionen der Karten bleiben.
+
+- **„Eindeutige Bestellnummern übernehmen“** (`bulkOrderNumbers`, `takeOrderNumbers`): nur sichere Paare ohne
+  Nummer, ohne Konkurrenten, ohne konkurrierende Kandidaten, unverändert seit der Analyse, offene Sitzung.
+  Konkurrenzfälle werden nie gesammelt freigegeben (dafür bleibt der Einzelausschluss, `0186`). Vorschau mit
+  Zahl der übernehmbaren und der übersprungenen Fälle samt Gründen; geschrieben erst nach Bestätigung, und nur
+  die gezeigten Fälle.
+- **Ein Fall blockiert die anderen nicht — und nichts geschieht still.** Der Server baut jeden Fall aus der
+  gespeicherten Sitzung neu und geht den Weg aus `0180`: `seller_recon_decide` je Fall (eine fallbezogene
+  Ablehnung — benannter Grund der Übernahmeprüfung, `PT409` = seit der Analyse geändert, „bereits übernommen“ —
+  sondert nur diesen Fall aus), eine Vorschau der angenommenen (was sie verwirft, wird ausgesondert und die
+  Vorschau EINMAL ohne ihn wiederholt), Abgleich jedes Werts mit der gezeigten Nummer, dann EINE Übernahme mit
+  dem Token — alle angenommenen oder keine. Jeder Fall kommt mit Ergebnis zurück: ergänzt, abgelehnt (mit Grund),
+  übersprungen, nicht übernommen. Nicht fallbezogene Fehler (Sitzung beendet, Rechte) beenden den Lauf vor jeder
+  Übernahme.
+- **„Finanzielle Angaben abgleichen“**: der bestehende Sammeldialog, nur Warenwert und Versand, jetzt ebenfalls
+  über die ganze Sitzung.
+- Keine Migration: die Prüfungen aus `0180` decken jeden Fall ab (`ref_present`, `ref_taken`, `rival_sale`,
+  `rival_order`, `competitors`, `uncertain`, `window`, `stale`); eine Auswahl fasst bis zu 500 Entscheidungen.
+
+### Grenzen
+
+- Ein Verkauf, der **nach** der Prüfung unter Sperre zum Konkurrenten wird (neu angelegt und noch nicht
+  festgeschrieben), ist für diesen Lauf unsichtbar — dieselbe Grenze wie bei `0180`. Ein bereits
+  festgeschriebener neuer Konkurrent lehnt ab.
+- Ohne `0186` auf Staging antwortet die Ausschlussliste mit „noch nicht verfügbar“ (PGRST202); nichts wird
+  geändert.
+
+### Konsequenzen
+
+- Keine Figur, kein Betrag, kein Datum, kein Lager, keine Reservierung, keine Abgleichszeile wird durch die
+  Bestellzuordnung verändert.
+- Rücknahme `R0186` entfernt nur die Funktion; eingetragene Nummern bleiben (jede im Journal).
+
+## ADR-0182 · Nicht zugeordnete Bestellungen: Kandidaten neu suchen, ausdrücklich zuordnen
+
+**Status:** angenommen (Betreiber, 2026-11-09). Kandidatenanzeige umgesetzt (ohne Migration);
+**Migration `0185` auf Staging angewendet am 2026-11-09** (Nachkontrolle 9999 = 0; Nachweis in
+`supabase/migrations/APPLIED.md`; berechtigter Postflight und Oberflächentest offen). **Production: NICHT angewendet.** **Betrifft:** ADR-0178 (Abgleich), `match.ts`, `0180` (Konkurrenzregel)
+
+### Kontext
+
+Die Analyse eines Berichts ist ein Schnappschuss. 06-14518-99785 blieb „nicht zugeordnet“, weil Verkauf 381
+erst danach angelegt wurde — die Bewertung der Analyse selbst gibt ihm offline 105 von 105 Punkten. Nicht
+zugeordnete Bestellungen wurden nach der Analyse nie wieder betrachtet.
+
+### Entscheidung
+
+1. **Identität, Abweichung, Bestätigung, Korrektur getrennt.** Kandidaten sind eine Empfehlung; Identität
+   entsteht erst durch ausdrückliche Zuordnung; Abweichungen zeigt danach die Karte; korrigiert wird mit den
+   bestehenden Werkzeugen.
+2. **Kandidaten beim Laden** (`candidates.ts`, `attachOrderContext`): eine Abfrage `seller_recon_candidates`
+   für die Seite, Fenster ±14 Tage, dazu die Aliase der Analyse. Bewertet mit `scoreCandidate` unverändert
+   (dessen „null“ wird als 0 gezeigt, nicht verworfen); die drei besten, der Rest gezählt; „Weitere Verkäufe
+   suchen“ über einen frei gewählten Zeitraum (höchstens 92 Tage). Nie Kandidat: ein in der Sitzung gepaarter
+   Verkauf, ein Verkauf mit anderer Bestellnummer, ein Test, ein stornierter Verkauf.
+3. **Transparenz:** je Kandidat Figuren mit Art der Paarung, Stückzahlen, Warenwert mit Rabatt, Versand,
+   Datum und Abstand, Bestellnummer, Konkurrenten (`rivals.ts`), Link zum Verkauf. Hinweise auf eine andere
+   Serie als im Angebotstitel (`listingSeries`) oder einen ähnlichen Namen werden gezeigt und NICHT gezählt.
+4. **Zuordnung (`0185`, `seller_recon_assign_sale`):** schreibt nur `external_order_ref` (Stufe A der Analyse),
+   unter Sperre und mit Pflicht-Version; nie überschreiben; keine doppelte Nummer; ein in irgendeiner
+   zählenden Sitzung gepaarter Verkauf wird nicht verdrängt; die Konkurrenzregel aus `0180` gilt
+   unverändert. Danach findet die Karte den Verkauf über die Nummer und zeigt den Vergleich neu.
+
+### Konkurrenten — entschieden in ADR-0183
+
+In `0185` sperren Konkurrenten (`rival_sale`, `rival_order`) die Zuordnung vollständig, und dabei bleibt es.
+Den Ausschluss einzelner Konkurrenten regelt ADR-0183 als eigene Funktion (`0186`): die aktuelle
+Konkurrentenmenge muss GENAU der ausgeschlossenen entsprechen, jeder Verkauf mit gesehenem Stand.
+
+### Konsequenzen
+
+- Keine gespeicherte Zuordnung, keine Abgleichsentscheidung, keine Figur, kein Betrag, kein Lager wird verändert.
+- Rücknahme `R0185` entfernt nur die Funktion; eingetragene Nummern bleiben (jede im Journal).
+
+## ADR-0181 · Der CSV-Abgleich öffnet den bestehenden Verkaufsdialog — Anlage ohne Reservierung auf Wunsch
+
+**Status:** angenommen (Betreiber, 2026-11-09). **Migration `0184` auf Staging angewendet am 2026-11-09**
+(Nachkontrolle 9999 = 0, genau eine Fassung; Nachweis in `supabase/migrations/APPLIED.md`; berechtigter
+Postflight und Oberflächentest offen). **Production: NICHT angewendet.** **Ersetzt** den Anlegeweg von ADR-0180 in der
+Oberfläche. **Betrifft:** ADR-0092 (Verkauf anlegen), `0110` (externe Holds), ADR-0180
+
+### Kontext
+
+Der eigene Dialog aus ADR-0180 war ein zweiter Verkaufseditor: feste Werte aus dem Bericht, Stückzahlen
+gegen den Bericht, keine Gebühren, kein Käufer. Der Betrieb will die Bestellung im gewohnten Dialog prüfen,
+Angaben korrigieren, die Figuren selbst wählen und bewusst speichern.
+
+### Entscheidung
+
+1. **Ein Dialog.** Eine nicht zugeordnete Bestellung führt über „Externen Verkauf anlegen“ zu
+   `/business/orderbuch/verkauf/neu?abgleich&bestellung` — `NewSale`, unverändert in Aufbau und Speichern.
+2. **Vorausgefüllt, nicht festgelegt:** Vorlage eBay, Verkaufsdatum, Bestellnummer (Referenz), Zielland,
+   Warenwert, Versand — gelesen SERVERSEITIG aus der gespeicherten Sitzung, nie aus der Adresse; jedes Feld
+   bleibt änderbar. Käufer und Gebühren bleiben leer. Die Berichtszeilen stehen als Orientierung über dem
+   Formular; übernommen wird keine — Figuren, Varianten, Stückzahlen wählt der Betrieb in der bestehenden
+   Figurenauswahl. Steht die Nummer schon an einem Verkauf, zeigt die Seite ihn statt des Formulars.
+3. **„Bestand sofort reservieren“** erscheint nur beim Einstieg aus dem Abgleich und ist dort AUS; die
+   normale Anlage reserviert wie bisher und zeigt den Schalter nicht. Der Modus geht ausdrücklich mit
+   (`createSaleWithDetails({ hold })`).
+4. **`0184`:** `seller_create_sale_with_details` erhält `p_hold boolean default true`. `false` fügt dieselben
+   Positionen ohne `hold_sale_item` ein; NULL wird abgelehnt. Die alte 15-Argument-Signatur wird in derselben
+   Transaktion entfernt (keine Overload, PostgREST bliebe sonst mehrdeutig); Rechte und Kommentar neu gesetzt.
+   Die App sendet `p_hold` nur, wenn es `false` ist — der normale Aufruf bleibt byte-gleich mit dem vor 0184
+   und funktioniert auch auf einer Datenbank ohne 0184; dort scheitert allein die Anlage ohne Reservierung,
+   laut (`PGRST202`), nie still mit Reservierung.
+5. Nach „Anlegen“ zurück zur Karte im Abgleich, die den Verkauf über die Bestellnummer erkennt und verlinkt;
+   „Abbrechen“ ist ein Link zurück und schreibt nichts. Doppelte Nummer: der Index aus `0171`, mit eigenem Satz.
+
+### Konsequenzen
+
+- `seller_recon_create_sale` (0183) bleibt auf Staging unverändert stehen, wird aber von keiner Oberfläche
+  mehr gerufen; der Dialog aus ADR-0180 ist entfernt. Ob die Funktion später zurückgenommen wird
+  (`R0183`), ist eine eigene Entscheidung.
+- Reservieren und Ausbuchen danach über die bestehenden Positionsfunktionen (`0110`).
+- Rücknahme `R0184` stellt den Rumpf aus `0110` wieder her; die App muss dann `p_hold` nicht mehr senden.
+
+## ADR-0180 · Eine nicht zugeordnete Bestellung wird zur offenen Bestellung — aus dem Bericht, ohne Reservierung
+
+**Status:** angenommen (Betreiber, 2026-11-09). **Migration `0183` auf Staging angewendet am 2026-11-09**
+(Nachkontrolle 9999 = 0, Nachweis in `supabase/migrations/APPLIED.md`; berechtigter Postflight und
+Oberflächentest offen). **Production: NICHT angewendet.**
+**Betrifft:** ADR-0178 (CSV-Abgleich), `0110` (externe Holds), `0171` (Bestellnummer je Kanal)
+
+### Kontext
+
+Der April-Abgleich fand die Bestellung 06-14518-99785, zu der SkyIsles keinen Verkauf kennt. Sie
+von Hand abzutippen kostet Zeit und lädt zu Tippfehlern ein; und jeder bestehende Anlageweg
+(`seller_create_sale_with_details` → `seller_add_sale_item`) reserviert freien Bestand sofort (`0110`).
+
+### Entscheidung
+
+1. Eine Funktion, `seller_recon_create_sale(order, pieces)`, kein paralleler Bestellprozess: das
+   Ergebnis ist ein gewöhnlicher externer Verkauf (`source = 'manual'`) im bestehenden Orderbuch.
+2. **Kopf und Geld liest die Datenbank aus dem gespeicherten Bericht** (`sales_recon_orders`):
+   Bestellnummer, Verkaufsdatum, Zielland, Warenwert, Versand, Rabatt 0 — und nur, wenn die Summe genau
+   Warenwert + Versand ist. Käufer (der Bericht hat keinen, `0169`), Gebühren, Erstattungen,
+   Auszahlung und Versanddatum bleiben leer; was der Bericht zu Zahlung und Versand sagt, steht als
+   Herkunft in der Notiz.
+3. **Je Stück eine ausdrücklich bestätigte Figur.** Der Aufrufer sendet nur `{line, skyId}` je Stück;
+   der Rohname kommt aus der Berichtszeile, die Stückzahlen müssen der Zeile und der Summe entsprechen,
+   eine Figur muss im Katalog stehen. Die Vorschau wählt nur einen **eindeutigen** Katalogtreffer
+   (exakter Name) vor; mehrdeutige (Spyro's Adventure / Giants) werden angeboten, nie gewählt; ohne
+   Treffer: Katalogsuche oder ausdrücklich „ohne Katalogfigur“. „Anlegen“ verlangt jede Entscheidung
+   und die Bestätigung „Ich habe jede Figur und Variante geprüft“.
+4. **Keine Reservierung, keine Lagerbewegung:** die Positionen werden direkt eingefügt
+   (`hold_sale_item` wird nicht gerufen). Danach gilt der bestehende Ablauf — Reservieren
+   (`seller_hold_sale_item`), Ausbuchen (`seller_book_sale_item`, bucht auch ohne Hold), Versand,
+   Abschließen. Eine Position ohne Hold ist seit `0110` ein zulässiger Zustand; nichts Neues nötig.
+5. **Nur einmal:** die Bestellzeile wird gesperrt (`for update`), eine schon vergebene Bestellnummer
+   antwortet `exists` mit dem Verkauf; der Index aus `0171` ist der Boden. Nur das Betriebskonto, nur
+   eine `external_only`-Bestellung ohne Verkauf einer **offenen** Sitzung. Journal je Verkauf und Position.
+6. Der Abgleich bleibt, was er war: keine Zeile in den Abgleichstabellen. Die Karte erkennt den
+   angelegten Verkauf an der Bestellnummer (`attachOrderContext`: erst im ±3-Tage-Fenster der Kandidaten,
+   sonst über `seller_sales` mit der Nummer, exakt auf Kanal und Nummer — das Datum entscheidet nichts) und
+   verlinkt ihn statt die Anlage erneut anzubieten; eine neue Analyse ordnet die Bestellung regulär zu.
+
+### Konsequenzen
+
+- **Seit ADR-0181 (2026-11-09) ist der eigene Dialog aus dem Ablauf entfernt**; die Oberfläche öffnet den
+  bestehenden Verkaufsdialog. Die Funktion bleibt auf Staging unverändert und ungenutzt.
+- Mehr als eine Funktion braucht es nicht; keine Tabelle, also keine Sicherungsänderung.
+- Rücknahme `R0183` entfernt nur die Funktion; angelegte Verkäufe sind Geschäftsvorfälle und bleiben.
+- Die finanzielle CSV-Übernahme (`0180`) ist unverändert; ihre Prüffunktion steht im Lauf unter Z2.
+
+## ADR-0179 · Positionen importierter Verkäufe werden korrigiert, nicht überschrieben
+
+**Status:** angenommen (Betreiber, 2026-11-08; Datumsschutz und Sicherung ergänzt 2026-11-09).
+**Migrationen `0181` und `0182` auf Staging angewendet am 2026-11-09** (EIN gemeinsamer Lauf
+`staging-0181-0182.sql`, Nachkontrolle 9999 = 0, Nachweis in `supabase/migrations/APPLIED.md`;
+berechtigter Postflight und Oberflächentest noch offen). **Production: NICHT angewendet.**
+**Betrifft:** ADR-0089 (Positionen), ADR-0099 (Freigabe, gefrorene Historie, `0071`),
+ADR-0178 (CSV-Abgleich), `0065`/`0088`/`0110`
+
+### Kontext
+
+Der CSV-Abgleich findet bei Verkäufen aus der Arbeitsmappe falsche Figuren und fehlende
+Positionen (April, Verkauf 152: drei Positionen, fünf Stück im Bericht). Korrigieren ließ sich das
+nicht: `seller_remove_sale_item` und `seller_set_sale_item_sky` lehnen jede Arbeitsmappenzeile ab
+(„its provenance is not editable“), die Oberfläche bot bei importierten Verkäufen gar nichts an.
+`seller_add_sale_item` hätte zwar angenommen, schreibt aber kein Audit, setzt `updated_at` nicht
+und versucht einen Lager-Hold. Und der Arbeitsmappen-Sync (`system_sync_legacy_sale_item`, 0088)
+hätte jede Korrektur beim nächsten Lauf zurückgeschrieben.
+
+### Entscheidung
+
+Ein **eigener, engerer Weg** neben den normalen — die Sperren der normalen Wege bleiben:
+
+1. `seller_correct_legacy_sale_item(item, sky_id, version)` — ändert **nur** `sky_id`.
+   `raw_name` (Regel 4), `source_row`, `position`, beide Legacy-Flags bleiben.
+2. `seller_add_legacy_sale_item(sale, sky_id | raw_name, condition, version)` — eine Position ohne
+   Quellzeile und Flags, **ohne Hold**.
+3. `seller_remove_legacy_added_item(item, version)` — nur eine Position, die eine Korrektur
+   ergänzt hat; eine Arbeitsmappenzeile wird nie gelöscht.
+4. Gemeinsame Bedingungen: Betriebskonto; externer, nicht stornierter Verkauf mit
+   `source = 'excel_order_2026'`; die Version (`updated_at`) ist **Pflicht** (PT409); die Position
+   ohne Bewegung, Rückgabe, angekündigte Rückgabe, Abschluss, „nicht verschickt“ und aktiven Hold.
+5. **Revisionssicher:** `sale_item_corrections` (append-only, Trigger; ohne Fremdschlüssel auf die
+   Position, damit auch eine Entfernung ihre Spur behält) hält Aktion, Position, Quellzeile, alten
+   und neuen Wert und das Konto. Die erste Ersetzung einer Arbeitsmappenzeile nennt deren
+   ursprüngliche `sky_id`/`raw_name` für immer. Zusätzlich `orderbook_audit` und
+   `orderbook_touch_sale`.
+6. Der Sync lehnt eine korrigierte Zeile ab (Wortlaut von 0088 plus eine Prüfung); das Werkzeug
+   `sync-legacy-orderbook.mts` meldet sie schon im Plan und schreibt dann gar nichts.
+7. Oberfläche: dieselbe Positionsliste (`SaleItems`), bei importierten Verkäufen mit „Figur
+   korrigieren“, „Fehlende Position ergänzen“ und „Entfernen“ (nur Ergänztes). Jede Wahl wird
+   **vorgemerkt**; geschrieben wird erst mit „Speichern“. Korrigierte Zeilen zeigen
+   „korrigiert · Arbeitsmappe: …“, ergänzte „nachträglich ergänzt“.
+8. Navigation: „Figuren / Stückzahl bearbeiten“ an Figuren- und Stückzahlbefunden →
+   `/verkauf/<id>?abgleich&bestellung&ansicht#positionen`, dort „Zurück zum Abgleich“; im
+   Verkaufsfenster „Positionen bearbeiten“.
+9. Neubewertung: Für einen geänderten Verkauf — oder einen mit anderer Positionszahl (ein normales
+   Hinzufügen bewegt `updated_at` nicht) — lädt die Abgleichseite die aktuellen Positionen aus
+   `seller_recon_candidates` und die Aliase aus `seller_recon_aliases`, also aus genau den
+   Lesefunktionen der Analyse; `live.ts` paart sie mit `matchPieces` und urteilt mit `diffPair`.
+   Ein behobener Figuren- oder Stückzahlbefund ist damit erledigt. Ohne aktuelle Positionen oder
+   ohne gespeicherte Positionsliste des Berichts bleibt der gespeicherte Befund stehen.
+
+### Konsequenzen
+
+- Keine Lagerbewegung, keine Reservierung, kein Betrag, keine Gebühr, keine Erstattung.
+- Der CSV-Abgleich ändert weiterhin keine Position; gespeicherte CSV-Entscheidungen greifen nach
+  einer Korrektur nicht mehr (`sales_recon_take_check` → `stale`).
+- Der Sync bleibt blockiert, bis die Arbeitsmappe an die Korrektur angepasst ist — gewollt.
+- Rücknahme `R0181` nur, solange keine Korrektur existiert, und erst nach `R0182`.
+
+### Ergänzung 2026-11-09 — von Hand korrigierte Kopfdaten und die Sicherung
+
+10. **Ein im Orderbuch korrigiertes Datum schreibt die Mappe nicht zurück.** Der einzige
+    Schreibpfad der Mappe auf ein Kopffeld ist `system_sync_legacy_sale_group` (0089, `sold_at`).
+    `0181` ersetzt ihn zeichengleich plus eine Prüfung: Hält `orderbook_audit` eine Änderung von
+    `sold_at` an diesem Verkauf (`seller_update_sale`/`seller_set_sale_date` — der Sync selbst
+    schreibt kein Audit, der Import nur `insert`) und weicht das Datum der Mappe ab, wird
+    abgelehnt (`restrict_violation`). Gleiches Datum läuft wie bisher. Beide Werkzeuge prüfen es
+    **vor** dem ersten Schreiben (`manualDateConflicts` in `legacy-sync-groups.ts`):
+    `sync-legacy-orderbook.mts` hält den ganzen Lauf an und nennt die Verkäufe (dieselbe Regel wie
+    bei korrigierten Positionen — ein stilles Überspringen gäbe es nicht, weil der neu gestempelte
+    Fingerabdruck sonst eine Übereinstimmung behauptete); `apply-workbook-dates.mts` lässt den
+    Verkauf unverändert und nennt ihn. Käufer, Beträge, Referenz, Land und Notiz haben **keinen**
+    Schreibpfad der Mappe: Käufer und Warenwert sind beim Sync schon `unexplained` (Lauf hält an),
+    die übrigen vergleicht und schreibt er gar nicht. Aufgelöst wird ein Konflikt, indem die Mappe
+    an die Korrektur angeglichen wird — kein Abschalten des Syncs.
+    *Grenze:* ein früherer Lauf von `apply-workbook-dates.mts` schreibt ebenfalls eine
+    `sold_at`-Auditzeile; ändert sich die Mappe danach erneut, gilt das ebenfalls als Konflikt
+    und wird von Hand im Orderbuch entschieden — fail closed.
+11. **Die Spur ist in beiden Sicherungen** (`0182`, Muster von `0174`): `seller_business_backup()`
+    (36 Bereiche, Formatversion 1) und `system_platform_export()` (62 Bereiche, **Formatversion
+    4**; Archive der Version 3 bleiben mit 61 gültig) führen `sale_item_corrections` mit 10 von 12
+    Spalten. Draußen nach bestehender Regel: `corrected_by` (Kontoidentität) und `source_row`
+    (Legacy-Zeilennummer, `FORBIDDEN_FIELDS`). Wiederherstellungsrelevant: die Spur ist nach einer
+    Korrektur die einzige Stelle mit der ursprünglichen Figur, und der Sync-Schutz aus Punkt 6
+    liest sie. Probe P82 (`verify:check-sql`) exportiert eine Korrektur durch beide Sicherungen und
+    spielt sie aus jedem Archiv Spalte für Spalte zurück. `0181` und `0182` laufen auf Staging in
+    **einer** Transaktion — die Tabelle entsteht nie ohne ihre Sicherung.
+- Namensvarianten (Verkauf 143 „Scorp“, Verkauf 141 Portalnummern) sind **keine** Datenfehler und
+  werden nicht durch Positionsänderungen „passend gemacht“; eine kuratierte Aliasliste ist ein
+  separater Vorschlag.
+
 ## ADR-0178 · Der Verkaufsabgleich übernimmt nur Nachgewiesenes, nur Ausgewähltes, nur mit Token
 
 **Status:** LOKAL VORBEREITET · 2026-11-05 (siehe Git). Migration `0180` ist auf **Staging und
@@ -17156,6 +17466,151 @@ geändert** — Produktentscheidung des Betreibers; 0180 könnte es, die Actions
 Folge: Entscheidungen entstehen erst beim Bestätigen, nicht beim Öffnen oder Analysieren; bei
 gesperrter Übernahme (`APPLY_RELEASED = false`) entsteht auch keine Entscheidung. Keine
 Migration, 0180 unverändert.
+
+### Ergänzung 2026-11-08 — Die Bestätigung im Dialog ist die Freigabe
+
+**Status:** angenommen (Betreiber, 2026-11-08). Lokal umgesetzt, nicht committet.
+
+**Kontext.** Bisher war die Übernahme bis zu einer *eigenen* Freigabe gesperrt
+(`APPLY_RELEASED = false`): erst Abnahme von 0180 auf Staging (A, B, C), dann ein eigener Commit.
+Der Betreiber will keinen zusätzlichen Freigabeprozess — „Abgleich bestätigen“ soll selbst die
+ausdrückliche Autorisierung sein, die ausgewählten Werte zu übernehmen.
+
+**Entscheidung.** `APPLY_RELEASED = true`. Der Wert bleibt als **Notbremse** stehen (committet
+`false` sperrt wieder alles vor dem ersten Aufruf), ist aber keine Freigabestufe mehr; einen
+Umgebungsschalter gibt es weiterhin nicht. Kein neuer Bestätigungsmechanismus ersetzt ihn.
+
+**Was die Übernahme auf Staging begrenzt** ist nicht dieser Wert:
+`reconciliationAvailable()` lässt jede Abgleich-Action nur gegen das Staging-Projekt zu, und auf
+Production fehlt 0180. Eine Production-Freigabe braucht 0180 dort und eine eigene Entscheidung.
+
+**Was unverändert gilt:** Staging- und Betreiberprüfung vor jedem Aufruf (`gate()`) und in der
+Datenbank (`sales_recon_gate()`); nur die im Dialog ausgewählten Einträge, nur Warenwert, Versand
+und Bestellnummer, nie ein Datum, eine Figur, eine Stückzahl oder ein Gesamtbetrag; Vorschau und
+Token vor der Übernahme, Abgleich der Vorschauwerte mit den angezeigten; unter Sperre neu
+beurteilt (`already_applied`, `stale`, Erstattung, Storno, unsicheres Paar); ein
+`seller_update_sale` je Verkauf gegen die gesperrte Version, mit `orderbook_audit`; alles oder
+nichts.
+
+**Abnahme von 0180.** B ist abgenommen (2026-11-06). C — echte Parallelität, lokal, ohne
+Netz — am 2026-11-08 7/7 bestanden (`npm run test:recon-pg`, ohne Nachweisdatei). A — der
+schreibfreie Ablehnungslauf über PostgREST auf Staging — ist **nicht gefahren**. Der Betreiber
+gibt die Übernahme trotzdem frei; A bleibt als offener Prüfschritt stehen.
+
+**Konsequenzen.** Der erste echte Abgleich auf Staging schreibt in Verkäufe — erst nach eigener
+Freigabe des Betreibers für genau diesen Lauf.
+
+### Ergänzung 2026-11-08 — Ergebnisansicht mit drei Kategorien und Abgleich-Historie
+
+**Status:** angenommen (Betreiber, 2026-11-08). Lokal umgesetzt, nicht committet. Keine Migration.
+
+**Kontext.** Die Datenbank-Kategorien (`exact`, `deviating`, …) beschreiben die Analyse, nicht
+was zu tun ist: eine Bestellung hieß „Stimmt überein“, obwohl ihre Bestellnummer noch fehlte.
+
+**Entscheidung.**
+- Jede Bestellung genau einer Kategorie (`orderOutcome`, `src/lib/reconciliation/plan.ts`),
+  abgeleitet aus demselben Plan wie „Abgleichen“: **Abweichung** (Widerspruch, Datum, Figur,
+  Stückzahl, Gesamtbetrag, nicht beurteilbarer Befund, unsicheres Paar, seit der Analyse
+  geänderter Verkauf, nicht nachgewiesener Vergleichswert) vor **Ergänzen** (nur fehlende,
+  eindeutig belegte Angaben) vor **Identisch**. Einseitige Zeilen als **Nicht zugeordnet**,
+  Zusatzkandidaten weiter getrennt. Unbekanntes wird nie „Identisch“. Die Kategorie beschreibt
+  die Daten, nicht die Sitzung: eine fehlende Nummer bleibt auch in einer abgeschlossenen
+  Sitzung „Ergänzen“.
+- Die Ergebnisseite liest **alle** Einträge einer Sitzung (Seiten zu `PAGE_LIMIT_MAX`, höchstens
+  `ALL_PAGES_MAX`; darüber ein Hinweis statt Teilzahlen), zählt und filtert serverseitig über
+  `?ansicht=`. Kein technischer Sitzungskopf mehr.
+- Upload: genau **eine** CSV-Datei; technische Angaben hinter „Einzelheiten“. Der Server nimmt
+  weiterhin mehrere Dateien an — die Grenze ist eine der Oberfläche.
+- **Abgleich-Historie** statt Sitzungsliste: nur Sitzungen mit mindestens einer Übernahme
+  (`applied > 0` aus `seller_recon_sessions()`).
+
+**Entfernen aus der Historie — braucht eine Migration, noch nicht umgesetzt.** Löschen ist
+ausgeschlossen: `sales_recon_decisions` und `sales_recon_applications` sind nur anfügbar
+(Trigger aus 0169), ihre Fremdschlüssel auf Sitzung und Verkauf stehen auf `on delete restrict`,
+`seller_recon_discard` lehnt eine Sitzung mit Übernahmen ab. Es gibt keine Spalte zum Ausblenden.
+Entwurf: `sales_recon_sessions` um `hidden_at timestamptz` und `hidden_by uuid` (→ `auth.users`,
+`on delete set null`) ergänzen; neue Funktion `seller_recon_hide(p_id)` (Tor
+`sales_recon_gate()`, nur für eine nicht offene Sitzung mit Übernahmen, setzt nur diese zwei
+Spalten); `seller_recon_sessions()` liefert `hiddenAt`, die Historie blendet aus. Kein Wert eines
+Verkaufs, keine Entscheidung, keine Übernahme und kein `orderbook_audit` ändert sich.
+
+**Konsequenzen.** Die Datenbank-Kategorien bleiben in Daten, Tests und der Zusammenfassung
+unverändert; sie stehen nur nicht mehr als Wort auf der Karte.
+
+### Ergänzung 2026-11-08 — Vom Abgleich ins Orderbuch und zurück; Neubewertung nach Korrektur
+
+**Status:** angenommen (Betreiber, 2026-11-08). Lokal umgesetzt, nicht committet. Keine Migration.
+
+**Navigation.** „Im Orderbuch bearbeiten“ öffnet nicht mehr die Figurenseite `/verkauf/<id>`
+(dort ist kein Datum änderbar), sondern das vorhandene Bearbeitungsfenster der Verkaufsliste
+(`/verkauf?verkauf=<id>`). Mit dabei drei **geprüfte Teile** statt einer URL: `abgleich` und
+`bestellung` (nur Ziffern, `parseSessionParam`) und `ansicht` (nur ein Wort aus `VIEW_WORDS`).
+„Zurück zum Abgleich“ wird daraus **gebaut** (`returnHref`: Sitzung, Filter,
+`#recon-match-<id>`) — auf der Seite und im Fenster; nichts aus der Adresszeile wird als Ziel
+übernommen. Die Teile bleiben an der eigenen Adresse der Liste, damit das Schließen des Fensters
+den Rückweg nicht verliert. Ohne sie verhält sich die Liste unverändert (`withReturn(href, null)`).
+
+**Neubewertung.** Befunde werden bei der Analyse gespeichert; nach einer Korrektur im Orderbuch
+zeigt der Treffer nur `ledger.state = changed`. Die Datenbank liefert bei jedem Lesen den
+**aktuellen** Stand des Verkaufs (`ledger.current`, 0178). Für einen geänderten Verkauf läuft
+die **Regel der Analyse selbst** (`diffPair`, unverändert) auf gespeicherte Bestellung und
+aktuellen Stand (`src/lib/reconciliation/live.ts`): Datum, Warenwert, Versand, Gesamtbetrag,
+Stückzahl, Bestellnummer. Ein gespeicherter Befund, der so nicht mehr abweicht, gilt als erledigt;
+eine neu entstandene Abweichung wird gesehen. **Figuren** bleiben, wie die Analyse sie sah — ihre
+aktuellen Namen sind nicht Teil von `ledger.current`, und eine Positionsänderung setzt
+`sales.updated_at` nicht. Es wird nichts geschrieben; Entscheidungen bleiben unberührt. Ein
+geänderter Verkauf kann in dieser Sitzung weiterhin nichts übernehmen (0180: `stale`); fehlt
+dort noch die Bestellnummer, heißt das „Ergänzen“, ergänzt wird nach neuer Analyse.
+
+**Bearbeitungsstand** getrennt vom Datenstand (`workState`): Offen · Teilweise erledigt ·
+Erledigt. Eine übernommene Nummer bei weiter abweichendem Datum ist „Teilweise erledigt“.
+
+**Nicht nötig:** eine Datenbankänderung. Eine echte Neuberechnung der Figuren je Treffer bräuchte
+eine neue Funktion, die die Befunde eines Treffers ersetzt — bewusst nicht umgesetzt.
+
+**Historisches Datum von Hand (2026-11-08).** Für eine Werkbuchzeile (`excel_order_2026`, auch eine
+nicht freigegebene, 0071) sperrt **nichts** das Datum: der Frost aus 0071 gilt der
+Lagerarbeit (Buchen, Abschließen, Holds, Versand), nicht `sold_at`; `seller_update_sale` (0091)
+kennt keine Herkunftsregel und schreibt eine Auditzeile `sold_at` alt → neu. Belegt auf PGlite mit
+den Funktionsrümpfen aus 0062/0091/0113 (`src/lib/orderbook/sale-date-correction.test.ts`):
+Datum korrigierbar, 42501 für Nicht-Betreiber, PT409 für ein veraltetes Fenster, Beträge,
+Erstattungen, Positionen und Lager unverändert, neuer Tag hinten angestellt, alter Tag nicht
+umnummeriert (Lücke bleibt sichtbar, 0113). Was den Betreiber hinderte, war der Ablauf im Fenster:
+Eingaben erst nach „Bearbeiten“, und „Fertig“ sowie Schließen schrieben nichts. Deshalb öffnet das
+Fenster aus dem Abgleich heraus direkt mit Eingaben, und ein getippter, nicht gespeicherter Stand
+wird angesagt („Noch nicht gespeichert …“). Geschrieben wird weiterhin nur durch „Speichern“; der
+CSV-Abgleich überträgt nach wie vor kein Datum. Keine Migration.
+
+**Verkaufsdetails an Ort und Stelle (2026-11-08).** Wie im Einkaufsfenster (`purchase-inline-edit`):
+jede Angabe steht einmal und wird beim Bearbeiten an ihrer Stelle zum Feld (Datum, Land, Käufer,
+Referenz, Notiz); der angehängte zweite Block ist weg. Kopfzeile: „Bearbeiten“ — im Bearbeiten
+„Speichern“ und „Abbrechen“; den Umschalter „Fertig“ gibt es nicht mehr. Der Entwurf wird beim
+Eintritt und beim Abbrechen aus dem aktuellen Verkauf gebaut (`draftOf`). Schließen, Escape,
+Hintergrund und „Zurück zum Abgleich“ warnen bei offenen Eingaben (auch einer getippten, nicht
+hinzugefügten Gebühr oder Erstattung) mit „Weiter bearbeiten“ / „Verwerfen und …“. Nur die
+Oberfläche; Aktionen, Rechte, Audit und Tagesplatz-Tausch unverändert.
+
+**Sammelabgleich: abgelehnte Übernahmen benennen (2026-11-08).** Ursache von „Diese Angabe ist
+hier nicht zulässig“ im April-Abgleich (Sitzung 12, Staging, nur gelesen): `seller_recon_decide`
+prüft jeden Befund mit `sales_recon_take_check` und lehnte zwei der 35 Bestellnummern mit
+`23514 this finding cannot be taken over (rival_sale)` ab — für die Bestellungen vom 29. und
+30.04. liegen im ±3-Tage-Fenster die ungepaarten Verkäufe 158/160 vom **01.05.** mit derselben
+Figur, also außerhalb des Berichtszeitraums. Die Datenbank hat richtig (vorsichtig) entschieden;
+der Fehler lag in der Anwendung: `message()` kannte für 23514 nur „cannot be applied“, alles andere
+wurde zu `rejected`, und die Schleife brach beim ersten Befund ab, ohne zu sagen, welcher. Die
+Oberfläche kann `take_check` nicht vorab fragen (kein Client-Recht) und zeigt solche Paare daher
+weiter als „Ergänzen“. Jetzt: `confirmReconciliation` entscheidet **alle** Einträge, sammelt jede
+Ablehnung mit ihrem Grundcode (nur Codes aus `SELECTION_PROBLEMS`, nie Text oder Werte) und gibt
+dann `{ ok: false, refused }` zurück — **ohne Preview und ohne Apply**, keine stillschweigende
+Teilübernahme. Andere Ablehnungen beenden weiterhin sofort. Die dabei gespeicherten Entscheidungen
+ändern keinen Verkauf (Notizen, wie nach jeder Ablehnung). Der Dialog nennt je Eintrag Bestellung,
+Verkauf, Feld und Grund, markiert ihn an seiner Stelle und sperrt „Abgleich bestätigen“, solange ein
+abgelehnter Eintrag ausgewählt ist; „Diese N Angaben abwählen“ ist ein eigener Klick, die Bestätigung
+danach eine neue. Der Sammelabgleich sendet je Bestellung dieselben Einträge wie der Einzelabgleich;
+eine Bestellung ohne Verkauf („Nicht zugeordnet“) ist nie darin. **Option, nicht umgesetzt:** eine
+Migration, die `take_check` je Befund lesend in die Sitzung legt — dann stünden solche Paare schon vor
+dem Bestätigen unter „Abweichung“; oder `rival_sale` auf den Berichtszeitraum begrenzen (lockert eine
+Sicherung, bräuchte eigene Freigabe).
 
 ## ADR-0177 · Der Verkaufsabgleich prüft jeden Upload ganz — auch einen, den er schon kennt
 
@@ -17428,7 +17883,8 @@ getrennten Endbestätigung übernehmen.
     28 → 35 Bereiche, `format_version` bleibt 1 (ADR-0114). Plattformsicherung 54 → 61 Bereiche,
     `format_version` **2 → 3** wie bei `0144` (ADR-0135); Archive der Versionen 1 und 2 bleiben
     lesbar. **Die früher für Favoriten, `offer_state` und die Verfügbarkeitstabellen angekündigte
-    „Formatversion 3“ wird damit zur 4**; die Laufzettel `0146`–`0150` nennen noch die 3 und bleiben
+    „Formatversion 3“ wird damit zur 4** (seit `0182`, ADR-0179, zur **5**: die 4 trägt die
+    Korrekturspur `sale_item_corrections`); die Laufzettel `0146`–`0150` nennen noch die 3 und bleiben
     als ausgeführte Akten unverändert. Der Umlauf (sichern, leeren, aus dem Archiv einspielen,
     vergleichen) ist Probelauf P74.
 12. **Aufbewahrung:** Sitzungen werden nie gelöscht. Eine beendete Sitzung kann ihre

@@ -2057,7 +2057,7 @@ kann.
 - **Konflikte:** angezeigte Werte und `sales.updated_at` werden bei jeder Entscheidung geprüft,
   beim Anwenden alle betroffenen Verkäufe gesperrt und verglichen — sonst `PT409`, und nichts
   geschieht.
-- **Nur nachgewiesene Übernahmen (`0180`, ADR-0178 — lokal vorbereitet, nirgends angewendet).**
+- **Nur nachgewiesene Übernahmen (`0180`, ADR-0178 — auf Staging angewendet, auf Production nicht).**
   Kategorie, Sicherheit und Berichtswerte des Payloads gelten nicht mehr als Beweis: die
   Datenbank prüft bei Entscheidung, Vorschau und Übernahme mit derselben Funktion
   (`sales_recon_take_check`) Paar, Sicherheit, Konkurrenten, Bestellnummer, Berichtswert gegen
@@ -2066,11 +2066,16 @@ kann.
   Auswahl, gebunden an den Token der Vorschau und unter Sperre neu beurteilt; die alte
   Übernahme ohne Auswahl hat kein Clientrecht mehr und weist im Rumpf ab. Fehlermeldungen
   nennen Grundcodes, keine Werte. RLS, Policies und Verkäuferrechte bleiben unverändert.
-- **Vorbereiten ist nicht Übernehmen (Schritt 6A).** Die Server Action `applySelection` ist
-  gesperrt (`APPLY_RELEASED = false` in `src/lib/reconciliation/release.ts`, kein Schalter in der
-  Umgebung) und ruft bis zur eigenen Freigabe keine Datenbankfunktion auf. Keine Seite und keine
-  Komponente importiert eine Entscheidungs-, Vorschau- oder Übernahmeaktion (Test
-  `selection.test.tsx`). `decideFinding` weist `manual` und freie Werte vor dem Aufruf ab.
+- **Die Bestätigung ist die Freigabe (ADR-0178, Ergänzung 2026-11-08).** „Abgleich bestätigen“
+  im Dialog autorisiert die Übernahme; es gibt keine zweite Freigabe und keinen Schalter in der
+  Umgebung (`APPLY_RELEASED = true` in `src/lib/reconciliation/release.ts`, nur noch Notbremse:
+  committet `false`, rufen `confirmReconciliation` und `applySelection` keine Datenbankfunktion
+  auf). Die Grenze zu Production ist nicht dieser Wert, sondern `reconciliationAvailable()` — jede
+  Abgleich-Action ruft nur gegen das Staging-Projekt etwas auf — und dass 0180 auf Production
+  fehlt. Davor bleibt `canOperateSeller()`, dahinter `sales_recon_gate()`. Die Oberfläche benutzt
+  nur `confirmReconciliation`; `decideFinding`, `previewSelection` und `applySelection` importiert
+  keine Seite (Test `selection.test.tsx`). `decideFinding` weist `manual` und freie Werte vor
+  dem Aufruf ab.
 - **Der Prüflauf für 0180 hinterlässt nichts und gilt nur für Staging (Schritt 6B).**
   `supabase/operations/staging-0180-probe.sql` ist eine einzige Transaktion ohne `commit`, die
   zurückgerollt wird; ihre Prüffunktionen liegen nur in `pg_temp` der Sitzung, ohne Clientrecht, und
@@ -2094,3 +2099,60 @@ kann.
   beiden ausführen darf. Das vorhandene `service_role`-Recht auf der Betriebssicherung (Supabases
   Voreinstellung, auf Staging gemessen) bleibt bestehen; darüber entscheidet die zentrale
   Sicherung (ADR-0175).
+
+### Zuordnung trotz Konkurrenz (`0186`, ADR-0183 — auf Staging angewendet 2026-11-09, Production nicht)
+
+- `seller_recon_confirm_order_ref`: `security definer`, leerer `search_path`, nur `authenticated`, Betriebskonto in
+  der Funktion. Bestellung und Paar kommen aus der gespeicherten Sitzung (Server-Action `confirmWithExclusions`).
+- **Keine Abschwächung bestehender Regeln:** `sales_recon_take_check` (`0180`) und `seller_recon_assign_sale`
+  (`0185`) bleiben Wort für Wort, ohne neuen Parameter. Wer Konkurrenten ausschließt, ruft ausdrücklich diese
+  Funktion; ohne Konkurrenten lehnt sie ab (`no_rivals`).
+- Kein pauschaler Ausschluss: jeder Konkurrent einzeln, die Menge muss gleich der unter Sperre neu ermittelten
+  sein, jeder Verkauf mit dem gesehenen Stand (`for share`); Begründung Pflicht; jede Ausnahme im Journal.
+- Unverändert: nie überschreiben, keine doppelte Nummer, keine andere Paarung verdrängen, Pflicht-Version.
+- „Bestellnummer übernehmen“ ohne Konkurrenten bleibt der Weg aus `0180` (ein Befund, Vorschau, Token).
+- „Eindeutige Bestellnummern übernehmen“ (Sammelaktion, ohne Migration): derselbe Weg für viele Fälle; nur die in
+  der Vorschau gezeigten, jeder aus der gespeicherten Sitzung neu gebaut; Konkurrenzfälle nie gesammelt;
+  fallbezogene Ablehnungen sondern nur den Fall aus, die Übernahme selbst bleibt alles oder nichts (Token).
+
+### Zuordnung einer nicht zugeordneten Bestellung (`0185`, ADR-0182 — auf Staging angewendet 2026-11-09, Production nicht)
+
+- `seller_recon_assign_sale`: `security definer`, leerer `search_path`, nur `authenticated`, Betriebskonto in der
+  Funktion. Die Bestellung kommt aus der gespeicherten Sitzung (Server-Action), nie aus dem Browser.
+- Nur ein Feld; nie überschreiben; Version Pflicht; Sperren auf Bestellung und Verkauf; bestehende Paarungen und die
+  Konkurrenzregel aus `0180` unverändert — der Ausschluss einzelner Konkurrenten ist eine eigene Funktion (`0186`, oben).
+
+### Anlage ohne Reservierung (`0184`, ADR-0181 — auf Staging angewendet 2026-11-09, Production nicht)
+
+- `seller_create_sale_with_details` behält Betriebskonto-Prüfung, Grenzen, Sperrordnung und Rechte (`authenticated`,
+  nie PUBLIC/anon); genau eine Fassung, keine Overload. `p_hold` NULL wird abgelehnt; Standard ist die Reservierung.
+- Die Vorausfüllung aus dem Abgleich liest die Bestellung serverseitig aus der Sitzung; die Adresse nennt nur Sitzung
+  und Karte (geprüfte Ganzzahlen).
+
+### Offene Bestellung aus dem CSV-Abgleich (`0183`, ADR-0180 — auf Staging angewendet 2026-11-09, Production nicht)
+
+- `seller_recon_create_sale`: `security definer`, leerer `search_path`, EXECUTE nur für
+  `authenticated`, in der Funktion `can_operate_active_seller()` — sonst 42501.
+- Kein Wert für Kopf, Geld oder Rohnamen vom Client: alles aus dem gespeicherten Bericht. Der Client
+  nennt je Stück nur Zeile und Katalogfigur; jeder andere Schlüssel wird abgelehnt.
+- Keine Reservierung, keine Lagerbewegung, keine Gebühr, keine Erstattung; kein Schreiben in die
+  Abgleichstabellen. Doppelte Anlage: Zeilensperre plus Index `sales_external_order_ref_per_channel`.
+
+### Korrektur importierter Verkaufspositionen (`0181`/`0182`, ADR-0179 — auf Staging angewendet 2026-11-09, Production nicht)
+
+- `seller_correct_legacy_sale_item`, `seller_add_legacy_sale_item`, `seller_remove_legacy_added_item`,
+  `seller_sale_item_corrections`: `security definer`, leerer `search_path`, EXECUTE nur für
+  `authenticated`, in der Funktion `can_operate_active_seller()` — sonst 42501.
+- Nur externe, nicht stornierte Arbeitsmappenverkäufe; normale Verkäufe behalten ihre Funktionen
+  und deren Sperren unverändert.
+- Version Pflicht (PT409 bei veraltet); keine Position mit Bewegung, Rückgabe, Abschluss oder Hold.
+- Die Spur `sale_item_corrections` ist append-only, ohne Client-Recht; eine Arbeitsmappenzeile wird
+  nie gelöscht und ihr ursprünglicher Wert bleibt dort erhalten.
+- Die Helfer `sales_legacy_correction_*` haben kein Client-Recht; beide Sync-Funktionen
+  (`system_sync_legacy_sale_item`, `system_sync_legacy_sale_group`) bleiben `service_role`.
+- Von Hand Korrigiertes überschreibt die Arbeitsmappe nicht: weder eine korrigierte Position noch
+  ein im Orderbuch korrigiertes Datum (Ablehnung in der Datenbank, Anhalten in beiden Werkzeugen
+  vor dem ersten Schreiben).
+- Sicherung (`0182`): die Spur geht ohne Kontoidentität (`corrected_by`) und ohne
+  Legacy-Zeilennummer (`source_row`) in beide Sicherungen; Rechte beider Exportfunktionen
+  unverändert (geprüft vor und nach dem Ersetzen), nie PUBLIC oder anon.

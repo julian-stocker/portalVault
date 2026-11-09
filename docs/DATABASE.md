@@ -2438,7 +2438,7 @@ setzt sie auf 0. Decke bei 2000 SKY-IDs je Aufruf.
 (hängt an `user_id`, und fremde Wunschlisten in einem Händlerexport wären ein
 Leck). In der Plattformsicherung heute ebenfalls ausgeschlossen — **aber
 vorübergehend und mit Bedingung**: die Folgemigration nach
-`0144`-auf-Production nimmt sie als Bereich auf (Formatversion 4 — die 3 ist seit `0174` durch den Verkaufsabgleich belegt, ADR-0174). Siehe
+`0144`-auf-Production nimmt sie als Bereich auf (Formatversion 5 — die 3 ist seit `0174` durch den Verkaufsabgleich belegt, ADR-0174, die 4 seit `0182` durch die Handkorrekturen). Siehe
 ADR-0136 und `supabase/checks/platform_export_gap.md`.
 
 ### 3.5b `offer_state` — der Angebotsspiegel (Migrationen `0146`, `0147`)
@@ -5517,3 +5517,82 @@ Nicht-Testverkäufe mit gesetzter Referenz.
 
 **Rücknahme:** zuerst `R0174_backups_without_sales_reconciliation.sql`, dann
 `R0169_0173_drop_sales_reconciliation.sql`. Der zweite bricht ab, sobald eine Sitzung existiert.
+
+## `seller_recon_confirm_order_ref` — Bestellnummer trotz Konkurrenz, jeder Konkurrent ausgeschlossen (Migration `0186`, ADR-0183)
+
+**Auf Staging angewendet am 2026-11-09, auf Production nicht.** `seller_recon_confirm_order_ref(p_order_id, p_sale_id,
+p_expected_updated_at, p_excluded jsonb, p_note) → jsonb {status: confirmed|exists, sale_id, excluded_sales,
+excluded_orders}`. `p_excluded = {"sales": [{"id", "updatedAt"}], "orders": [{"id"}]}` — genau diese zwei
+Schlüssel, höchstens 50 Einträge. Zwei Wege: eine nicht zugeordnete Bestellung (`external_only`) mit einem
+bestehenden Verkauf, oder genau das sichere Paar (`exact`/`deviating`), jeweils in einer nicht verworfenen
+Sitzung. Die Konkurrenten werden unter Sperre mit den Prädikaten aus `sales_recon_take_check` (`0180`) neu
+ermittelt; die Menge muss gleich der ausgeschlossenen sein, jeder Konkurrenzverkauf mit dem angegebenen
+`updated_at` (gelesen `for share`). Schreibt nur `sales.external_order_ref` (+ `updated_at`/`updated_by`) und
+`orderbook_audit`: eine Zeile `external_order_ref`, je Konkurrent eine Zeile `rival_excluded`
+(`old_value` „sale <id> @ <Stand>“ bzw. „order <Nummer>“, `new_value` „<Nummer> (pair|unmatched) — <Begründung>“).
+Ablehnungen (`this order number cannot be confirmed (<code>)`): `version_required`, `note`, `exclusions`,
+`session`, `not_assignable`, `no_lines`, `sale`, `ref_present`, `ref_taken`, `paired`, `no_rivals`,
+`rivals_changed`; PT409 bei veralteter Version. `sales_recon_take_check` und `seller_recon_assign_sale` bleiben
+unverändert. Rücknahme `supabase/rollback/R0186_…` (nur die Funktion).
+
+## `seller_recon_assign_sale` — nicht zugeordnete Bestellung einem bestehenden Verkauf zuordnen (Migration `0185`, ADR-0182)
+
+**Auf Staging angewendet am 2026-11-09, auf Production nicht.** `seller_recon_assign_sale(p_order_id, p_sale_id,
+p_expected_updated_at) → jsonb {status: assigned|exists, sale_id}`. Schreibt nur `sales.external_order_ref`
+(+ `updated_at`/`updated_by`, eine `orderbook_audit`-Zeile). Ablehnungen (`this sale cannot be assigned (<code>)`):
+`version_required`, `session`, `not_unmatched`, `no_lines`, `sale`, `ref_present`, `ref_taken`, `paired`,
+`rival_sale`, `rival_order`; PT409 bei veralteter Version. Rücknahme `supabase/rollback/R0185_…`.
+
+## `seller_create_sale_with_details(…, p_hold)` — Anlage ohne Reservierung auf Wunsch (Migration `0184`, ADR-0181)
+
+**Auf Staging angewendet am 2026-11-09, auf Production nicht.** Letzter Parameter `p_hold boolean default
+true`: `true` wie seit `0110` (jede freie Figur wird gehalten), `false` dieselben Positionen ohne Hold, NULL
+abgelehnt. Die 15-Argument-Signatur ist entfernt — genau eine Funktion dieses Namens. Rechte wie `0065`
+(`authenticated`). Rücknahme `supabase/rollback/R0184_…` (Rumpf aus `0110`).
+
+## `seller_recon_create_sale` — nicht zugeordnete Bestellung als offene Bestellung (Migration `0183`, ADR-0180)
+
+Seit `0184` (ADR-0181) von keiner Oberfläche mehr gerufen.
+
+**Auf Staging angewendet am 2026-11-09, auf Production nicht.** Eine Funktion, keine Tabelle.
+`seller_recon_create_sale(p_order_id bigint, p_pieces jsonb) → jsonb {status: created|exists, sale_id}`
+legt aus einer `external_only`-Bestellung ohne Verkauf einer offenen Sitzung einen Verkauf an:
+`channel`, `sold_at`, `external_order_ref`, `destination_country_code`, `items_subtotal`,
+`shipping_charged` aus `sales_recon_orders`, `discount_amount` 0, `buyer_ref` NULL, `source` `manual`,
+Notiz mit Sitzung, Bericht, Datensatz, Zahlungs- und Versanddatum laut Bericht. `p_pieces` = je Stück
+`{line, skyId}`; `raw_name` aus der Berichtszeile; Stückzahlen je Zeile und gesamt gegen den Bericht.
+Positionen direkt in `sale_items` (`condition` = `v1_sale_condition()`), **kein Hold, keine Bewegung**.
+Journal: `orderbook_audit` `insert` je Verkauf und Position. Sperrt die Bestellzeile; vergebene
+Bestellnummer → `exists`. Rücknahme `supabase/rollback/R0183_…` (nur die Funktion).
+
+## `sale_item_corrections` — Positionen importierter Verkäufe korrigieren (Migration `0181`, ADR-0179)
+
+**Auf Staging angewendet am 2026-11-09 (mit `0182`, ein gemeinsamer Lauf), auf Production nicht.**
+
+| Spalte | Bedeutung |
+|---|---|
+| `sale_id` | der Verkauf (`on delete restrict`) |
+| `sale_item_id` | die Position — **ohne** Fremdschlüssel, damit eine entfernte ergänzte Position ihre Spur behält |
+| `action` | `replace` (Katalogfigur), `add` (fehlende Position), `remove` (nur eine ergänzte) |
+| `position`, `source_row` | Platz und Arbeitsmappenzeile zum Zeitpunkt der Korrektur (`source_row` NULL bei ergänzten) |
+| `old_sky_id`, `old_raw_name`, `new_sky_id`, `new_raw_name` | vorher / nachher |
+| `corrected_at`, `corrected_by` | wann, welches Konto |
+
+Append-only (Trigger `sale_item_corrections_append_only`), RLS an, kein Client-Recht auf die
+Tabelle. Geschrieben nur durch `seller_correct_legacy_sale_item`, `seller_add_legacy_sale_item`,
+`seller_remove_legacy_added_item`; gelesen durch `seller_sale_item_corrections(sale)`. Alle drei
+schreibenden Funktionen verlangen die Version des Verkaufs, schreiben `orderbook_audit` und setzen
+`sales.updated_at`; keine ruft `hold_sale_item`, keine berührt Lager, Beträge, Gebühren oder
+Erstattungen. Auf der Position ändert eine Korrektur nur `sky_id`; `raw_name`, `source_row`,
+`position` und die Legacy-Flags bleiben die der Arbeitsmappe. `system_sync_legacy_sale_item` (0088)
+lehnt seit `0181` eine korrigierte Zeile ab, und `system_sync_legacy_sale_group` (0089) ein im
+Orderbuch korrigiertes `sold_at` (eine `update`-Zeile für `sold_at` in `orderbook_audit`), sobald
+das Datum der Mappe abweicht. Rücknahme: `supabase/rollback/R0181_…`, nur solange die Tabelle leer
+ist und erst nach `R0182`.
+
+**In beiden Sicherungen seit `0182`** (auf Staging angewendet am 2026-11-09, gemeinsam mit `0181`;
+Production nicht): Bereich `sale_item_corrections` in `seller_business_backup()` (36 Bereiche, Version 1) und
+`system_platform_export()` (62 Bereiche, Formatversion **4**). Exportiert werden 10 der 12 Spalten;
+`corrected_by` (Kontoidentität) und `source_row` (Legacy-Zeilennummer) bleiben draußen. Die
+ursprüngliche Figur jeder korrigierten Zeile steht damit auch nach einer Wiederherstellung in
+`old_sky_id`/`old_raw_name`. Rücknahme `supabase/rollback/R0182_…` (die Rümpfe aus `0174`).
