@@ -39,12 +39,12 @@ const NAV = readFileSync("src/components/business/orderbook-nav.tsx", "utf8");
 const render = async (sitzung?: string) =>
   renderToStaticMarkup(await ReconciliationPage({ searchParams: Promise.resolve({ sitzung }) }));
 
-const session = (id: number, state: "open" | "closed" | "discarded") => ({
+const session = (id: number, state: "open" | "closed" | "discarded", applied = 1) => ({
   id, channel: "ebay", state, coveredFrom: "2026-01-01", coveredTo: "2026-01-31", chainComplete: true,
   createdAt: "2026-11-03T10:00:00+00:00",
   closedAt: state === "closed" ? "2026-11-04T10:00:00+00:00" : null,
   discardedAt: state === "discarded" ? "2026-11-04T10:00:00+00:00" : null,
-  snapshotsPurgedAt: null, summary: null, files: 1, decided: 0, applied: 0,
+  snapshotsPurgedAt: null, summary: null, files: 1, decided: 0, applied,
 });
 
 beforeEach(() => {
@@ -85,11 +85,14 @@ describe("the gates", () => {
 });
 
 describe("the states", () => {
-  it("empty: the heading and one sentence, no alert", async () => {
+  it("empty: the heading, the CSV choice, the history heading and one sentence, no alert", async () => {
     const html = await render();
     expect(html).toContain(`<h1`);
     expect(html).toContain(copy.title);
-    expect(html).toContain(copy.list.empty);
+    expect(html).toContain(copy.history.empty);
+    // CSV first, the history below it.
+    expect(html.indexOf(copy.picker.heading)).toBeGreaterThan(-1);
+    expect(html.indexOf(copy.picker.heading)).toBeLessThan(html.indexOf(copy.history.heading));
     expect(html).not.toContain('role="alert"');
   });
 
@@ -99,16 +102,18 @@ describe("the states", () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain(copy.errors.loadFailed);
     expect(html).toContain('href="/business/orderbuch/abgleich"');
-    expect(html).not.toContain(copy.list.empty);
+    expect(html).not.toContain(copy.history.empty);
   });
 
-  it("sessions in all three states, newest first as delivered", async () => {
-    MOCK.result = { status: "ok", sessions: [session(3, "open"), session(2, "closed"), session(1, "discarded")] };
+  it("the history lists only reconciliations that took a value over, newest first as delivered", async () => {
+    MOCK.result = { status: "ok", sessions: [session(4, "open", 0), session(3, "open"), session(2, "closed", 3), session(1, "discarded", 0)] };
     const html = await render();
-    const order = ["Sitzung 3", "Sitzung 2", "Sitzung 1"].map((t) => html.indexOf(t));
+    const order = ["abgleich/3", "abgleich/2"].map((t) => html.indexOf(t));
     expect(order.every((i) => i > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    for (const s of ["open", "closed", "discarded"] as const) expect(html).toContain(copy.states[s]);
+    expect(html).not.toContain("abgleich/4");
+    expect(html).not.toContain("abgleich/1");
+    expect(html).toContain(copy.history.appliedCount(3));
   });
 
   it("links back to Verkauf and to each session's comparison page", async () => {
@@ -123,8 +128,7 @@ describe("after an analysis (?sitzung=)", () => {
     MOCK.result = { status: "ok", sessions: [session(3, "open"), session(2, "closed")] };
     const html = await render("3");
     expect(html.match(/data-marked="true"/g)?.length).toBe(1);
-    expect(html).toMatch(/data-marked="true"[^>]*>[\s\S]*?Sitzung 3/);
-    expect(html).toContain(copy.list.justAnalysed);
+    expect(html).toMatch(/data-marked="true"[^>]*>[\s\S]*?abgleich\/3/);
   });
 
   it("ignores anything that is not a session id", async () => {
@@ -136,7 +140,7 @@ describe("after an analysis (?sitzung=)", () => {
 describe("the way in from Verkauf", () => {
   it("is a link under Extern, only where the reconciliation exists", () => {
     expect(SALES).toMatch(/scope === "extern" && reconciliationEnvironment\(\) \?[\s\S]*href=\{RECONCILIATION_PATH\}/);
-    expect(SALES).toContain('import { RECONCILIATION_PATH } from "@/lib/reconciliation/routes"');
+    expect(SALES).toMatch(/import \{[^}]*\bRECONCILIATION_PATH\b[^}]*\} from "@\/lib\/reconciliation\/routes"/);
     expect(SALES).toContain("de.business.reconciliation.entry");
   });
 

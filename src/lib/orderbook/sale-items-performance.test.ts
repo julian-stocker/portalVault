@@ -149,7 +149,8 @@ describe("kein gemeinsames pending mehr", () => {
      * Dokumentation: wer eine sechste Steuerung einbaut, soll sie bewusst
      * an `working` hängen und nicht vergessen.
      */
-    expect((detail.match(/disabled=\{working\}/g) ?? []).length).toBe(5);
+    // 0181: „Figur korrigieren" und „Entfernen" einer ergänzten Position — beide an `working`.
+    expect((detail.match(/disabled=\{working\}/g) ?? []).length).toBe(7);
   });
 
   it("das Verkaufsbuch ebenso, über alle aufgeklappten Zeilen hinweg", () => {
@@ -281,9 +282,17 @@ describe("revalidatePath ist aus dem Positions-Hotpath verschwunden", () => {
     expect(detail).toContain("const ensureFigures = useCallback(");
     expect(detail).toContain("loadOrderbookFigures()");
     // Fokus steigt in React auf: die Suche braucht dafür keinen eigenen Handler.
-    expect((detail.match(/onFocus=\{ensureFigures\}/g) ?? []).length).toBe(2);
+    // 0181: dazu die Suche „Fehlende Position ergänzen" eines importierten Verkaufs.
+    expect((detail.match(/onFocus=\{ensureFigures\}/g) ?? []).length).toBe(3);
     // Und einmal geholt, wird er nicht erneut geholt.
-    expect(detail).toContain("if (catalog !== undefined || figures !== null || loadingFigures) return;");
+    expect(detail).toContain("if (catalog !== undefined || figures !== null || loadingFigures || showsAddSearch) return;");
+  });
+
+  it("und auf einer Seite mit Hinzufügen-Suche sofort — ein abgeschaltetes Feld bekäme nie Fokus (2026-11-09)", () => {
+    expect(detail).toContain("const showsAddSearch = !(internal || (historical && !correctable));");
+    expect(detail).toContain("if (!showsAddSearch || catalog !== undefined) return;");
+    // Bis die Antwort da ist: „lädt“, nicht „gescheitert“.
+    expect((detail.match(/loading=\{catalogLoading\}/g) ?? []).length).toBe(3);
   });
 
   it("die Action reicht die EINE Katalogquelle durch", () => {

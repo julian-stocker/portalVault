@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 import { PLATFORM_FORMAT_VERSION, PLATFORM_SECTIONS, SECTIONS_BY_FORMAT_VERSION }
   from "./platform-manifest";
-import { SALES_RECONCILIATION_SECTIONS } from "./manifest";
+import { SALE_ITEM_CORRECTIONS_SECTIONS, SALES_RECONCILIATION_SECTIONS } from "./manifest";
 import { columnsOf } from "@/test-support/migrations";
 
 /**
@@ -156,11 +156,13 @@ describe("die Formatversion und die alten Archive", () => {
    * ohne die sieben Bereiche, die `0174` hinzugefügt hat.
    */
   const NEU_0174 = new Set(SALES_RECONCILIATION_SECTIONS.map((s) => s.key));
-  const V2 = PLATFORM_SECTIONS.filter((s) => !NEU_0174.has(s.key));
+  /* Und seit `0182` (Version 4) der eine Bereich der Handkorrekturen. */
+  const NEU_0182 = new Set(SALE_ITEM_CORRECTIONS_SECTIONS.map((s) => s.key));
+  const V2 = PLATFORM_SECTIONS.filter((s) => !NEU_0174.has(s.key) && !NEU_0182.has(s.key));
 
-  it("die Zuordnung kennt Version 1 und 2 unverändert — und seit 0174 auch 3", () => {
-    expect(PLATFORM_FORMAT_VERSION).toBe(3);
-    expect(SECTIONS_BY_FORMAT_VERSION).toEqual({ 1: 53, 2: 54, 3: 61 });
+  it("die Zuordnung kennt Version 1 und 2 unverändert — und seit 0174 auch 3, seit 0182 auch 4", () => {
+    expect(PLATFORM_FORMAT_VERSION).toBe(4);
+    expect(SECTIONS_BY_FORMAT_VERSION).toEqual({ 1: 53, 2: 54, 3: 61, 4: 62 });
   });
 
   it("die Zahl zu Version 2 ist die Zahl der Bereiche im Manifest vor 0174", () => {

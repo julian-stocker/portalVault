@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 
-import { BACKUP_SECTIONS, SALES_RECONCILIATION_SECTIONS } from "./manifest";
+import { BACKUP_SECTIONS, SALE_ITEM_CORRECTIONS_SECTIONS, SALES_RECONCILIATION_SECTIONS } from "./manifest";
 
 /**
  * Die Bereiche, die die beiden Baselines kennen — das Manifest ohne die sieben
@@ -27,7 +27,9 @@ import { BACKUP_SECTIONS, SALES_RECONCILIATION_SECTIONS } from "./manifest";
  * nach dem Anwenden von `0174` braucht es eine NEUE, gemessene Baseline.
  */
 const NEU_0174 = new Set(SALES_RECONCILIATION_SECTIONS.map((s) => s.key));
-const VOR_0174 = BACKUP_SECTIONS.filter((s) => !NEU_0174.has(s.key));
+/* Und der eine Bereich aus `0182` (Handkorrekturen): die Baselines stammen von davor. */
+const NEU_0182 = new Set(SALE_ITEM_CORRECTIONS_SECTIONS.map((s) => s.key));
+const VOR_0174 = BACKUP_SECTIONS.filter((s) => !NEU_0174.has(s.key) && !NEU_0182.has(s.key));
 import {
   auditBackup, baselineForDocument, BASELINE_JE_PROJEKT, buildFieldPlan,
   fieldsFromBackupSql, PRODUCTION_BASELINE, report, STAGING_BASELINE,
@@ -204,7 +206,7 @@ describe("ein stimmiges Dokument geht glatt durch", () => {
 
   it("alle Bereiche des Manifests gezählt", () => {
     expect(Object.keys(ergebnis.areaCounts)).toHaveLength(BACKUP_SECTIONS.length);
-    expect(BACKUP_SECTIONS).toHaveLength(35);
+    expect(BACKUP_SECTIONS).toHaveLength(36);
     expect(ergebnis.areaCounts.purchase_receipts).toBe(2);
     expect(ergebnis.areaCounts.purchase_receipt_downloads).toBe(2);
   });
@@ -451,9 +453,9 @@ describe("das Werkzeug liest eine Datei und sonst nichts", () => {
  * ======================================================================== */
 
 describe("der Feldplan kommt aus Manifest UND SQL-Rumpf", () => {
-  it("der Parser findet alle 35 Bereiche und ihre Felder", () => {
+  it("der Parser findet alle 36 Bereiche und ihre Felder", () => {
     const imSql = fieldsFromBackupSql(LETZTE_FASSUNG.sql);
-    expect(Object.keys(imSql)).toHaveLength(35);
+    expect(Object.keys(imSql)).toHaveLength(36);
     /* Die Bereichszeile selbst ist kein Feld — sie steht auf sechs
        Leerzeichen, Felder auf zehn. */
     expect(imSql.purchases).not.toContain("purchases");

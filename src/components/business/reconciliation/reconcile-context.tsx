@@ -6,12 +6,16 @@
  */
 import { createContext, useContext, type ReactNode } from "react";
 
+import type { ResultView } from "@/lib/reconciliation/routes";
+
 export type ReconcileState = {
   sessionId: number;
   /** The session can still be reconciled (`state = open`). */
   sessionOpen: boolean;
-  /** False: "Abgleich bestätigen" stays locked, and the action refuses on its own. */
+  /** False only with the emergency stop: "Abgleich bestätigen" stays locked, and the action refuses on its own. */
   applyReleased: boolean;
+  /** The result filter the page shows — the way back from the Orderbuch keeps it. */
+  view?: ResultView | null;
 };
 
 const ReconcileContext = createContext<ReconcileState | null>(null);

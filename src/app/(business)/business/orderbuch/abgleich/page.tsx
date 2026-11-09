@@ -1,9 +1,10 @@
 /**
  * Orderbuch — Verkaufsabgleich (ADR-0174, phase 4 step 2).
  *
- * The list of reconciliation sessions, and above it the report check
- * (`ReportPicker`). Each session opens its comparison page (`[id]`, step 5).
- * No decision, no session action yet: later steps, each released on its own.
+ * Two things, in this order (2026-11-08): choose ONE CSV report
+ * (`ReportPicker`, it opens the result of its comparison), and below it the
+ * "Abgleich-Historie" — only reconciliations that took at least one value
+ * over (`HistoryList`). An upload alone never fills the history.
  *
  * TWO GATES BEFORE THE FIRST QUERY.
  *
@@ -18,7 +19,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ReportPicker } from "@/components/business/reconciliation/report-picker";
-import { SessionList } from "@/components/business/reconciliation/session-list";
+import { HistoryList } from "@/components/business/reconciliation/session-list";
 import { de } from "@/lib/i18n/de";
 import { parseSessionParam, RECONCILIATION_PATH } from "@/lib/reconciliation/routes";
 import { fetchReconciliationSessions, reconciliationEnvironment } from "@/lib/reconciliation/server/queries";
@@ -50,8 +51,9 @@ export default async function ReconciliationPage({ searchParams }: {
       {/* Choosing and checking reports happens in the browser only (step 3). */}
       <ReportPicker />
 
-      <section aria-labelledby="recon-sessions" className="mt-8">
-        <h2 id="recon-sessions" className="text-base font-medium">{copy.list.heading}</h2>
+      <section aria-labelledby="recon-history" className="mt-8">
+        <h2 id="recon-history" className="text-base font-medium">{copy.history.heading}</h2>
+        <p className="mt-1 text-sm text-muted">{copy.history.intro}</p>
         {result.status === "error" ? (
           <div role="alert" className="mt-4 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">
             <p className="text-danger">{copy.errors.loadFailed}</p>
@@ -60,7 +62,7 @@ export default async function ReconciliationPage({ searchParams }: {
             </Link>
           </div>
         ) : (
-          <SessionList sessions={result.sessions} marked={marked} />
+          <HistoryList sessions={result.sessions} marked={marked} />
         )}
       </section>
     </main>

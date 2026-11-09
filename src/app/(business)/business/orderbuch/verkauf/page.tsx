@@ -28,7 +28,7 @@ import { parseStatus, rpcStatus, type OrderbookStatus } from "@/lib/orderbook/cl
 import { normaliseSearch, parseYearFilter, UNDATED } from "@/lib/orderbook/ledger";
 import { fetchSaleYears, fetchSales } from "@/lib/orderbook/sales-queries";
 import { parseScope, salesHref, SALE_SCOPES } from "@/lib/orderbook/sales-view";
-import { RECONCILIATION_PATH } from "@/lib/reconciliation/routes";
+import { parseReturn, RECONCILIATION_PATH, returnHref, withReturn } from "@/lib/reconciliation/routes";
 import { reconciliationEnvironment } from "@/lib/reconciliation/server/queries";
 
 export const metadata: Metadata = { title: de.business.sales.title };
@@ -39,7 +39,8 @@ const MONTHS = ["Januar","Februar","März","April","Mai","Juni","Juli","August",
 
 export default async function SalesPage({ searchParams }: {
   searchParams: Promise<{ bereich?: string; jahr?: string; monat?: string; q?: string;
-                          status?: string; verkauf?: string }>;
+                          status?: string; verkauf?: string;
+                          abgleich?: string; bestellung?: string; ansicht?: string }>;
 }) {
   const params = await searchParams;
   /*
@@ -67,7 +68,16 @@ export default async function SalesPage({ searchParams }: {
   const href = (y?: number | "ohne", m?: number) => salesHref(scope, y, m, search, status);
   const statusHref = (s: OrderbookStatus) =>
     salesHref(scope, year === UNDATED ? "ohne" : year, month, search, s);
-  const here = salesHref(scope, year === UNDATED ? "ohne" : year, month, search, status);
+  /*
+   * OPENED FROM THE RECONCILIATION (2026-11-08): `?abgleich=`, `?bestellung=`
+   * and `?ansicht=` are checked parts (`parseReturn`), never a URL. They stay on
+   * this page's own address, so closing the edit dialog (it replaces the URL
+   * with `here`) keeps "Zurück zum Abgleich" — and the link is built from the
+   * parts, never taken from the address bar. Without them nothing changes.
+   */
+  const fromReconciliation = parseReturn(params);
+  const here = withReturn(salesHref(scope, year === UNDATED ? "ohne" : year, month, search, status), fromReconciliation);
+  const backToReconciliation = fromReconciliation ? returnHref(fromReconciliation) : null;
   const chip = (active: boolean) =>
     `rounded-sky-md px-2 py-1 text-xs ring-1 ${active ? "bg-surface ring-fg/40" : "ring-border/70 text-muted"}`;
 
@@ -90,6 +100,15 @@ export default async function SalesPage({ searchParams }: {
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pt-6 pb-10 md:pt-8">
+      {backToReconciliation ? (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Link href={backToReconciliation} data-return-to-reconciliation=""
+                className="focus-ring inline-flex min-h-11 items-center rounded-sky-md bg-surface px-3 text-sm font-medium ring-1 ring-fg/40 hover:ring-fg sm:min-h-9">
+            <span aria-hidden="true">←&nbsp;</span>{de.business.reconciliation.result.backToReconciliation}
+          </Link>
+          <p className="text-xs text-muted">{de.business.reconciliation.result.fromReconciliation}</p>
+        </div>
+      ) : null}
       <h1 className="text-xl font-semibold tracking-tight md:text-2xl">{book.title}</h1>
 
       {/* Einkäufe · Verkäufe · + Neu — one row, the same place on both pages. */}
@@ -175,7 +194,7 @@ export default async function SalesPage({ searchParams }: {
         <p className="mt-8 text-sm text-muted">{empty}</p>
       ) : (
         <SalesLedger key={here} sales={ledger.sales} summary={ledger.summary} backHref={here}
-                     openSale={openSale} />
+                     openSale={openSale} returnHref={backToReconciliation} returnTarget={fromReconciliation} />
       )}
     </main>
   );

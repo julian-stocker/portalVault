@@ -1458,7 +1458,8 @@ describe("the Excel financial row", () => {
   it("an internal sale is read-only where commerce owns the fact", () => {
     // No payout editor on a SkyIsles order; commerce owns that money.
     expect(DETAILS).toMatch(/const internal = sale\.orderId !== null;/);
-    expect(DETAILS).toMatch(/\{internal \? null : \(/);
+    // Inline editing (2026-11-08): no Bearbeiten, Speichern or Abbrechen for an order.
+    expect(DETAILS).toMatch(/\{internal \? null : editing \? \(/);
     expect(DETAILS).toContain("copy.commerceOwned");
   });
 
@@ -1970,7 +1971,7 @@ describe("the Details overlay maintains an external sale", () => {
   it("editing is opt-in, and never offered for an internal sale", () => {
     // The breakdown stays readable; inputs appear when the owner says so.
     expect(DETAILS).toContain("const [editing, setEditing]");
-    expect(DETAILS).toMatch(/\{internal \? null : \([\s\S]{0,400}modal\.edit/);
+    expect(DETAILS).toMatch(/\{internal \? null : editing \? \([\s\S]{0,1600}modal\.edit/);
     expect(DETAILS).toContain("modal.commerceLocked");
     // The ledger itself grows no always-visible inputs.
     const row = LEDGER.slice(LEDGER.indexOf("<LedgerRow "), LEDGER.indexOf("</LedgerRow>"));

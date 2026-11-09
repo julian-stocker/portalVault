@@ -168,9 +168,10 @@ describe("der neue Rumpf ist der alte plus EINE Zeile", () => {
     expect(bereiche(NEUER_RUMPF)).toBe(bereiche(ALTER_RUMPF));
     expect(SECTIONS_BY_FORMAT_VERSION[2]).toBe(54);
     /* Und keine dritte Version ist mit DIESER Migration dazugekommen — die
-       dritte brachte erst `0174` (sieben Bereiche des Verkaufsabgleichs). */
-    expect(PLATFORM_FORMAT_VERSION).toBe(3);
-    expect(Object.keys(SECTIONS_BY_FORMAT_VERSION)).toEqual(["1", "2", "3"]);
+       dritte brachte erst `0174` (sieben Bereiche des Verkaufsabgleichs),
+       die vierte `0182` (die Handkorrekturen der Positionen). */
+    expect(PLATFORM_FORMAT_VERSION).toBe(4);
+    expect(Object.keys(SECTIONS_BY_FORMAT_VERSION)).toEqual(["1", "2", "3", "4"]);
   });
 });
 
@@ -250,9 +251,9 @@ describe("alte Archive bleiben lesbar", () => {
     format_version: 2,
     created_at: "2026-10-26T00:00:00.000Z",
     commerce_mode: "live",
-    /* Ein Archiv der Version 2: das Manifest ohne die sieben aus `0174`. */
+    /* Ein Archiv der Version 2: das Manifest ohne die sieben aus `0174` und den aus `0182`. */
     data: Object.fromEntries(PLATFORM_SECTIONS
-      .filter((s) => !s.key.startsWith("sales_recon_"))
+      .filter((s) => !s.key.startsWith("sales_recon_") && s.key !== "sale_item_corrections")
       .map((s) => [s.source, []])),
   };
 

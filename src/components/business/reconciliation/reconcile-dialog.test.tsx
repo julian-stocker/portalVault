@@ -83,13 +83,11 @@ const settle = async () => { await act(async () => { await new Promise((r) => se
 const open = () => act(() => button(t.button, container)!.click());
 
 describe("the dialog", () => {
-  it("addition preselected, conflict asks, date and figure only shown — with the way to the Orderbuch", () => {
+  it("no order number (its own act since 2026-11-09), conflict asks, date and figure only shown — with the way to the Orderbuch", () => {
     mount(false);
     open();
-    expect(row(1).dataset.state).toBe("MISSING_IN_SKYISLES");
-    expect(row(1).textContent).toContain(t.missing);
-    expect(row(1).textContent).toContain("06-14260-71832");
-    expect(row(1).querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);
+    expect(dialog().querySelector('[data-finding="1"]')).toBeNull();
+    expect(dialog().textContent).not.toContain(de.business.reconciliation.fields.external_order_ref);
     expect(row(2).dataset.state).toBe("CONFLICT");
     expect(row(2).querySelectorAll('input[type="radio"]')).toHaveLength(2);
     expect(row(2).textContent).toContain("4,99");
@@ -97,8 +95,11 @@ describe("the dialog", () => {
     for (const id of [3, 4]) {
       expect(row(id).dataset.state).toBe("READ_ONLY_DIFFERENCE");
       expect(row(id).querySelector("input")).toBeNull();
-      expect(row(id).querySelector('a[href="/business/orderbuch/verkauf/64"]')).not.toBeNull();
     }
+    // The date to the edit dialog; a figure to the sale's positions (2026-11-08) — both with the way back.
+    expect(row(3).querySelector('a[href="/business/orderbuch/verkauf?verkauf=64&abgleich=5&bestellung=50"]')).not.toBeNull();
+    expect(row(4).querySelector('a[href="/business/orderbuch/verkauf/64?abgleich=5&bestellung=50#positionen"]')?.textContent)
+      .toBe(t.positions);
     expect(row(3).textContent).toContain(t.reasons.date);
     expect(row(4).textContent).toContain(t.reasons.positions);
     expect(dialog().textContent).toContain(t.openConflicts(1));
@@ -108,7 +109,7 @@ describe("the dialog", () => {
     mount(false);
     open();
     act(() => row(2).querySelector<HTMLInputElement>('input[value="take_external"]')!.click());
-    expect(dialog().textContent).toContain(t.summary(1, 1, 1));
+    expect(dialog().textContent).toContain(t.summary(0, 1, 1));
     expect(dialog().textContent).toContain(t.notReleased);
     const confirm = button(t.confirm, dialog())!;
     expect(confirm.disabled).toBe(true);
@@ -119,28 +120,26 @@ describe("the dialog", () => {
 });
 
 describe("once released", () => {
-  it("waits for the conflict, then sends exactly the addition and the choice — never the date or the figure", async () => {
+  it("waits for the conflict, then sends exactly the choice — never the order number, the date or the figure", async () => {
     mount(true);
     open();
     expect(button(t.confirm, dialog())!.disabled).toBe(true);
     act(() => row(2).querySelector<HTMLInputElement>('input[value="keep_ledger"]')!.click());
-    expect(dialog().textContent).toContain(t.summary(1, 0, 1));
+    expect(dialog().textContent).toContain(t.summary(0, 0, 0));
     expect(button(t.confirm, dialog())!.disabled).toBe(false);
     act(() => button(t.confirm, dialog())!.click());
     await settle();
     expect(MOCK.confirm).toHaveBeenCalledWith({ sessionId: 5, items: [
-      { findingId: 1, field: "external_order_ref", decision: "take_external", shownLedger: null, shownExternal: "06-14260-71832" },
       { findingId: 2, field: "shipping", decision: "keep_ledger", shownLedger: 4.99, shownExternal: 5.49 },
     ] });
     expect(MOCK.refresh).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain(t.done(2, 1));
   });
 
-  it("an unticked addition is not sent; a refusal shows a known sentence only", async () => {
+  it("the order number is never sent from here; a refusal shows a known sentence only", async () => {
     MOCK.confirm.mockResolvedValue({ ok: false, message: "ERROR: relation sales 06-14260-71832" });
     mount(true);
     open();
-    act(() => row(1).querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
     act(() => row(2).querySelector<HTMLInputElement>('input[value="take_external"]')!.click());
     act(() => button(t.confirm, dialog())!.click());
     await settle();
@@ -148,5 +147,44 @@ describe("once released", () => {
     expect(dialog().textContent).toContain(t.failed);
     expect(dialog().textContent).not.toContain("relation sales");
     expect(MOCK.refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("released: cancelling and confirming twice", () => {
+  it("cancelling sends nothing and leaves the page as it was", async () => {
+    mount(true);
+    open();
+    act(() => row(2).querySelector<HTMLInputElement>('input[value="take_external"]')!.click());
+    act(() => button(t.cancel, dialog())!.click());
+    await settle();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(MOCK.confirm).not.toHaveBeenCalled();
+    expect(MOCK.refresh).not.toHaveBeenCalled();
+  });
+
+  it("a conflict left open keeps the confirmation disabled — nothing is sent", async () => {
+    mount(true);
+    open();
+    const confirm = button(t.confirm, dialog())!;
+    expect(confirm.disabled).toBe(true);
+    act(() => confirm.click());
+    await settle();
+    expect(MOCK.confirm).not.toHaveBeenCalled();
+  });
+
+  it("a double click confirms once", async () => {
+    let finish: (v: unknown) => void = () => {};
+    MOCK.confirm.mockImplementation(() => new Promise((r) => { finish = r; }));
+    mount(true);
+    open();
+    act(() => row(2).querySelector<HTMLInputElement>('input[value="keep_ledger"]')!.click());
+    const confirm = button(t.confirm, dialog())!;
+    act(() => { confirm.click(); confirm.click(); });
+    await settle();
+    expect(MOCK.confirm).toHaveBeenCalledTimes(1);
+    await act(async () => { finish({ ok: true, applied: 1, sales: 1 }); });
+    await settle();
+    expect(MOCK.confirm).toHaveBeenCalledTimes(1);
+    expect(MOCK.refresh).toHaveBeenCalledTimes(1);
   });
 });

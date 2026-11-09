@@ -143,9 +143,11 @@ describe("the four fingerprints", () => {
     expect(head).toContain("supabase/rollback/R0174_backups_without_sales_reconciliation.sql");
   });
 
-  it("latestFunction() sees 0174 as the newest version of both functions", () => {
-    expect(latestFunction("seller_business_backup").file).toBe("0174_backup_sales_reconciliation.sql");
-    expect(latestFunction("system_platform_export").file).toBe("0174_backup_sales_reconciliation.sql");
+  it("latestFunction() sees 0182 as the newest version of both functions — 0174 plus one area", () => {
+    // Since 0182 (hand corrections of workbook positions) the live bodies are
+    // 0174's plus one area each; `backup-sale-item-corrections.test.ts` proves it.
+    expect(latestFunction("seller_business_backup").file).toBe("0182_backup_sale_item_corrections.sql");
+    expect(latestFunction("system_platform_export").file).toBe("0182_backup_sale_item_corrections.sql");
   });
 });
 
@@ -174,7 +176,8 @@ describe("the business backup is the body from 0140 plus one block", () => {
     const keys = BACKUP_SECTIONS.map((s) => s.key);
     const at = keys.indexOf("name_mappings");
     expect(keys.slice(at + 1, at + 8)).toEqual(RECON_KEYS);
-    expect(keys[at + 8]).toBe("orders");
+    // Since 0182 the hand corrections follow, then orders.
+    expect(keys.slice(at + 8, at + 10)).toEqual(["sale_item_corrections", "orders"]);
   });
 
   it("format_version stays 1 — a new area does not raise it (ADR-0114)", () => {
@@ -223,15 +226,16 @@ describe("the platform export is the body from 0164 plus one block and two lines
     const keys = PLATFORM_SECTIONS.map((s) => s.key);
     const at = keys.indexOf("orderbook_audit");
     expect(keys.slice(at + 1, at + 8)).toEqual(RECON_KEYS);
-    expect(keys[at + 8]).toBe("seller_monthly_reports");
+    // Since 0182 the hand corrections follow, then seller_monthly_reports.
+    expect(keys.slice(at + 8, at + 10)).toEqual(["sale_item_corrections", "seller_monthly_reports"]);
   });
 
-  it("format_version 3, and the map keeps the two older versions readable", () => {
+  it("format_version 3 with 61 sections, and the map keeps it readable after 0182 (version 4)", () => {
     expect(P_NEW_BODY).toContain("'format_version', 3,");
-    expect(PLATFORM_FORMAT_VERSION).toBe(3);
-    expect(SECTIONS_BY_FORMAT_VERSION).toEqual({ 1: 53, 2: 54, 3: 61 });
-    expect(SECTIONS_BY_FORMAT_VERSION[3]).toBe(PLATFORM_SECTIONS.length);
-    expect(PLATFORM_SECTIONS.length - RECON_KEYS.length).toBe(SECTIONS_BY_FORMAT_VERSION[2]);
+    expect(PLATFORM_FORMAT_VERSION).toBe(4);
+    expect(SECTIONS_BY_FORMAT_VERSION).toEqual({ 1: 53, 2: 54, 3: 61, 4: 62 });
+    expect(SECTIONS_BY_FORMAT_VERSION[3]).toBe(PLATFORM_SECTIONS.length - 1);
+    expect(PLATFORM_SECTIONS.length - 1 - RECON_KEYS.length).toBe(SECTIONS_BY_FORMAT_VERSION[2]);
   });
 
   it("the block keeps the body one statement and adds no forbidden word", () => {

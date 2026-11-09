@@ -28,7 +28,7 @@ describe("the reconciliation's server actions", () => {
     const bodies = exported(ACTIONS);
     expect([...bodies.keys()].sort()).toEqual([
       "analyseReconciliation", "applySelection", "closeReconciliation", "confirmReconciliation", "decideFinding",
-      "discardReconciliation", "previewSelection", "thinReconciliationSnapshots",
+      "discardReconciliation", "previewSelection", "takeOrderNumber", "takeOrderNumbers", "thinReconciliationSnapshots",
     ]);
     for (const [name, body] of bodies) {
       const gated = body.indexOf("await gate()") >= 0 ? body.indexOf("await gate()") : body.indexOf("sessionCall(");

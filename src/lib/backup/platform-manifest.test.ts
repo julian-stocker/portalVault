@@ -55,9 +55,9 @@ describe("der Formatvertrag", () => {
      * nur die Bereiche DIESES Archivs, und ohne die Version könnte ein Leser
      * „älteres Archiv" nicht von „Bereich abhandengekommen" unterscheiden.
      * 3 seit `0174`, aus demselben Grund: sieben Bereiche des
-     * Verkaufsabgleichs.
+     * Verkaufsabgleichs. 4 seit `0182`: die Handkorrekturen der Positionen.
      */
-    expect(PLATFORM_FORMAT_VERSION).toBe(3);
+    expect(PLATFORM_FORMAT_VERSION).toBe(4);
     expect(PLATFORM_FORMAT).not.toBe("skyisles-business-backup");
   });
 
@@ -396,8 +396,8 @@ describe("der Business-Export bleibt unberührt", () => {
      * darunter beweist es —, aber die ausgeführte Fassung ist eine andere,
      * und `backup-sql.test.ts` hält jetzt diese Feld für Feld dagegen.
      */
-    /* 35 seit `0174`: die sieben Tabellen des Verkaufsabgleichs. */
-    expect(BACKUP_SECTIONS).toHaveLength(35);
+    /* 35 seit `0174`: die sieben Tabellen des Verkaufsabgleichs; 36 seit `0182`: die Handkorrekturen. */
+    expect(BACKUP_SECTIONS).toHaveLength(36);
     for (const key of ["purchase_receipts", "purchase_receipt_downloads",
                        "purchase_receipt_counters"]) {
       expect(BACKUP_SECTIONS.map((s) => s.key)).toContain(key);

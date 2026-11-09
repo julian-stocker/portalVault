@@ -550,6 +550,37 @@ export function saleItemEdits(
   return { canRemove: open, canRemap: open && item.returned_at === null };
 }
 
+/**
+ * DIE KORREKTUR IMPORTIERTER POSITIONEN (0181) — was der Bildschirm anbietet.
+ *
+ * Dieselben Bedingungen, die `seller_correct_legacy_sale_item` und
+ * `seller_remove_legacy_added_item` prüfen, damit kein Knopf erscheint, den
+ * die Datenbank ablehnen würde. Die Datenbank bleibt die Grenze:
+ *
+ *   correctable   ein externer, nicht stornierter Arbeitsmappenverkauf
+ *   canCorrect    die Position hat keinen Vorgang — keine Bewegung, keine
+ *                 Rückgabe, keinen Abschluss, keinen Hold
+ *   canRemoveAdded  dazu: sie stammt nicht aus der Mappe (keine
+ *                 Quellzeile, keine Flags) — dann hat sie eine Korrektur ergänzt
+ */
+export function legacyItemCorrections(
+  item: {
+    movement_id: number | null; return_movement_id: number | null; returned_at: string | null;
+    return_announced_at?: string | null; settled_at?: string | null; not_shipped_at?: string | null;
+    held?: boolean | null; source_row?: number | null;
+    legacy_stock_flag?: string | null; legacy_shipped_flag?: string | null;
+  },
+  context: { correctable: boolean },
+): { canCorrect: boolean; canRemoveAdded: boolean } {
+  const untouched = context.correctable
+    && item.movement_id === null && item.return_movement_id === null && item.returned_at === null
+    && (item.return_announced_at ?? null) === null && (item.settled_at ?? null) === null
+    && (item.not_shipped_at ?? null) === null && item.held !== true;
+  const fromWorkbook = (item.source_row ?? null) !== null
+    || (item.legacy_stock_flag ?? null) !== null || (item.legacy_shipped_flag ?? null) !== null;
+  return { canCorrect: untouched, canRemoveAdded: untouched && !fromWorkbook };
+}
+
 /** What the Verkauf ledger's stock column says about a whole sale (0072/0075). */
 export type SaleStockStatus =
   | "cancelled" | "frozen" | "outbooked" | "returned" | "closed" | "partial" | "open";

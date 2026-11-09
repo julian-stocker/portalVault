@@ -16,8 +16,12 @@
  * through 0180. Nothing is written by opening the dialog, by ticking, or by
  * choosing a side.
  *
- * LOCKED WHILE `APPLY_RELEASED` IS FALSE: the confirm button stays disabled
- * and says why; and the action itself refuses before any database call.
+ * "Abgleich bestätigen" IS the operator's authorisation (ADR-0178,
+ * 2026-11-08) — there is no second approval. It is enabled once every
+ * conflict is chosen and something would be sent; one click, one call
+ * (`busy` blocks a second one). Only the emergency stop
+ * (`APPLY_RELEASED = false`) disables it and says why; the action then
+ * refuses on its own before any database call.
  */
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -27,13 +31,13 @@ import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { Modal } from "@/components/ui/modal";
 import { PendingButton } from "@/components/ui/pending";
 import { de } from "@/lib/i18n/de";
-import { orderbookSaleHref } from "@/lib/reconciliation/decide";
 import { shownActionRefusal } from "@/lib/reconciliation/messages";
 import {
   type Choices, type ConflictChoice, confirmItems, confirmSummary, initialChoices, type MatchPlan, openConflicts,
-  type PlanEntry, planMatch,
+  financialPlan, type PlanEntry, planMatch,
 } from "@/lib/reconciliation/plan";
-import { confirmReconciliation } from "@/lib/reconciliation/server/actions";
+import { orderbookEditHref, orderbookItemsHref } from "@/lib/reconciliation/routes";
+import { confirmReconciliation, type RefusedItem } from "@/lib/reconciliation/server/actions";
 import type { Match } from "@/lib/reconciliation/view";
 
 import { EntryValues, reasonText } from "./plan-values";
@@ -44,8 +48,14 @@ const t = copy.reconcile;
 
 type Row = { plan: MatchPlan; entry: PlanEntry };
 
-function Group({ title, tone, rows, many, children }: {
+/** 0180's reason for one refused take-over, in words — never the code. */
+const refusalText = (problem: string): string =>
+  copy.selection.problems[problem as keyof typeof copy.selection.problems] ?? t.refused.unknown;
+
+function Group({ title, tone, rows, many, refused, children }: {
   title: string; tone: string; rows: readonly Row[]; many: boolean;
+  /** Findings the database refused at the last confirmation, with the reason code. */
+  refused: ReadonlyMap<number, string>;
   children: (row: Row) => React.ReactNode;
 }) {
   if (rows.length === 0) return null;
@@ -55,13 +65,19 @@ function Group({ title, tone, rows, many, children }: {
       <ul className="mt-1">
         {rows.map((row) => (
           <li key={row.entry.finding.id} data-finding={row.entry.finding.id} data-state={row.entry.state}
+              data-refused={refused.has(row.entry.finding.id) ? refused.get(row.entry.finding.id) : undefined}
               className="border-t border-border/50 py-2 first:border-t-0">
             {many ? <p className="text-xs text-muted break-words">{t.orderOf(row.plan.orderRef, row.plan.saleId)}</p> : null}
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
               <span className="text-sm font-medium">{copy.fields[row.entry.finding.field]}</span>
               <EntryValues entry={row.entry} />
             </div>
-            {children(row)}
+            {/* Refused: marked HERE, once — deselected, its reason beside it; no second list. */}
+            {refused.has(row.entry.finding.id) ? (
+              <p data-not-taken="" className="mt-0.5 text-xs text-danger">
+                <span className="font-medium">{t.refused.badge}:</span> {refusalText(refused.get(row.entry.finding.id)!)}
+              </p>
+            ) : children(row)}
           </li>
         ))}
       </ul>
@@ -76,15 +92,24 @@ export function ReconcileButton({ matches, label }: { matches: readonly Match[];
   const ctx = useReconcile();
   const name = useId();
   const busy = useRef(false);
-  const plans = useMemo(() => matches.map(planMatch), [matches]);
+  // Only the financial values: the order number is its own act ("Bestellnummer übernehmen").
+  const plans = useMemo(() => matches.map((m) => financialPlan(planMatch(m))), [matches]);
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<Choices>(() => initialChoices(plans));
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  /*
+   * WHAT THE DATABASE REFUSED AT THE LAST CONFIRMATION, finding → reason
+   * code. Nothing was applied then. Since 2026-11-09 a refused value is
+   * DESELECTED at once and marked "nicht übernommen" where it stands; the
+   * remaining ones need a NEW explicit confirmation — never a partial
+   * take-over on its own.
+   */
+  const [refused, setRefused] = useState<ReadonlyMap<number, string>>(() => new Map());
 
   if (!ctx || !ctx.sessionOpen || plans.length === 0) return null;
-  const { sessionId, applyReleased } = ctx;
+  const { sessionId, applyReleased, view = null } = ctx;
 
   const rows = (pick: (p: MatchPlan) => PlanEntry[]): Row[] => plans.flatMap((plan) => pick(plan).map((entry) => ({ plan, entry })));
   const supplements = rows((p) => p.supplements);
@@ -92,8 +117,10 @@ export function ReconcileButton({ matches, label }: { matches: readonly Match[];
   const checks = rows((p) => p.checks);
   const many = plans.length > 1;
 
-  const items = confirmItems(plans, choices);
-  const pending = openConflicts(plans, choices);
+  // A refused value is out: not sent, not counted as an open conflict.
+  const items = confirmItems(plans, choices).filter((i) => !refused.has(i.findingId));
+  const pending = openConflicts(plans, choices) - conflicts.filter((r) => refused.has(r.entry.finding.id)
+    && !choices.conflicts.has(r.entry.finding.id)).length;
   const summary = confirmSummary(plans, items);
   const canConfirm = applyReleased && pending === 0 && items.length > 0 && !running;
 
@@ -112,6 +139,7 @@ export function ReconcileButton({ matches, label }: { matches: readonly Match[];
     setChoices(initialChoices(plans));
     setError(null);
     setDone(null);
+    setRefused(new Map());
     setOpen(true);
   }
 
@@ -122,7 +150,16 @@ export function ReconcileButton({ matches, label }: { matches: readonly Match[];
     setError(null);
     try {
       const result = await confirmReconciliation({ sessionId, items });
-      if (!result.ok) { setError(shownActionRefusal(result.message, t.failed)); return; }
+      if (!result.ok) {
+        // Only ids of findings this dialog sent, with a known code — nothing else is shown.
+        const sent = new Set(items.map((i) => i.findingId));
+        const named = ("refused" in result && Array.isArray(result.refused) ? result.refused : [])
+          .filter((r: RefusedItem) => sent.has(r.findingId) && typeof r.problem === "string");
+        setRefused(new Map(named.map((r) => [r.findingId, r.problem])));
+        setError(named.length > 0 ? null : shownActionRefusal(result.message, t.failed));
+        return;
+      }
+      setRefused(new Map());
       setDone(t.done(result.applied, result.sales));
       setOpen(false);
       router.refresh();
@@ -152,7 +189,7 @@ export function ReconcileButton({ matches, label }: { matches: readonly Match[];
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-5">
             {supplements.length + conflicts.length + checks.length === 0 ? <p className="text-sm">{t.nothing}</p> : null}
-            <Group title={t.supplements} tone="text-success" rows={supplements} many={many}>
+            <Group title={t.supplements} tone="text-success" rows={supplements} many={many} refused={refused}>
               {({ entry }) => (
                 <label className="mt-1 inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-8">
                   <input type="checkbox" className="size-4" checked={!choices.skipped.has(entry.finding.id)}
@@ -161,7 +198,7 @@ export function ReconcileButton({ matches, label }: { matches: readonly Match[];
                 </label>
               )}
             </Group>
-            <Group title={t.conflicts} tone="text-danger" rows={conflicts} many={many}>
+            <Group title={t.conflicts} tone="text-danger" rows={conflicts} many={many} refused={refused}>
               {({ entry }) => (
                 <fieldset className="mt-1 flex flex-wrap gap-2">
                   <legend className="sr-only">{copy.fields[entry.finding.field]}</legend>
@@ -176,12 +213,17 @@ export function ReconcileButton({ matches, label }: { matches: readonly Match[];
                 </fieldset>
               )}
             </Group>
-            <Group title={t.checks} tone="text-fg" rows={checks} many={many}>
+            <Group title={t.checks} tone="text-fg" rows={checks} many={many} refused={refused}>
               {({ plan, entry }) => (
                 <p className="mt-0.5 text-xs text-muted">
                   {reasonText(entry.reason)}
                   {plan.saleId !== null ? (
-                    <> <Link href={orderbookSaleHref(plan.saleId)} className="focus-ring underline underline-offset-2">{t.check}</Link></>
+                    <> <Link href={entry.reason === "positions"
+                                    ? orderbookItemsHref(plan.saleId, { sessionId, matchId: plan.matchId, view })
+                                    : orderbookEditHref(plan.saleId, { sessionId, matchId: plan.matchId, view })}
+                             className="focus-ring underline underline-offset-2">
+                      {entry.reason === "positions" ? t.positions : t.check}
+                    </Link></>
                   ) : null}
                 </p>
               )}
@@ -191,6 +233,11 @@ export function ReconcileButton({ matches, label }: { matches: readonly Match[];
             <p data-summary="" className="text-sm font-medium">{t.summary(summary.additions, summary.corrections, summary.sales)}</p>
             <p className="text-xs text-muted">{t.unchanged}</p>
             {pending > 0 ? <p className="mt-1 text-sm">{t.openConflicts(pending)}</p> : null}
+            {refused.size > 0 ? (
+              <p role="alert" data-refused-summary="" className="mt-2 text-sm text-danger">
+                {t.refused.summary(refused.size, items.length)}
+              </p>
+            ) : null}
             {!applyReleased ? <p data-not-released="" className="mt-1 text-sm text-muted">{t.notReleased}</p> : null}
             {error ? <p role="alert" className="mt-1 text-sm text-danger">{error}</p> : null}
             <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

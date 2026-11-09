@@ -318,7 +318,7 @@ describe("die Tabelle in den beiden Sicherungen", () => {
     const grund = PLATFORM_EXCLUDED_TABLES["availability_notifications"];
     expect(grund).toBeDefined();
     expect(grund).toContain("GEHOERT INS ARCHIV");
-    expect(grund).toContain("Formatversion 4"); // 3 belegt seit 0174 (Verkaufsabgleich)
+    expect(grund).toContain("Formatversion 5"); // 3 belegt seit 0174 (Verkaufsabgleich), 4 seit 0182 (Handkorrekturen)
     expect(grund).toContain("VOR");
   });
 

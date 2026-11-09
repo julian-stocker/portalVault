@@ -11,10 +11,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  classifyFinding, confirmItems, confirmSummary, fieldState, initialChoices, isExtraCandidate, isRelevant, openConflicts,
-  planMatch,
+  appliedCount, bulkOrderNumbers, byOutcome, classifyFinding, confirmItems, confirmSummary, fieldState, financialPlan, initialChoices, isExtraCandidate,
+  isReassessed, isRelevant, missingOrderNumber, openConflicts, orderNumberEntry, orderOutcome, outcomeCounts, planMatch, workState,
 } from "./plan";
-import type { Finding, Match } from "./view";
+import { liveDifferences } from "./live";
+import type { AtAnalysisValue, Finding, LedgerField, Match } from "./view";
 
 const current = (over: Record<string, unknown> = {}) => ({
   soldOn: "2026-02-10", itemsSubtotal: 12.5, discount: 0, itemsNet: 12.5, shipping: 4.99, refundsTotal: 0,
@@ -43,14 +44,37 @@ const match = (over: Partial<Match> = {}, ledger: Record<string, unknown> = {}):
 });
 
 describe("one field, one state", () => {
-  it("a missing order number is preselected as an addition — and sent as a take-over without a click", () => {
+  it("a missing order number is an addition of the card — but NOT of 'Angaben abgleichen' (its own act since 2026-11-09)", () => {
     const m = match({ certainty: "unique", category: "exact", findings: [finding()] });
     expect(classifyFinding(m, m.findings[0])).toEqual({ state: "MISSING_IN_SKYISLES", reason: null });
-    const plans = [planMatch(m)];
-    expect(confirmItems(plans, initialChoices(plans))).toEqual([{
-      findingId: 1, field: "external_order_ref", decision: "take_external", shownLedger: null, shownExternal: "06-14260-71832",
-    }]);
-    expect(confirmSummary(plans, confirmItems(plans, initialChoices(plans)))).toEqual({ additions: 1, corrections: 0, kept: 0, sales: 1 });
+    const plan = planMatch(m);
+    // the separate act finds it …
+    expect(orderNumberEntry(plan)?.finding.id).toBe(1);
+    expect(missingOrderNumber(m)?.id).toBe(1);
+    // … while the financial dialog has nothing to show and nothing to send
+    expect(isRelevant(plan)).toBe(false);
+    const plans = [financialPlan(plan)];
+    expect(confirmItems(plans, initialChoices(plans))).toEqual([]);
+    // and even an unfiltered plan sends no order number: it is not a confirm field
+    expect(confirmItems([plan], initialChoices([plan]))).toEqual([]);
+  });
+
+  it("the missing number is found in a CLOSED session too (only 0186 can write it then) — never when SkyIsles has one now", () => {
+    const closed = match({ certainty: "unique", category: "exact", findings: [finding({ lock: "session_not_open" })] });
+    expect(orderNumberEntry(planMatch(closed))).toBeNull();
+    expect(missingOrderNumber(closed)?.id).toBe(1);
+    expect(missingOrderNumber(match({ certainty: "probable", category: "probable", findings: [finding()] }))).toBeNull();
+  });
+
+  it("the summary counts what the financial confirmation writes: a taken CSV value a correction, a kept one kept — per sale", () => {
+    const m = match({ findings: [shipping(), finding({ id: 5, key: "items_net", field: "items_net", kind: "deviation",
+      shown: { ledger: 12.5, external: 13 }, delta: -0.5 })] });
+    const plans = [financialPlan(planMatch(m))];
+    const item = (findingId: number, field: "shipping" | "items_net", decision: "take_external" | "keep_ledger") =>
+      ({ findingId, field, decision, shownLedger: null, shownExternal: null });
+    expect(confirmSummary(plans, [item(2, "shipping", "take_external"), item(5, "items_net", "keep_ledger")]))
+      .toEqual({ additions: 0, corrections: 1, kept: 1, sales: 1 });
+    expect(confirmSummary(plans, [item(5, "items_net", "keep_ledger")])).toEqual({ additions: 0, corrections: 0, kept: 1, sales: 0 });
   });
 
   it("an equal value needs nothing — no entry, nothing sent", () => {
@@ -145,5 +169,181 @@ describe("the report's orders, not the search window", () => {
     for (const c of ["exact", "deviating", "probable", "ambiguous", "external_only", "ledger_only"] as const) {
       expect(isExtraCandidate(match({ category: c }))).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One outcome per order (2026-11-08): Abweichung > Ergänzen > Identisch
+// ---------------------------------------------------------------------------
+
+describe("one outcome per order", () => {
+  const proven = (): Record<LedgerField, AtAnalysisValue> => ({
+    soldOn: { value: "2026-02-10", basis: "derived" },
+    itemsNet: { value: 12.5, basis: "derived" },
+    shipping: { value: 4.99, basis: "derived" },
+    expectedTotal: { value: 17.49, basis: "derived" },
+    pieces: { value: 1, basis: "derived" },
+  });
+  const order = { orderRef: "06-14260-71832", soldOn: "2026-02-10", itemsValue: 12.5, shipping: 4.99, total: 17.49, pieces: 1, lines: [] };
+  const pair = (over: Partial<Match> = {}, ledger: Record<string, unknown> = {}, at = proven()): Match => match({
+    category: "exact", order: order as unknown as Match["order"], ...over,
+    ledger: { state: "unchanged", version: { analysed: "v", current: "v" }, current: current({ externalOrderRef: "06-14260-71832", ...ledger }), atAnalysis: at },
+  });
+
+  it("a certain pair, every value proven equal, nothing missing: Identisch", () => {
+    expect(orderOutcome(pair())).toBe("identical");
+  });
+
+  it("only the order number is missing: Ergänzen — never Identisch", () => {
+    expect(orderOutcome(pair({ findings: [finding()] }, { externalOrderRef: null }))).toBe("supplement");
+  });
+
+  it("missing number AND another date: Abweichung wins — and the number stays an addition of its plan", () => {
+    const m = pair({ category: "deviating", findings: [finding(), soldOn()] }, { externalOrderRef: null },
+      { ...proven(), soldOn: { value: "2026-02-10", basis: "stored" } });
+    expect(orderOutcome(m)).toBe("deviation");
+    expect(planMatch(m).supplements.map((e) => e.finding.field)).toEqual(["external_order_ref"]);
+  });
+
+  it("a conflict, a figure or a date alone: Abweichung", () => {
+    for (const f of [shipping(), figure(), soldOn()]) {
+      expect(orderOutcome(pair({ category: "deviating", findings: [f] })), f.field).toBe("deviation");
+    }
+  });
+
+  it("an unsure pair, a changed sale or a value the database could not prove: never Identisch", () => {
+    expect(orderOutcome(pair({ category: "probable", certainty: "probable" }))).toBe("deviation");
+    expect(orderOutcome(pair({ category: "ambiguous", certainty: "ambiguous" }))).toBe("deviation");
+    expect(orderOutcome(pair({}, {}, { ...proven(), itemsNet: { value: null, basis: "unknown" } }))).toBe("deviation");
+    expect(orderOutcome({ ...pair(), ledger: null })).toBe("deviation");
+  });
+
+  it("one side only: Nicht zugeordnet; a candidate of the search window: extra — neither counted as Identisch", () => {
+    expect(orderOutcome(match({ category: "external_only", sale: null, ledger: null }))).toBe("unmatched");
+    expect(orderOutcome(match({ category: "ledger_only", order: null }))).toBe("unmatched");
+    expect(orderOutcome(match({ category: "not_comparable", order: null }))).toBe("extra");
+  });
+
+  it("everything taken over: Identisch again, and the order counts as done", () => {
+    const m = pair({ findings: [finding({ applied: true })] });
+    expect(orderOutcome(m)).toBe("identical");
+    expect(appliedCount(m)).toBe(1);
+  });
+
+  it("the outcome is the data's: a missing number in a closed session is still Ergänzen; a date there still Abweichung", () => {
+    const closed = (f: Finding) => ({ ...f, lock: "session_not_open" as const });
+    expect(orderOutcome(pair({ findings: [closed(finding())] }, { externalOrderRef: null }))).toBe("supplement");
+    expect(orderOutcome(pair({ category: "deviating", findings: [closed(soldOn())] },
+      {}, { ...proven(), soldOn: { value: "2026-02-10", basis: "stored" } }))).toBe("deviation");
+  });
+
+  it("counts and order: what needs work first, every order exactly once", () => {
+    const list = [pair({ id: 1 }), pair({ id: 2, findings: [finding()] }, { externalOrderRef: null }),
+      pair({ id: 3, category: "deviating", findings: [shipping()] }), match({ id: 4, category: "external_only", sale: null, ledger: null }),
+      match({ id: 5, category: "not_comparable", order: null })];
+    expect(outcomeCounts(list)).toEqual({ deviation: 1, supplement: 1, identical: 1, unmatched: 1, extra: 1 });
+    expect(byOutcome(list).map((m) => m.id)).toEqual([3, 2, 4, 1, 5]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Corrected in the Orderbuch: judged again on the sale as it is now (`live.ts`)
+// ---------------------------------------------------------------------------
+
+describe("a sale changed since the analysis", () => {
+  const order = { orderRef: "06-14260-71832", recordNo: 1, soldOn: "2026-02-18", paidOn: null, shippedOn: null,
+    itemsValue: 54.3, shipping: 15.99, total: 70.29, pieces: 9, combined: false, destinationCountry: null,
+    shippingService: null, sourceFile: "feb.csv", lines: [] };
+  const at = { soldOn: { value: "2026-02-17", basis: "stored" }, itemsNet: { value: 54.3, basis: "derived" },
+    shipping: { value: 15.99, basis: "derived" }, expectedTotal: { value: 70.29, basis: "derived" },
+    pieces: { value: 9, basis: "derived" } } as Record<LedgerField, AtAnalysisValue>;
+  /** Sale 64 as in session 5: number taken over, then the date corrected (or not). */
+  const sale64 = (now: Record<string, unknown>, state: "changed" | "applied" | "unchanged" = "changed",
+    findings: Finding[] = [soldOn({ id: 61, shown: { ledger: "2026-02-17", external: "2026-02-18" }, lock: state === "changed" ? "stale" : null }),
+      finding({ id: 62, applied: true })]) => match({
+    id: 50, category: "deviating", certainty: "unique", order: order as unknown as Match["order"], findings,
+    ledger: { state, version: { analysed: "v", current: state === "changed" ? "w" : "v" }, atAnalysis: at,
+      current: current({ soldOn: "2026-02-17", itemsSubtotal: 54.3, itemsNet: 54.3, shipping: 15.99, refundsTotal: 0,
+        expectedTotal: 70.29, pieces: 9, externalOrderRef: "06-14260-71832", ...now }) },
+  });
+
+  it("before the correction: the number is done, the date still differs — Abweichung, partly done", () => {
+    const m = sale64({}, "applied");
+    expect(orderOutcome(m)).toBe("deviation");
+    expect(workState(m)).toBe("partial");
+  });
+
+  it("date corrected in the Orderbuch: every value equal now — Identisch, done; the old date finding is resolved", () => {
+    const m = sale64({ soldOn: "2026-02-18" });
+    expect(liveDifferences(m)).toEqual(new Set());
+    expect(orderOutcome(m)).toBe("identical");
+    expect(workState(m)).toBe("done");
+    expect(planMatch(m).checks).toEqual([]);
+    expect(isReassessed(m)).toBe(true);
+  });
+
+  it("changed, but to another wrong day: still Abweichung — and the date line stays", () => {
+    const m = sale64({ soldOn: "2026-02-20" });
+    expect(liveDifferences(m)).toEqual(new Set(["sold_on"]));
+    expect(orderOutcome(m)).toBe("deviation");
+    expect(planMatch(m).checks.map((e) => e.finding.field)).toEqual(["sold_on"]);
+  });
+
+  it("a NEW difference made in the Orderbuch is seen, though the analysis had no finding for it", () => {
+    const m = sale64({ soldOn: "2026-02-18", shipping: 9.99, expectedTotal: 64.29 });
+    expect(liveDifferences(m)).toEqual(new Set(["shipping", "total"]));
+    expect(orderOutcome(m)).toBe("deviation");
+  });
+
+  it("a stored figure finding is never resolved by the live values — figures cannot be re-read", () => {
+    const m = sale64({ soldOn: "2026-02-18" }, "changed", [figure({ id: 63 })]);
+    expect(orderOutcome(m)).toBe("deviation");
+    expect(planMatch(m).checks.map((e) => e.finding.field)).toEqual(["figure"]);
+  });
+
+  it("the number still missing after a correction: Ergänzen — but this session cannot add it (stale)", () => {
+    const m = sale64({ soldOn: "2026-02-18", externalOrderRef: null }, "changed",
+      [finding({ id: 62, lock: "stale" })]);
+    expect(orderOutcome(m)).toBe("supplement");
+    expect(planMatch(m).supplements).toEqual([]);
+    expect(planMatch(m).checks[0].reason).toBe("stale");
+  });
+
+  it("an unchanged sale is not judged again — the stored findings are the current ones", () => {
+    expect(liveDifferences(sale64({}, "unchanged"))).toBeNull();
+    expect(liveDifferences(sale64({}, "applied"))).toBeNull();
+  });
+
+  it("nothing done yet, a date to correct: Abweichung, open", () => {
+    const m = sale64({ externalOrderRef: null }, "unchanged", [soldOn({ id: 61, shown: { ledger: "2026-02-17", external: "2026-02-18" } })]);
+    expect(workState(m)).toBe("open");
+  });
+});
+
+describe("Eindeutige Bestellnummern übernehmen — what goes in, what is skipped and why", () => {
+  const pair = (id: number, over: Partial<Match> = {}, f: Partial<Finding> = {}, ledger: Record<string, unknown> = {}) =>
+    match({ id, certainty: "unique", category: "exact", order: { orderRef: `05-${id}` } as Match["order"],
+      sale: { id: 500 + id } as Match["sale"], findings: [finding({ id, ...f })], ...over }, ledger);
+
+  it("the whole session: certain pairs without number in; rivals, competitors, changed, closed, uncertain named; done ones not at all", () => {
+    const { takeable, skipped } = bulkOrderNumbers([
+      pair(1), pair(2),
+      pair(3, { rivals: [{ saleId: 158, soldOn: "2026-05-01", shared: ["Camo"], pieces: ["Camo"], updatedAt: "v" }] }),
+      pair(4, { rivalOrders: [{ orderId: 9, orderRef: "x", soldOn: "2026-05-01", shared: ["Camo"] }] }),
+      pair(5, { competitors: [{}] as unknown as Match["competitors"] }),
+      pair(6, {}, { lock: "stale" }),
+      pair(7, {}, { lock: "session_not_open" }),
+      pair(8, {}, { applied: true }),               // taken over earlier: not listed
+      pair(9, {}, {}, { externalOrderRef: "05-9" }), // typed in since: not listed
+      pair(10, { certainty: "probable", category: "probable" }), // not a certain pair: not listed
+      match({ id: 11, category: "external_only", sale: null, findings: [] }),
+    ]);
+    expect(takeable).toEqual([{ matchId: 1, orderRef: "05-1", saleId: 501 }, { matchId: 2, orderRef: "05-2", saleId: 502 }]);
+    expect(skipped.map((c) => [c.matchId, c.reason])).toEqual([[3, "rivals"], [4, "rivals"], [5, "competitors"], [6, "stale"], [7, "closed"]]);
+  });
+
+  it("38 orders: in one pass, no financial finding among them", () => {
+    const many = Array.from({ length: 38 }, (_, k) => pair(k + 1, { findings: [finding({ id: k + 1 }), shipping({ id: 1000 + k })] }));
+    expect(bulkOrderNumbers(many).takeable).toHaveLength(38);
   });
 });

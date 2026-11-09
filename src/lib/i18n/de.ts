@@ -2316,6 +2316,157 @@ export const de = {
      * Verkaufsbuch; nur auf Staging, bis eine eigene Freigabe vorliegt.
      */
     reconciliation: {
+      /*
+       * EINE NICHT ZUGEORDNETE BESTELLUNG (0184): der bestehende Dialog
+       * „Neuer externer Verkauf“, vorausgefüllt aus dem Bericht — und danach
+       * der Link auf den Verkauf, der die Bestellnummer trägt.
+       */
+      /* EINDEUTIGE BESTELLNUMMERN (2026-11-09, ADR-0183): die Sammelaktion über den Weg aus 0180. */
+      bulkNumbers: {
+        button: (n: number) => `Eindeutige Bestellnummern übernehmen (${n})`,
+        title: "Eindeutige Bestellnummern übernehmen",
+        only: "Ergänzt werden AUSSCHLIESSLICH fehlende eBay-Bestellnummern bei sicher gepaarten Verkäufen der ganzen Sitzung — keine Beträge, kein Datum, keine Figuren, keine Mengen, keine Reservierungen, kein Lager. Eine vorhandene Nummer wird nie überschrieben.",
+        takeable: (n: number) => (n === 1 ? "1 Bestellnummer wird ergänzt" : `${n} Bestellnummern werden ergänzt`),
+        skipped: (n: number) => (n === 1 ? "1 Bestellung wird übersprungen" : `${n} Bestellungen werden übersprungen`),
+        showTakeable: "Welche Bestellungen?",
+        showSkipped: "Warum übersprungen?",
+        recheck: "Die Datenbank prüft jede Bestellung unmittelbar vor dem Schreiben noch einmal. Was dann nicht mehr passt, wird nicht übernommen und unten mit Grund genannt.",
+        caseLine: (ref: string, saleId: number) => `${ref} → Verkauf ${saleId}`,
+        reasons: {
+          rivals: "Konkurrierende Verkäufe oder Bestellungen — nur einzeln auf der Karte mit ausdrücklichem Ausschluss.",
+          competitors: "Mehrere Kandidaten für diese Bestellung.",
+          stale: "Der Verkauf wurde seit der Analyse geändert — bitte neu analysieren.",
+          closed: "Die Sitzung ist beendet.",
+          not_takeable: "Nicht sicher genug für eine Übernahme.",
+        },
+        confirm: (n: number) => (n === 1 ? "1 Bestellnummer ergänzen" : `${n} Bestellnummern ergänzen`),
+        working: "Ergänzt …",
+        cancel: "Abbrechen",
+        close: "Schließen",
+        resultTitle: "Ergebnis",
+        result: (taken: number, refused: number, skipped: number) =>
+          `${taken} ergänzt · ${refused} abgelehnt · ${skipped} übersprungen`,
+        failed: "Es wurde KEINE Bestellnummer ergänzt.",
+        status: {
+          taken: "Ergänzt",
+          refused: "Abgelehnt",
+          skipped: "Übersprungen — nicht mehr übernehmbar (z. B. inzwischen geändert oder schon eingetragen)",
+          not_applied: "Nicht übernommen — die Übernahme ist als Ganzes gescheitert",
+        },
+        unknownCase: (id: number) => `Bestellung #${id}`,
+      },
+      /*
+       * MÖGLICHE VORHANDENE VERKÄUFE (ADR-0182). Für eine nicht zugeordnete
+       * Bestellung beim Laden neu gesucht — mit der Bewertung der Analyse.
+       * Eine hohe Punktzahl ist eine Empfehlung, keine Zuordnung.
+       */
+      candidates: {
+        title: "Mögliche vorhandene Verkäufe",
+        hint: "Neu gesucht beim Laden dieser Seite — auch Verkäufe, die nach der Analyse angelegt oder geändert wurden. Die Punktzahl ist eine Empfehlung, keine Zuordnung.",
+        none: "Kein vorhandener Verkauf in ±14 Tagen kommt in Frage.",
+        more: (n: number) => (n === 1 ? "1 weiterer möglicher Verkauf" : `${n} weitere mögliche Verkäufe`),
+        sale: (id: number) => `Verkauf ${id}`,
+        score: (n: number) => `Empfehlung: ${n} von 105 Punkten`,
+        outsideWindow: "außerhalb des Analysefensters (±3 Tage)",
+        figures: "Figuren",
+        figuresMatched: (m: number, report: number, ledger: number) => `${m} gleich · Bericht ${report} Stück · SkyIsles ${ledger} Stück`,
+        onlyReport: "fehlt in SkyIsles",
+        onlyLedger: "nicht im Bericht",
+        tier: { exact: "gleich", normalized: "gleich (Schreibweise)", alias: "gleich (Alias)", fuzzy: "ähnlich (unscharf)" },
+        seriesHint: (listing: string, ledger: string) => `Hinweis: Angebot nennt Serie ${listing}, gewählt ist ${ledger} — andere Variante?`,
+        similar: (name: string) => `Hinweis: ähnlich „${name}“ — andere Variante?`,
+        goods: "Warenwert",
+        goodsLine: (net: string, gross: string, discount: string) => `${net} (${gross} − ${discount} Rabatt)`,
+        shipping: "Versand",
+        date: "Verkaufsdatum",
+        dateDelta: (d: number) => (d === 0 ? "gleicher Tag" : `${d > 0 ? "+" : ""}${d} Tage`),
+        orderRef: "Bestellnummer",
+        refMissing: "fehlt",
+        refSame: "gleich",
+        report: "Bericht",
+        open: "Verkauf öffnen",
+        rivalsNone: "Keine konkurrierenden Verkäufe.",
+        searchTitle: "Weitere Verkäufe suchen",
+        searchFrom: "Von",
+        searchTo: "Bis",
+        searchButton: "Suchen",
+        searching: "Sucht …",
+        searchEmpty: "In diesem Zeitraum kommt kein weiterer Verkauf in Frage.",
+        searchRange: "Bitte einen Zeitraum von höchstens 92 Tagen wählen.",
+        linkedTitle: (id: number) => `Verkauf ${id} trägt diese Bestellnummer — der Vergleich mit dem Bericht:`,
+        /* Die Zuordnung (0185): nur die Bestellnummer, nur nach ausdrücklicher Bestätigung. */
+        assign: "Diesem Verkauf zuordnen",
+        assignTitle: (id: number, ref: string) => `Verkauf ${id} der Bestellung ${ref} zuordnen?`,
+        assignWhat: "Eingetragen wird NUR die Bestellnummer am Verkauf. Figuren, Stückzahlen, Beträge, Datum und Lager bleiben, wie sie sind — Abweichungen zeigt die Karte danach, korrigiert wird im Orderbuch.",
+        assignCheck: (id: number, ref: string) => `Ich bestätige: Verkauf ${id} ist die Bestellung ${ref}.`,
+        assignConfirm: "Zuordnen",
+        assigning: "Ordnet zu …",
+        assignCancel: "Abbrechen",
+        assignBlockedRivals: "Zuordnung gesperrt: es gibt konkurrierende Verkäufe (siehe oben). Erst klären, welcher Verkauf zu welcher Bestellung gehört.",
+        assignBlockedRef: "Dieser Verkauf trägt schon diese Bestellnummer.",
+        assignErrors: {
+          notAvailable: "Die Zuordnung ist hier noch nicht verfügbar — es wurde nichts geändert.",
+          rejected: "Die Auswahl ist ungültig — es wurde nichts geändert.",
+          stale: "Der Verkauf wurde inzwischen geändert. Bitte die Seite neu laden und erneut prüfen.",
+          version_required: "Der Stand des Verkaufs fehlt. Bitte die Seite neu laden.",
+          session: "Dieser Abgleich wurde verworfen.",
+          not_unmatched: "Diese Bestellung ist nicht mehr nicht zugeordnet.",
+          no_lines: "Die Positionen des Berichts sind nicht mehr gespeichert.",
+          sale: "Dieser Verkauf kommt nicht in Frage (Test, storniert, Shop-Bestellung oder anderer Kanal).",
+          ref_present: "Dieser Verkauf trägt schon eine andere Bestellnummer — sie wird nie überschrieben.",
+          ref_taken: "Diese Bestellnummer steht schon an einem anderen Verkauf.",
+          paired: "Dieser Verkauf ist in einem Abgleich schon einer anderen Bestellung zugeordnet.",
+          rival_sale: "Ein anderer, ungepaarter Verkauf mit derselben Figur liegt im Zeitfenster.",
+          rival_order: "Eine andere, ungepaarte Bestellung mit derselben Figur liegt im Zeitfenster.",
+        },
+        assigned: (id: number) => `Zugeordnet: Verkauf ${id} trägt jetzt die Bestellnummer.`,
+        /*
+         * ZUORDNUNG TROTZ KONKURRENZ (0186). Jeder Konkurrent einzeln
+         * ausgeschlossen, mit Begründung — gilt nur für diese Zuordnung.
+         */
+        exclude: {
+          title: "Konkurrierende Verkäufe und Bestellungen ausschließen",
+          what: (ref: string, saleId: number) => `Bestellnummer ${ref} an Verkauf ${saleId} eintragen — sonst wird nichts geändert.`,
+          intro: "Die Bestellnummer wird nur eingetragen, wenn du JEDEN Konkurrenten ausdrücklich ausschließt. Die Datenbank prüft unmittelbar vor dem Schreiben erneut: ein neuer oder inzwischen geänderter Konkurrent führt zur Ablehnung. Der Ausschluss gilt nur für diese eine Zuordnung und steht im Journal.",
+          sale: (id: number, day: string, pieces: string) => `Verkauf ${id} vom ${day} (${pieces}) ist NICHT diese Bestellung.`,
+          order: (ref: string, day: string, shared: string) => `Bestellung ${ref} vom ${day} (${shared}) gehört NICHT zu diesem Verkauf.`,
+          note: "Begründung (Pflicht)",
+          notePlaceholder: "z. B. 158 und 160 sind Mai-Bestellungen",
+          confirm: "Trotz Konkurrenz zuordnen",
+          errors: {
+            notAvailable: "Die Zuordnung trotz Konkurrenz ist hier noch nicht verfügbar — es wurde nichts geändert.",
+            rejected: "Bitte jeden Konkurrenten ausschließen und eine Begründung angeben.",
+            version_required: "Der Stand des Verkaufs fehlt. Bitte die Seite neu laden.",
+            note: "Bitte eine Begründung angeben (höchstens 500 Zeichen).",
+            exclusions: "Die Auswahl der Konkurrenten ist ungültig — es wurde nichts geändert.",
+            session: "Dieser Abgleich wurde verworfen.",
+            not_assignable: "Diese Bestellung lässt sich so nicht zuordnen (nicht zugeordnet oder genau dieses Paar).",
+            no_lines: "Die Positionen des Berichts sind nicht mehr gespeichert.",
+            sale: "Dieser Verkauf kommt nicht in Frage (Test, storniert, Shop-Bestellung oder anderer Kanal).",
+            ref_present: "Dieser Verkauf trägt schon eine andere Bestellnummer — sie wird nie überschrieben.",
+            ref_taken: "Diese Bestellnummer steht schon an einem anderen Verkauf.",
+            paired: "Dieser Verkauf ist in einem Abgleich schon einer anderen Bestellung zugeordnet.",
+            no_rivals: "Es gibt keine Konkurrenten mehr — bitte die Seite neu laden und ohne Ausschluss zuordnen.",
+            rivals_changed: "Die Konkurrenz hat sich geändert (neu, entfallen oder geändert). Bitte die Seite neu laden und erneut prüfen.",
+          },
+        },
+        /* „Bestellnummer übernehmen“ für ein sicheres Paar ohne Nummer — eigener Vorgang, nur dieses Feld. */
+        takeNumber: {
+          button: "Bestellnummer übernehmen",
+          title: (ref: string, id: number) => `Bestellnummer ${ref} an Verkauf ${id} eintragen?`,
+          what: "Eingetragen wird NUR die Bestellnummer. Warenwert, Versand, Datum, Figuren und Lager bleiben, wie sie sind — die übernimmt „Angaben abgleichen“ getrennt.",
+          check: (id: number, ref: string) => `Ich bestätige: Verkauf ${id} ist die Bestellung ${ref}.`,
+          confirm: "Bestellnummer eintragen",
+          working: "Trägt ein …",
+          done: "Bestellnummer eingetragen.",
+          closedNoRivals: "Die Sitzung ist beendet. Ohne Konkurrenten trägt ein neuer Abgleich dieses Berichts die Nummer ein.",
+        },
+      },
+      createSale: {
+        button: "Externen Verkauf anlegen",
+        onCard: (id: number) => `Angelegt als Verkauf ${id}`,
+        openSale: "Im Orderbuch öffnen",
+      },
       title: "Verkaufsabgleich",
       errors: {
         notAvailable: "Der Verkaufsabgleich ist in dieser Umgebung noch nicht freigegeben.",
@@ -2330,6 +2481,8 @@ export const de = {
         countChanged:
           "Die Zahl der offenen Entscheidungen hat sich geändert. Lade die Seite neu und bestätige erneut.",
         rejected: "Diese Angabe ist hier nicht zulässig.",
+        /* 0180 lehnt einzelne Übernahmen ab (Grundcode je Befund); der Dialog nennt sie einzeln. */
+        notTakeable: "Nicht alle Angaben lassen sich übernehmen. Es wurde nichts übernommen.",
         duplicateReference: "Diese Bestellnummer ist bereits einem anderen Verkauf zugeordnet.",
         notPossible: "Das ist in diesem Zustand nicht möglich.",
         /* Ab hier für die Oberfläche (Phase 4); die Zuordnung zu Fehlercodes folgt mit Schritt 5. */
@@ -2406,11 +2559,27 @@ export const de = {
        * ist gesperrt, bis die Übernahme freigegeben ist.
        */
       reconcile: {
-        button: "Abgleichen",
-        all: (n: number) => (n === 1 ? "1 Bestellung abgleichen" : `${n} Bestellungen auf dieser Seite abgleichen`),
+        /* „Angaben abgleichen“ (2026-11-09): nur Warenwert und Versand — die Bestellnummer ist ein eigener Vorgang. */
+        button: "Angaben abgleichen",
+        all: (n: number) => (n === 1 ? "Angaben von 1 Bestellung abgleichen" : `Angaben von ${n} Bestellungen auf dieser Seite abgleichen`),
         orderbook: "Im Orderbuch bearbeiten",
+        /* Figuren und Stückzahl liegen bei den Positionen des Verkaufs, nicht im Bearbeitungsfenster. */
+        positions: "Figuren / Stückzahl bearbeiten",
+        /*
+         * WER DIE BESTELLNUMMER BLOCKIERT (`rival_sale`, 0180). Die Datenbank
+         * nennt nur den Grund; hier stehen die Verkäufe, nach derselben Regel
+         * ermittelt. Nur Anzeige — freigeben kann man damit nichts.
+         */
+        rivals: {
+          title: "Unsichere Zuordnung — die Bestellnummer wird nicht übernommen",
+          why: "Diese Verkäufe sind in diesem Abgleich keiner Bestellung zugeordnet, liegen höchstens drei Tage vom Bestelldatum entfernt und enthalten dieselbe Figur. Jeder davon könnte die Bestellung sein.",
+          sale: (id: number, day: string) => `Verkauf ${id} vom ${day}`,
+          shared: "gleiche Figur",
+          all: "Positionen",
+          open: "Im Orderbuch ansehen",
+        },
         check: "Im Orderbuch prüfen",
-        dialogTitle: "Abgleich prüfen",
+        dialogTitle: "Angaben abgleichen",
         orders: (n: number) => (n === 1 ? "1 Bestellung" : `${n} Bestellungen`),
         supplements: "Fehlende Angaben — werden ergänzt",
         conflicts: "Widersprüche — bitte entscheiden",
@@ -2439,11 +2608,26 @@ export const de = {
               `${corrections === 1 ? "1 Korrektur" : `${corrections} Korrekturen`} in ` +
               `${sales === 1 ? "1 Verkauf" : `${sales} Verkäufen`}.`,
         unchanged: "Positionen, Lager, Datum und Erstattungen bleiben unverändert.",
+        /* Abgelehnte Übernahmen (0180 nennt je Befund einen Grund) — es wurde nichts übernommen. */
+        /*
+         * ABGELEHNTES (0180 nennt je Befund einen Grund). Es wurde NICHTS
+         * übernommen; die abgelehnten Angaben sind abgewählt und an Ort und
+         * Stelle als „nicht übernommen“ markiert. Die übrigen übernimmt erst
+         * eine neue, ausdrückliche Bestätigung.
+         */
+        refused: {
+          summary: (n: number, rest: number) =>
+            `${n === 1 ? "1 Angabe wurde" : `${n} Angaben wurden`} abgelehnt und abgewählt. Es wurde nichts übernommen. ` +
+            (rest === 0 ? "Sonst ist nichts ausgewählt."
+              : `Bestätige erneut, um ${rest === 1 ? "die übrige Angabe" : `die übrigen ${rest} Angaben`} zu übernehmen.`),
+          badge: "Nicht übernommen",
+          unknown: "Die Datenbank lässt diese Übernahme nicht zu.",
+        },
         openConflicts: (n: number) => (n === 1 ? "Noch 1 Widerspruch offen." : `Noch ${n} Widersprüche offen.`),
         notReleased: "Die Übernahme ist noch nicht freigegeben — es wird nichts gespeichert.",
         cancel: "Schließen",
-        confirm: "Abgleich bestätigen",
-        confirming: "Wird abgeglichen …",
+        confirm: "Ausgewählte Angaben übernehmen",
+        confirming: "Wird übernommen …",
         failed: "Der Abgleich konnte nicht gespeichert werden. Lade die Seite neu und versuche es erneut.",
         done: (applied: number, sales: number) =>
           applied === 0
@@ -2591,7 +2775,7 @@ export const de = {
       entry: "Abgleich mit Plattformberichten",
       backToSales: "Zurück zu den Verkäufen",
       intro:
-        "Plattformberichte gegen die externen Verkäufe in SkyIsles — jede Abweichung wird einzeln entschieden.",
+        "Einen eBay-Bericht mit den Verkäufen in SkyIsles vergleichen und fehlende oder abweichende Angaben gezielt übernehmen.",
 
       /*
        * DIE SITZUNGSLISTE. Sie zeigt, was die Datenbank je Sitzung liefert,
@@ -2628,16 +2812,82 @@ export const de = {
       },
 
       /*
+       * DIE ABGLEICH-HISTORIE (2026-11-08). Nur Abgleiche, aus denen
+       * mindestens ein Wert übernommen wurde — ein Upload allein steht hier nicht.
+       */
+      history: {
+        heading: "Abgleich-Historie",
+        intro: "Abgleiche, aus denen mindestens ein Wert übernommen wurde.",
+        empty: "Noch kein Abgleich mit übernommenen Werten.",
+        period: "Berichtszeitraum",
+        date: "Abgleich vom",
+        applied: "Übernommen",
+        appliedCount: (n: number) => (n === 1 ? "1 Änderung" : `${n} Änderungen`),
+        open: "Ansehen",
+        closed: "abgeschlossen",
+      },
+
+      /*
+       * DIE ERGEBNISANSICHT (2026-11-08): jede Bestellung genau einer
+       * Kategorie — Abweichung vor Ergänzen vor Identisch (`orderOutcome`).
+       */
+      result: {
+        heading: "Ergebnis",
+        all: "Alle",
+        filterLabel: "Ergebnis filtern",
+        outcomes: {
+          identical: "Identisch",
+          supplement: "Ergänzen",
+          deviation: "Abweichung",
+          unmatched: "Nicht zugeordnet",
+          extra: "Zusatzkandidaten",
+        },
+        outcomeHints: {
+          identical: "Alle vergleichbaren Angaben stimmen überein.",
+          supplement: "Eine eindeutig belegte Angabe fehlt in SkyIsles und kann ergänzt werden.",
+          deviation: "Mindestens eine Angabe weicht ab oder die Zuordnung ist nicht sicher.",
+          unmatched: "Kein passendes Gegenstück — nur im Bericht oder nur in SkyIsles.",
+          extra: "SkyIsles-Verkauf aus den Tagen um den Berichtszeitraum — nicht Teil des Berichts.",
+        },
+        period: "Berichtszeitraum",
+        file: "Bericht",
+        orders: (n: number) => (n === 1 ? "1 Bestellung" : `${n} Bestellungen`),
+        doneCount: (n: number) => (n === 1 ? "1 Wert übernommen" : `${n} Werte übernommen`),
+        /* Bearbeitungsstand — getrennt vom Datenstand (Identisch / Ergänzen / Abweichung). */
+        workLabel: "Bearbeitung",
+        backToReconciliation: "Zurück zum Abgleich",
+        fromReconciliation: "Aus dem Verkaufsabgleich geöffnet — nach dem Speichern führt „Zurück zum Abgleich“ zur selben Bestellung.",
+        work: { open: "Offen", partial: "Teilweise erledigt", done: "Erledigt" },
+        workHints: {
+          open: "Hier ist noch nichts übernommen oder korrigiert.",
+          partial: "Etwas ist übernommen oder im Orderbuch korrigiert, aber es bleibt noch etwas offen.",
+          done: "Übernommen oder korrigiert — die Bestellung stimmt jetzt überein.",
+        },
+        workCount: (n: number, label: string) => `${label} ${n}`,
+        reassessed: "Nach einer Änderung im Orderbuch mit dem aktuellen Stand neu verglichen.",
+        liveDiffers: (fields: string) => `Weicht nach dem aktuellen Stand ab: ${fields}. Bitte im Orderbuch prüfen.`,
+        emptyView: "In dieser Ansicht gibt es keine Bestellung.",
+        incomplete: "Nicht alle Einträge konnten geladen werden — die Zahlen sind unvollständig.",
+        readOnly: "Dieser Abgleich ist abgeschlossen und nur noch lesbar.",
+        intro: "Je Bestellung: „Abgleichen“ zeigt, was ergänzt oder entschieden werden kann.",
+        reconcileAll: (n: number) => (n === 1 ? "Finanzielle Angaben abgleichen (1 Bestellung)" : `Finanzielle Angaben abgleichen (${n} Bestellungen)`),
+        bulkActions: "Sammelaktionen für die ganze Sitzung",
+        unproven: "Der Vergleich ist nicht vollständig nachgewiesen — unter „Einzelheiten“ steht, welcher Wert offen ist.",
+      },
+
+      /*
        * BERICHTE PRÜFEN (Phase 4, Schritt 3). Alles hier geschieht im Browser;
-       * die Dateien verlassen das Gerät nicht. Gezeigt werden Zahlen, Tage
+       * die Datei verlässt das Gerät nicht. Gezeigt werden Zahlen, Tage
        * und Hinweise — nie ein Titel, eine Bestellnummer oder ein Käufer.
        */
       picker: {
-        heading: "Berichte prüfen",
+        heading: "CSV-Datei auswählen",
         hint:
-          "Wähle einen oder mehrere eBay-Bestellberichte (CSV). Sie werden nur auf diesem Gerät gelesen; " +
-          "angezeigt werden Zahlen und Zeiträume, keine Käuferdaten.",
-        input: "Berichtsdateien auswählen",
+          "Wähle einen eBay-Bestellbericht (CSV) — genau eine Datei je Abgleich. Sie wird nur auf diesem Gerät " +
+          "gelesen; angezeigt werden Zahlen und Zeiträume, keine Käuferdaten.",
+        input: "Berichtsdatei auswählen",
+        oneFile: "Bitte genau eine CSV-Datei auswählen.",
+        moreDetails: "Einzelheiten",
         reading: (n: number) => (n === 1 ? "1 Datei wird geprüft …" : `${n} Dateien werden geprüft …`),
         done: (n: number) => (n === 1 ? "1 Datei geprüft." : `${n} Dateien geprüft.`),
         failed: "Die Auswahl konnte nicht geprüft werden. Wähle die Dateien bitte erneut.",
@@ -2709,18 +2959,18 @@ export const de = {
          * Kein Verkauf wird dabei geändert.
          */
         analyse: {
-          start: "Analyse starten",
-          dialogTitle: "Analyse starten?",
-          dialogIntro: "Übertragen werden nur die geprüften Angaben aus der Vorschau — die Dateien selbst bleiben auf diesem Gerät.",
+          start: "Abgleich starten",
+          dialogTitle: "Abgleich starten?",
+          dialogIntro: "Übertragen werden nur die geprüften Angaben aus der Vorschau — die Datei selbst bleibt auf diesem Gerät.",
           sentFiles: "Übertragene Dateien",
           note:
-            "SkyIsles legt dafür eine Abgleichssitzung an oder öffnet die vorhandene, wenn genau diese Dateien " +
-            "schon offen analysiert wurden. Verkaufswerte werden dabei nicht geändert.",
+            "SkyIsles vergleicht den Bericht mit den Verkäufen — oder öffnet den offenen Abgleich, wenn genau diese Datei " +
+            "schon verglichen wurde. Verkaufswerte werden dabei nicht geändert.",
           cancel: "Abbrechen",
-          confirm: "Jetzt analysieren",
-          running: "Analyse läuft …",
-          failed: "Die Analyse konnte nicht gestartet werden. Prüfe die Verbindung und versuche es erneut.",
-          done: (id: number) => `Sitzung ${id} ist bereit.`,
+          confirm: "Jetzt vergleichen",
+          running: "Wird verglichen …",
+          failed: "Der Abgleich konnte nicht gestartet werden. Prüfe die Verbindung und versuche es erneut.",
+          done: (id: number) => `Abgleich ${id} ist bereit.`,
         },
       },
 
@@ -2839,7 +3089,7 @@ export const de = {
         basisLegend: "Herkunft des Werts bei der Analyse — antippen oder mit der Tastatur öffnen für die Erklärung:",
         basisLabel: (basis: string) => `Herkunft: ${basis}`,
         statuses: {
-          match: "Stimmt überein",
+          match: "Gleich",
           deviation: "Abweichung",
           unconfirmed_deviation: "Abweichung, Zuordnung unsicher",
           addition: "In SkyIsles fehlt die Angabe",
@@ -2882,6 +3132,22 @@ export const de = {
       /* Anlegen eines externen Verkaufs. Intern entsteht aus einer Bestellung. */
       create: {
         title: "Neuer externer Verkauf",
+        /*
+         * AUS DEM CSV-ABGLEICH (0184). Derselbe Dialog, vorausgefüllt aus dem
+         * Bericht; jede Angabe bleibt änderbar, die Figuren wählt der Betrieb.
+         */
+        fromReport: {
+          intro: (ref: string) => `Vorausgefüllt aus dem eBay-Bericht, Bestellung ${ref}. Prüfe jede Angabe — alles bleibt änderbar. Käufer und Gebühren nennt der Bericht nicht.`,
+          linesTitle: "Laut Bericht — nur zur Orientierung",
+          linesHint: "Diese Artikel werden NICHT übernommen. Wähle die tatsächlichen Figuren, Varianten und Stückzahlen unten selbst.",
+          line: (qty: number, name: string, price: string) => `${qty} × ${name} · je ${price}`,
+          hold: "Bestand sofort reservieren",
+          holdHint: "Aus: der Verkauf wird offen angelegt, ohne Reservierung und ohne Ausbuchung. Reservieren und Ausbuchen machst du danach im Orderbuch.",
+          cancel: "Abbrechen und zurück zum Abgleich",
+          exists: (id: number) => `Diese Bestellung steht schon als Verkauf ${id} im Orderbuch.`,
+          openExisting: "Verkauf öffnen",
+          notUsable: "Diese Bestellung kann hier nicht übernommen werden (nicht mehr im Abgleich, oder schon zugeordnet). Der Dialog ist leer.",
+        },
         /*
          * DIE ÜBERSCHRIFTEN TRAGEN JETZT DIE ERKLÄRUNG.
          *
@@ -3033,6 +3299,25 @@ export const de = {
          nicht ausgebuchte Positionen — historische bleiben, wie sie sind. */
       changeFigure: "Figur ändern",
       changeFigureOne: (name: string) => `${name} austauschen`,
+      /*
+       * Positionen eines importierten Verkaufs korrigieren (0181). Erst
+       * vormerken, dann „Speichern“; die Herkunft bleibt sichtbar.
+       */
+      correction: {
+        change: "Figur korrigieren",
+        addTitle: "Fehlende Position ergänzen",
+        addHint:
+          "Importierter Verkauf: Die Position wird ohne Reservierung und ohne Lagerbuchung ergänzt. Geschrieben wird erst mit „Speichern“.",
+        pendingTitle: "Noch nicht gespeichert:",
+        replace: (position: number, from: string, to: string) => `Position ${position}: ${from} → ${to}`,
+        add: (name: string) => `Neue Position: ${name}`,
+        remove: (position: number, name: string) => `Position ${position} entfernen: ${name}`,
+        save: "Speichern",
+        cancel: "Abbrechen",
+        corrected: (original: string) => `korrigiert · Arbeitsmappe: ${original}`,
+        added: "nachträglich ergänzt",
+        itemsLink: "Positionen bearbeiten",
+      },
       itemSearch: "Figur suchen",
       noItems: "Noch keine Position erfasst.",
       addUncategorized: "Ohne Katalogzuordnung hinzufügen",
@@ -3129,6 +3414,13 @@ export const de = {
         none: "keine",
         /* Pflege eines externen Verkaufs nach dem Verkaufstag. */
         edit: "Bearbeiten", done: "Fertig", save: "Speichern", cancel: "Abbrechen",
+        /* Getippt, aber noch nicht gespeichert — „Fertig" und Schließen schreiben nichts. */
+        unsaved: "Noch nicht gespeichert — erst „Speichern“ übernimmt die Änderung.",
+        unsavedLeave: "Ungespeicherte Änderungen gehen verloren.",
+        keepEditing: "Weiter bearbeiten",
+        discardClose: "Verwerfen und schließen",
+        discardBack: "Verwerfen und zurück zum Abgleich",
+        discardItems: "Verwerfen und Positionen öffnen",
         remove: "Entfernen",
         addFee: "Gebühr hinzufügen", addRefund: "Rückerstattung hinzufügen",
         amount: "Betrag", kind: "Art", settlement: "Abrechnung", label: "Bezeichnung",
@@ -3396,6 +3688,16 @@ export const de = {
         /* 0065: eine Werkbuch-Position wird weder gelöscht noch umgehängt. */
         historicalItem:
           "Diese Position stammt aus der Excel-Historie und wird nicht verändert.",
+        /* 0181: die Korrektur importierter Positionen. */
+        workbookLineStays:
+          "Eine Position aus der Arbeitsmappe wird nie entfernt — nur eine nachträglich ergänzte.",
+        notAWorkbookSale:
+          "Diese Korrektur gilt nur für importierte Verkäufe. Für diesen Verkauf gelten die normalen Positionen.",
+        correctionBlocked:
+          "Diese Position hat schon einen Vorgang (Lager, Rückgabe, Abschluss oder Reservierung) und wird hier nicht korrigiert.",
+        correctionUnchanged: "Das ist schon die Figur dieser Position.",
+        unknownFigure: "Diese Figur steht nicht im Katalog. Wähle sie aus der Suche.",
+        needsFigure: "Wähle eine Figur aus der Suche oder gib einen Namen ein.",
         bookedItem:
           "Diese Position ist ausgebucht. Nimm die Lagerbewegung zurück, bevor du sie änderst.",
         tooMany: "Zu viele Positionen, Gebühren oder Korrekturen auf einmal.",
@@ -3415,6 +3717,12 @@ export const de = {
           "und kann nicht für diesen Verkauf ausgebucht werden.",
         noStock:
           "Dieser Artikel ist aktuell nicht auf Lager und kann nicht ausgebucht werden.",
+        /* Der Index aus 0171: eine Bestellnummer gehört je Kanal genau einem Verkauf. */
+        duplicateOrderRef:
+          "Diese Bestellnummer steht schon an einem anderen Verkauf dieses Kanals — es wurde nichts angelegt.",
+        /* 0184 noch nicht auf dieser Datenbank: ohne Reservierung kann noch nicht angelegt werden. */
+        holdOptionUnavailable:
+          "Das Anlegen ohne Reservierung ist hier noch nicht verfügbar — es wurde nichts angelegt.",
         /*
          * Der alte, mehrdeutige Satz derselben Funktion — solange eine
          * Umgebung 0093 noch nicht hat. Er behauptet nichts, was er nicht

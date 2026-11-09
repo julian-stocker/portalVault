@@ -81,9 +81,9 @@ function openDialog() {
 }
 
 describe("choosing and previewing", () => {
-  it("starts with a labelled multi-file CSV input and an empty live region", () => {
+  it("starts with a labelled single-file CSV input and an empty live region", () => {
     const el = input();
-    expect(el.multiple).toBe(true);
+    expect(el.multiple).toBe(false);
     expect(el.accept).toBe(".csv,text/csv");
     expect(container.querySelector(`label[for="${el.id}"]`)?.textContent).toBe(t.input);
     expect(container.querySelector('[role="status"]')?.getAttribute("aria-live")).toBe("polite");
@@ -113,9 +113,33 @@ describe("choosing and previewing", () => {
   it("a new choice replaces the old one, and the input is emptied for the next", async () => {
     await chooseValid();
     expect(input().value).toBe("");
-    await choose([new File([REPORT], "maerz.csv"), new File([REPORT], "kopie.csv")]);
-    expect(status()).toBe(t.done(2));
-    expect(container.textContent).toContain(t.warnings.duplicate_files);
+    await choose([new File([REPORT], "kopie.csv")]);
+    expect(status()).toBe(t.done(1));
+    expect(container.textContent).toContain("kopie.csv");
+    expect(container.textContent).not.toContain("maerz.csv");
+  });
+
+  it("two files at once: one sentence, no preview, nothing to send — one report per reconciliation", async () => {
+    await choose([new File([REPORT], "maerz.csv"), new File([REPORT], "april.csv")]);
+    expect(container.querySelector("[data-too-many]")?.textContent).toBe(t.oneFile);
+    expect(container.textContent).not.toContain("maerz.csv");
+    expect(button(t.analyse.start, container)).toBeNull();
+    expect(MOCK.analyse).not.toHaveBeenCalled();
+    expect(input().value).toBe("");
+  });
+
+  it("shows platform, orders and period; the technical facts wait behind Einzelheiten", async () => {
+    await chooseValid();
+    const details = container.querySelector<HTMLDetailsElement>("details[data-picker-details]")!;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain(t.summary.chain);
+    expect(details.textContent).toContain(t.summary.size);
+    expect(details.textContent).toContain("maerz.csv");
+    const outside = (container.textContent ?? "").replace(details.textContent ?? "", "");
+    expect(outside).toContain(t.summary.orders);
+    expect(outside).toContain(t.summary.period);
+    expect(outside).not.toContain(t.summary.chain);
   });
 
   it("reset empties the preview and returns the focus to the input", async () => {
@@ -136,11 +160,12 @@ describe("choosing and previewing", () => {
 describe("Analyse starten", () => {
   it("is not there before a preview, and disabled while anything blocks", async () => {
     expect(button(t.analyse.start, container)).toBeNull();
-    await choose([new File([REPORT], "maerz.csv"), new File(["a;b\n1;2\n"], "notiz.csv")]);
+    await choose([new File(["a;b\n1;2\n"], "notiz.csv")]);
     const start = button(t.analyse.start, container)!;
     expect(start.disabled).toBe(true);
     expect(start.getAttribute("aria-describedby")).toBe("recon-start-blocked");
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(t.blockers.failed_files);
+    const alert = container.querySelector('[role="alert"]')?.textContent ?? "";
+    expect(Object.values(t.blockers).some((b) => alert.includes(b))).toBe(true);
     act(() => start.click());
     expect(dialog()).toBeNull();
     expect(MOCK.analyse).not.toHaveBeenCalled();

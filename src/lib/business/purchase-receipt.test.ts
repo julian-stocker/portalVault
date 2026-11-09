@@ -428,9 +428,19 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * `0179`: a value at analysis only with proof — read only, no receipt table.
      * `0180` (ADR-0178): the selected, proven apply of the reconciliation —
      * function bodies and rights only, no receipt table.
+     * `0181` (ADR-0179): the hand correction of imported sale positions — its
+     * own append-only trail, no receipt table.
+     * `0182` (ADR-0179): that trail in both backups — two function bodies,
+     * no receipt table.
+     * `0183`: an unmatched report order created as an open sale — one
+     * function, no receipt table.
+     * `0184`: the create function with `p_hold` — one function, no receipt table.
+     * `0185`: an unmatched order assigned to an existing sale — one function, no receipt table.
+     * `0186`: the order number despite rivals, each one excluded — one function, no receipt table.
      */
-    expect(files[files.length - 1]).toBe("0180_sales_recon_selected_apply.sql");
-    expect(files[files.length - 2]).toBe("0179_sales_recon_ledger_proof.sql");
+    expect(files[files.length - 1]).toBe("0186_recon_order_ref_with_exclusions.sql");
+    expect(files[files.length - 2]).toBe("0185_recon_assign_sale.sql");
+    expect(files[files.length - 3]).toBe("0184_create_sale_hold_option.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });

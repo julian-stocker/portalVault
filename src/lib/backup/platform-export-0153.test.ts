@@ -140,9 +140,10 @@ describe("der neue Rumpf ist der alte plus EINE Zeile", () => {
     expect(bereiche(NEUER_RUMPF)).toBe(bereiche(ALTER_RUMPF));
     expect(SECTIONS_BY_FORMAT_VERSION[2]).toBe(54);
     /* Und keine dritte Version ist mit DIESER Migration dazugekommen — die
-       dritte brachte erst `0174` (sieben Bereiche des Verkaufsabgleichs). */
-    expect(PLATFORM_FORMAT_VERSION).toBe(3);
-    expect(Object.keys(SECTIONS_BY_FORMAT_VERSION)).toEqual(["1", "2", "3"]);
+       dritte brachte erst `0174` (sieben Bereiche des Verkaufsabgleichs),
+       die vierte `0182` (die Handkorrekturen der Positionen). */
+    expect(PLATFORM_FORMAT_VERSION).toBe(4);
+    expect(Object.keys(SECTIONS_BY_FORMAT_VERSION)).toEqual(["1", "2", "3", "4"]);
   });
 });
 

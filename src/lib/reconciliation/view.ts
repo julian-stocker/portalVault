@@ -33,7 +33,7 @@
 
 import type { CauseCode, Category as DiffCategory, Decision, FindingField } from "./diff.ts";
 import type { Certainty as MatchCertainty, NotComparableReason } from "./match.ts";
-import type { ReportIssue } from "./types.ts";
+import type { LedgerPiece, ReportIssue } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // The vocabularies — each exactly the list of its CHECK constraint in 0169
@@ -340,7 +340,56 @@ export type Match = {
   /** Null exactly when `sale` is null. */
   ledger: Ledger | null;
   findings: Finding[];
+  /**
+   * The sale's positions as they are NOW — attached by the session page, never
+   * read from the session (`attachLivePieces`, `live.ts`). Absent: the figures
+   * are not judged again.
+   */
+  livePieces?: {
+    pieces: readonly LedgerPiece[];
+    /** The aliases of exactly these figures, `[skyId, names]`. */
+    aliases: readonly (readonly [string, readonly string[]])[];
+  };
+  /**
+   * The unpaired sales that make 0180 refuse taking over the order number
+   * (`rival_sale`) — recomputed by the database's own rule for display
+   * (`rivals.ts`, attached by `attachRivals`). Absent: not computed; empty:
+   * none. Display only: the decision stays the database's.
+   */
+  rivals?: readonly RivalSale[];
+  /** The unpaired ORDERS of the session that would rival this pair (`rival_order`). Absent: not computed. */
+  rivalOrders?: readonly RivalOrder[];
+  /**
+   * For an unmatched order: the sale that carries its number now (created
+   * from the report, 0183, or by hand) — `null` none, absent not looked up.
+   */
+  createdSaleId?: number | null;
+  /**
+   * For an unmatched order no sale carries the number of: the existing sales
+   * it could be, scored again at page load (`candidates.ts`) — a
+   * recommendation, never an assignment. Absent: not computed.
+   */
+  candidates?: { shown: readonly CandidateExplanation[]; more: number };
+  /** For an unmatched order whose number a sale carries now: that sale, compared again. */
+  linkedComparison?: CandidateExplanation;
 };
+
+import type { CandidateExplanation } from "./candidates";
+
+/** One unpaired sale the database would see as a rival of a pair (`rival_sale`, 0180). */
+export type RivalSale = {
+  saleId: number;
+  soldOn: string;
+  /** The figure names this sale shares with the report's lines, as SkyIsles writes them. */
+  shared: readonly string[];
+  /** All of its positions, raw — so the operator can judge which order it really is. */
+  pieces: readonly string[];
+  /** Its version as read — an exclusion (0186) holds only for exactly this state. */
+  updatedAt: string | null;
+};
+
+/** Another unpaired order of the session the database would see as a rival (`rival_order`, 0180). */
+export type RivalOrder = { orderId: number; orderRef: string; soldOn: string; shared: readonly string[] };
 
 export type PageInfo = {
   category: Category | null;

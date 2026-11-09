@@ -17,6 +17,8 @@
  * columns, and the owner reads it as "who paid the label" — so it renders as
  * `Über Kanal` or `Extern bezahlt`, never as `channel` or `external`.
  */
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 
 import { Modal } from "@/components/ui/modal";
@@ -152,8 +154,28 @@ function FeeForm({ kind, saving, value, onChange, onAdd }: {
   );
 }
 
-export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
+/** The editable fields of a sale, as the inputs hold them — built from the sale as it is now. */
+function draftOf(sale: SaleRow) {
+  return {
+    soldAt: sale.soldAt ?? "", country: sale.country ?? "",
+    buyer: sale.buyerRef ?? "", reference: sale.externalOrderRef ?? "",
+    note: sale.note ?? "",
+  };
+}
+
+const EMPTY_FEE = { kind: "payment", amount: "", settledBy: "channel", label: "" };
+const EMPTY_REFUND = { amount: "", reason: "", occurredAt: "" };
+
+export function SaleDetails({ sale, detail, open, onClose, onSaved, returnHref = null, itemsHref = null }: {
   sale: SaleRow;
+  /** Opened from the sales reconciliation: the checked way back (else null — nothing changes). */
+  returnHref?: string | null;
+  /**
+   * The sale's own page at its positions (figures and count), with the way
+   * back when there is one. The dialog edits date, buyer, reference — the
+   * positions are kept there (2026-11-08).
+   */
+  itemsHref?: string | null;
   /** `seller_sale()`'s payload, or undefined while it is still loading. */
   detail: Record<string, unknown> | "failed" | undefined;
   open: boolean;
@@ -163,17 +185,23 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
   const headingId = useId();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
   /*
    * Edit mode is opt-in. The normal view stays a breakdown you can read; the
    * inputs appear only when the owner says they are correcting something.
+   * Opened from the sales reconciliation (`returnHref`), the operator came to
+   * correct something — the inputs are open from the start. Nothing is
+   * written by that: only "Speichern" writes.
    */
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(() => ({
-    soldAt: sale.soldAt ?? "", country: sale.country ?? "",
-    buyer: sale.buyerRef ?? "", reference: sale.externalOrderRef ?? "",
-    note: sale.note ?? "",
-    /* null = untouched, so the stored reference shows through until it is. */
-  }));
+  const [editing, setEditing] = useState(() => returnHref !== null && sale.orderId === null);
+  const [draft, setDraft] = useState(() => draftOf(sale));
+  /*
+   * LEAVING WITH UNSAVED INPUT (2026-11-08). "Schließen", Escape, the
+   * backdrop and "Zurück zum Abgleich" first ask when something typed would
+   * be lost: `close` or `back` is what the operator wanted, held until they
+   * say "Verwerfen" or "Weiter bearbeiten".
+   */
+  const [leaving, setLeaving] = useState<"close" | "back" | "items" | null>(null);
   /*
    * Was das Verschicken getan hat, bis das Fenster neu lädt (0112).
    *
@@ -184,8 +212,8 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
   const [shipped, setShipped] = useState<{ settled: number; stillOpen: number } | null>(null);
   /* Der getauschte Platz, bis das Fenster neu lädt (0113). */
   const [swapped, setSwapped] = useState<number | null>(null);
-  const [newFee, setNewFee] = useState({ kind: "payment", amount: "", settledBy: "channel", label: "" });
-  const [newRefund, setNewRefund] = useState({ amount: "", reason: "", occurredAt: "" });
+  const [newFee, setNewFee] = useState(EMPTY_FEE);
+  const [newRefund, setNewRefund] = useState(EMPTY_REFUND);
   const [audit, setAudit] = useState<Record<string, unknown>[]>([]);
 
   /* The trail is only worth fetching once the dialog is actually open. */
@@ -226,6 +254,46 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
   const expected = loaded?.expected_payout === undefined || loaded?.expected_payout === null
     ? sale.expectedPayout : Number(loaded.expected_payout);
   const internal = sale.orderId !== null;
+  /*
+   * TYPED, NOT YET SAVED (2026-11-08). Only while editing: the draft is
+   * rebuilt from the sale on every entry, so outside edit mode nothing is
+   * pending. A fee or refund typed but not added counts too — leaving would
+   * drop it just the same.
+   */
+  const unsaved = editing && !internal && (
+    JSON.stringify(draft) !== JSON.stringify(draftOf(sale))
+    || newFee.amount.trim() !== "" || newFee.label.trim() !== ""
+    || newRefund.amount.trim() !== "" || newRefund.reason.trim() !== "" || newRefund.occurredAt !== "");
+
+  /*
+   * ENTERING AND CANCELLING (the purchase dialog's rule, 2026-10). The draft
+   * is built from the sale as it is NOW, on entry and on cancel — the list
+   * refreshes while the dialog is open, and a draft from earlier would carry
+   * old values back in. Cancel resets; it does not merely fold away.
+   */
+  function startEditing() {
+    setDraft(draftOf(sale));
+    setError(null);
+    setEditing(true);
+  }
+  function cancelEditing() {
+    setDraft(draftOf(sale));
+    setNewFee(EMPTY_FEE);
+    setNewRefund(EMPTY_REFUND);
+    setError(null);
+    setLeaving(null);
+    setEditing(false);
+  }
+  function leave(target: "close" | "back" | "items") {
+    if (target === "close") onClose();
+    else if (target === "items") { if (itemsHref) router.push(itemsHref); }
+    else if (returnHref) router.push(returnHref);
+  }
+  function requestLeave(target: "close" | "back" | "items") {
+    if (saving) return;
+    if (unsaved) { setLeaving(target); return; }
+    leave(target);
+  }
 
   /*
    * Every write goes through here so they all carry the same concurrency
@@ -288,35 +356,87 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
      * alles oder nichts.
      */
     const wanted = draft.soldAt.trim() === "" ? null : draft.soldAt.trim();
-    await run(() => updateSaleMeta(sale.id, {
+    const ok = await run(() => updateSaleMeta(sale.id, {
       ...(wanted !== (sale.soldAt ?? null) ? { soldAt: wanted } : {}),
       country: draft.country.trim() || null,
       buyerRef: draft.buyer.trim() || null,
       externalRef: draft.reference.trim() || null,
       note: draft.note,
     }, sale.updatedAt));
+    /* Saved: back to reading, where the refreshed sale shows the new values in the same places. */
+    if (ok) { setLeaving(null); setEditing(false); }
   }
 
   return (
-    <Modal open={open} onClose={onClose} labelledBy={headingId} size="lg">
-      <div className="flex items-baseline justify-between gap-4 px-4 pt-4 pb-1">
+    <Modal open={open} onClose={() => requestLeave("close")} labelledBy={headingId} size="lg">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 px-4 pt-4 pb-1">
         <h2 id={headingId} className="text-base font-semibold">{modal.title}</h2>
         <div className="flex items-center gap-2">
-          {/* Commerce owns an internal sale; there is nothing to edit here. */}
-          {internal ? null : (
-            <button type="button" onClick={() => setEditing((on) => !on)}
-                    aria-pressed={editing}
-                    className={`min-h-9 rounded-sky-md px-2 text-xs ring-1 ${
-                      editing ? "bg-surface font-medium ring-fg/40" : "text-muted ring-border/70 hover:text-fg"}`}>
-              {editing ? modal.done : modal.edit}
+          {/*
+            IM BEARBEITEN: SPEICHERN UND ABBRECHEN, OBEN (wie im Einkauf).
+            Kein Umschalter „Fertig" mehr, der nichts speichert, und kein
+            Speichern-Knopf am Ende eines zweiten Blocks. Commerce owns an
+            internal sale; there is nothing to edit there.
+          */}
+          {internal ? null : editing ? (
+            <>
+              <button type="button" disabled={saving} onClick={() => void saveMeta()} data-save=""
+                      className="min-h-9 rounded-sky-md bg-surface px-2 text-xs font-medium ring-1 ring-fg/40 hover:ring-fg/60 disabled:opacity-50">
+                {modal.save}
+              </button>
+              <button type="button" disabled={saving} onClick={cancelEditing} data-cancel=""
+                      className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg disabled:opacity-50">
+                {modal.cancel}
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={startEditing} data-edit=""
+                    className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg">
+              {modal.edit}
             </button>
           )}
-          <button type="button" onClick={onClose}
+          <button type="button" onClick={() => requestLeave("close")}
                   className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg">
             {modal.close}
           </button>
         </div>
       </div>
+
+      {itemsHref && !internal ? (
+        <div className="px-4 pb-1">
+          <Link href={itemsHref} data-items-link=""
+                onClick={(e) => { if (unsaved || saving) { e.preventDefault(); requestLeave("items"); } }}
+                className="inline-flex min-h-11 items-center rounded-sky-md px-2 text-sm underline underline-offset-2 sm:min-h-9">
+            {copy.correction.itemsLink}
+          </Link>
+        </div>
+      ) : null}
+
+      {returnHref ? (
+        <div className="px-4 pb-1">
+          <Link href={returnHref} data-return-to-reconciliation=""
+                onClick={(e) => { if (unsaved || saving) { e.preventDefault(); requestLeave("back"); } }}
+                className="inline-flex min-h-11 items-center rounded-sky-md px-2 text-sm font-medium underline underline-offset-2 sm:min-h-9">
+            <span aria-hidden="true">←&nbsp;</span>{de.business.reconciliation.result.backToReconciliation}
+          </Link>
+        </div>
+      ) : null}
+
+      {leaving !== null ? (
+        <div role="alert" data-leave-warning=""
+             className="mx-4 mb-1 flex flex-wrap items-center gap-2 rounded-sky-md bg-surface px-3 py-2 text-xs ring-1 ring-attention/60">
+          <span className="flex-1 font-medium">{modal.unsavedLeave}</span>
+          <button type="button" onClick={() => setLeaving(null)} data-keep-editing=""
+                  className="min-h-9 rounded-sky-md px-2 text-xs font-medium ring-1 ring-fg/40 hover:ring-fg/60">
+            {modal.keepEditing}
+          </button>
+          <button type="button" data-discard=""
+                  onClick={() => { const target = leaving; cancelEditing(); leave(target); }}
+                  className="min-h-9 rounded-sky-md px-2 text-xs text-danger ring-1 ring-border/70">
+            {leaving === "back" ? modal.discardBack : leaving === "items" ? modal.discardItems : modal.discardClose}
+          </button>
+        </div>
+      ) : null}
 
       {error ? (
         <p role="alert" className="mx-4 mb-1 rounded-sky-md bg-surface px-3 py-2 text-xs text-danger ring-1 ring-border/70">
@@ -324,10 +444,28 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
         </p>
       ) : null}
 
+      {unsaved ? (
+        <p role="status" data-unsaved="" className="mx-4 mb-1 text-xs font-medium text-fg">{modal.unsaved}</p>
+      ) : null}
+
       {/* The panel caps its own height; this is the part that scrolls. */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section title={modal.sale}>
-          <Line label={copy.columns.date} value={formatDate(sale.soldAt)} />
+          {/*
+            INLINE, NICHT UNTEN (2026-11-08). Jede Angabe steht einmal und wird
+            an ihrer Stelle zum Feld — kein zweiter Block unter der Ansicht,
+            dieselbe Reihenfolge beim Lesen und beim Bearbeiten.
+          */}
+          {editing ? (
+            <Field label={copy.columns.date}>
+              {/* Empty means the date is not known — `Datum fehlt`, not a guess. */}
+              <input type="date" value={draft.soldAt} disabled={saving}
+                     onChange={(e) => setDraft({ ...draft, soldAt: e.target.value })}
+                     className={`${INPUT} w-40`} />
+            </Field>
+          ) : (
+            <Line label={copy.columns.date} value={formatDate(sale.soldAt)} />
+          )}
           {/*
             DER PLATZ AM TAG (0113).
 
@@ -370,19 +508,47 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
           <Line label={modal.channel}
                 value={internal ? (sale.orderNumber ?? CHANNEL_LABELS.skyisles ?? "SkyIsles")
                                 : CHANNEL_LABELS[sale.channel] ?? sale.channel} />
-          <Line label={copy.columns.country}
-                value={sale.country ? `${sale.country} · ${countryLabel(sale.country)}` : "—"} />
+          {editing ? (
+            <Field label={copy.columns.country}>
+              <input value={draft.country} disabled={saving} maxLength={2}
+                     onChange={(e) => setDraft({ ...draft, country: e.target.value.toUpperCase() })}
+                     className={`${INPUT} w-20 uppercase`} />
+            </Field>
+          ) : (
+            <Line label={copy.columns.country}
+                  value={sale.country ? `${sale.country} · ${countryLabel(sale.country)}` : "—"} />
+          )}
           {/*
             0113. `buyerLabel` statt `buyerRef`: extern die Referenz des
             Marktplatzes, intern der Name aus der beim Kauf eingefrorenen
             Lieferadresse (B-1). Die Zeile fehlte für Bestellungen ganz.
           */}
-          {sale.buyerLabel ? (
+          {editing ? (
+            <Field label={modal.buyer}>
+              <input value={draft.buyer} disabled={saving}
+                     onChange={(e) => setDraft({ ...draft, buyer: e.target.value })}
+                     className={`${INPUT} w-52`} />
+            </Field>
+          ) : sale.buyerLabel ? (
             <Line label={modal.buyer} value={sale.buyerLabel}
                   hint={sale.buyerRepeat ? copy.repeatBuyer : null} />
           ) : null}
-          {sale.externalOrderRef
+          {editing ? (
+            <Field label={modal.reference}>
+              <input value={draft.reference} disabled={saving}
+                     onChange={(e) => setDraft({ ...draft, reference: e.target.value })}
+                     className={`${INPUT} w-52`} />
+            </Field>
+          ) : sale.externalOrderRef
             ? <Line label={modal.reference} value={sale.externalOrderRef} /> : null}
+          {editing ? (
+            <Field label={copy.note}>
+              <input value={draft.note} disabled={saving}
+                     onChange={(e) => setDraft({ ...draft, note: e.target.value })}
+                     className={`${INPUT} w-52`} />
+            </Field>
+          ) : sale.note
+            ? <Line label={copy.note} value={sale.note} /> : null}
           <Line label={modal.shippingState}
                 value={sale.shippedAt !== null || sale.fulfillmentStatus === "shipped"
                        || sale.fulfillmentStatus === "completed" ? copy.shipped : copy.notShipped} />
@@ -429,41 +595,6 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
           ) : null}
           {internal ? <p className="mt-1 text-xs text-muted">{modal.commerceLocked}</p> : null}
 
-          {editing ? (
-            <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-2">
-              <Field label={copy.columns.date}>
-                {/* Empty means the date is not known — `Datum fehlt`, not a guess. */}
-                <input type="date" value={draft.soldAt} disabled={saving}
-                       onChange={(e) => setDraft({ ...draft, soldAt: e.target.value })}
-                       className={`${INPUT} w-40`} />
-              </Field>
-              <Field label={copy.columns.country}>
-                <input value={draft.country} disabled={saving} maxLength={2}
-                       onChange={(e) => setDraft({ ...draft, country: e.target.value.toUpperCase() })}
-                       className={`${INPUT} w-20 uppercase`} />
-              </Field>
-              <Field label={modal.buyer}>
-                <input value={draft.buyer} disabled={saving}
-                       onChange={(e) => setDraft({ ...draft, buyer: e.target.value })}
-                       className={`${INPUT} w-52`} />
-              </Field>
-              <Field label={modal.reference}>
-                <input value={draft.reference} disabled={saving}
-                       onChange={(e) => setDraft({ ...draft, reference: e.target.value })}
-                       className={`${INPUT} w-52`} />
-              </Field>
-              <Field label={copy.note}>
-                <input value={draft.note} disabled={saving}
-                       onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-                       className={`${INPUT} w-52`} />
-              </Field>
-              <div className="mt-1 flex justify-end">
-                <button type="button" disabled={saving} onClick={() => void saveMeta()} className={BUTTON}>
-                  {modal.save}
-                </button>
-              </div>
-            </div>
-          ) : null}
         </Section>
 
         <Section title={modal.amounts}>

@@ -104,6 +104,7 @@ import { announceSaleItemReturn, bookSaleItem, loadSale, receiveSaleItemReturn,
   restockSaleItem, setSaleItemNotShipped, shipSaleItem,
   shipSale, type ItemResult } from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
+import { type ReturnTarget, SALE_ITEMS_ANCHOR, withReturn } from "@/lib/reconciliation/routes";
 import { commerceLineIndicator, commerceLineStatus } from "@/lib/orderbook/commerce-line-status";
 import {
   countryLabel, saleItemActions, saleStockIndicator, saleStockStatus, saleItemIndicator,
@@ -194,7 +195,7 @@ function Summary({ summary }: { summary: SalesSummary }) {
 
 type Detail = Record<string, unknown>;
 
-export function SalesLedger({ sales, summary, backHref, openSale }: {
+export function SalesLedger({ sales, summary, backHref, openSale, returnHref = null, returnTarget = null }: {
   sales: SaleRow[]; summary: SalesSummary; backHref: string;
   /**
    * Ein Verkauf, der beim Laden schon offen sein soll (`?verkauf=`).
@@ -206,6 +207,14 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
    * anderen Verkauf, statt einer zweiten Oberfläche für denselben Zweck.
    */
   openSale?: number;
+  /**
+   * Opened from the sales reconciliation: the checked way back to the same
+   * session and order (`returnHref` in `lib/reconciliation/routes`), shown in
+   * the edit dialog too. Null otherwise — then nothing changes.
+   */
+  returnHref?: string | null;
+  /** The same way back as checked parts — carried on to the sale's positions ("Positionen bearbeiten"). */
+  returnTarget?: ReturnTarget | null;
 }) {
   const [open, setOpen] = useState<ReadonlySet<number>>(
     () => new Set([...sales.filter((s) => s.matchItems.length > 0).map((s) => s.id),
@@ -718,6 +727,9 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
       */}
       {showingSale ? (
         <SaleDetails key={showingSale.id} sale={showingSale} detail={details[showingSale.id]}
+                     returnHref={returnHref}
+                     itemsHref={`${withReturn(`/business/orderbuch/verkauf/${showingSale.id}?zurueck=${encodeURIComponent(backHref)}`,
+                       returnTarget)}#${SALE_ITEMS_ANCHOR}`}
                      open onClose={() => {
                        setShowing(null);
                        /* `?verkauf=` hat seinen Zweck erfüllt: ohne das

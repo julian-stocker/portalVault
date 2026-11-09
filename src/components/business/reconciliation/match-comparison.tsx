@@ -8,7 +8,14 @@
  *
  * An order without a relevant difference is one line and its details.
  *
- * WHAT THE COLOURS MEAN comes from `compareMatch` — green only for a value the
+ * THE CHIP IN THE HEAD is the order's outcome (`orderOutcome`, 2026-11-08):
+ * Identisch, Ergänzen, Abweichung, Nicht zugeordnet or Zusatzkandidat — the
+ * same word the result view counts, so a card never says "Stimmt überein"
+ * while a number is still missing. The frame follows the outcome. Values
+ * already taken over are marked "Erledigt". An order that is a deviation
+ * without a line of its own says why (changed sale, unproven comparison).
+ *
+ * THE FIELD COLOURS come from `compareMatch` — green only for a value the
  * database PROVED equal, red only for a recorded deviation of a certain pair.
  * Every other state is neutral and said in words (WCAG 1.4.1); `unbekannt`
  * is never written as 0 or as a dash that could pass for "nothing".
@@ -27,25 +34,43 @@ import { de } from "@/lib/i18n/de";
 import {
   compareMatch, toneOf, type ComparisonField, type FieldStatus, type MatchComparison, type Tone, type ValueKind,
 } from "@/lib/reconciliation/compare";
-import { orderbookSaleHref } from "@/lib/reconciliation/decide";
-import { isRelevant, type MatchPlan, planMatch } from "@/lib/reconciliation/plan";
+import {
+  appliedCount, isReassessed, isRelevant, isUnproven, type MatchPlan, missingOrderNumber, type OrderOutcome, orderOutcome, planMatch,
+  type WorkState, workState,
+} from "@/lib/reconciliation/plan";
+import { liveDifferences } from "@/lib/reconciliation/live";
+import { newSaleFromReportHref, orderbookEditHref, orderbookItemsHref, type ResultView } from "@/lib/reconciliation/routes";
 import type { AtAnalysisValue, JsonScalar, Match } from "@/lib/reconciliation/view";
 
 import { EntryValues, reasonText } from "./plan-values";
 import { ReconcileButton } from "./reconcile-dialog";
+import { AssignSale, CandidateSearch, TakeOrderNumber } from "./candidate-actions";
+import { CandidateComparison } from "./report-candidates";
+import { RivalSales } from "./rival-sales";
 
 const copy = de.business.reconciliation;
 const t = copy.detail;
 
-const TONE_RING: Record<Tone, string> = {
-  match: "ring-success/40",
-  deviation: "ring-danger/60",
-  neutral: "ring-border/70",
-};
 const TONE_CHIP: Record<Tone, string> = {
   match: "text-success ring-success/40",
   deviation: "text-danger ring-danger/40",
   neutral: "text-muted ring-border/70",
+};
+/** The outcome of an order, as the result view counts it (`orderOutcome`). */
+const OUTCOME_CHIP: Record<OrderOutcome, string> = {
+  identical: "text-success ring-success/40",
+  supplement: "text-fg ring-fg/40",
+  deviation: "text-danger ring-danger/40",
+  unmatched: "text-muted ring-border/70",
+  extra: "text-muted ring-border/70",
+};
+/** The card's frame follows its outcome — an order to complete is never framed green. */
+const OUTCOME_RING: Record<OrderOutcome, string> = {
+  identical: "ring-success/40",
+  supplement: "ring-fg/30",
+  deviation: "ring-danger/60",
+  unmatched: "ring-border/70",
+  extra: "ring-border/70",
 };
 
 /** A value as text. Null means "not there" (—); `unbekannt` is said by the caller. */
@@ -236,14 +261,42 @@ function PlanLines({ plan }: { plan: MatchPlan }) {
   );
 }
 
-export function MatchCard({ match: m }: { match: Match }) {
+const WORK_CHIP: Record<WorkState, string> = {
+  open: "text-muted ring-border/70",
+  partial: "text-fg ring-fg/40",
+  done: "text-success ring-success/40",
+};
+
+export function MatchCard({ match: m, back = null }: {
+  match: Match;
+  /** Where "Im Orderbuch bearbeiten" returns to — this session and filter. */
+  back?: { sessionId: number; view: ResultView | null } | null;
+}) {
   const c = compareMatch(m);
   const plan = planMatch(m);
+  const outcome = orderOutcome(m);
+  const work = workState(m);
+  const done = appliedCount(m);
+  const reassessed = isReassessed(m);
+  const live = liveDifferences(m);
   const headingId = `recon-match-${m.id}`;
   const cur = m.ledger?.current ?? null;
+  // What still differs NOW but has no line of its own (a changed sale, judged again).
+  const liveOnly = live === null ? [] : [...live].filter((f) => f !== "external_order_ref"
+    && !plan.checks.some((e) => e.finding.field === f) && !plan.conflicts.some((e) => e.finding.field === f));
+  // Why an order is a deviation when no single line says so.
+  const why = outcome !== "deviation" ? null
+    : liveOnly.length > 0 ? copy.result.liveDiffers(liveOnly.map((f) => copy.fields[f]).join(", "))
+    : [...plan.conflicts, ...plan.checks].length > 0 ? null
+    : isUnproven(m) ? copy.result.unproven : null;
+  const edit = m.sale ? orderbookEditHref(m.sale.id, back ? { ...back, matchId: m.id } : null) : null;
+  // Figures or count differ (stored, or judged again): straight to the sale's positions.
+  const positionsDiffer = plan.checks.some((e) => e.reason === "positions")
+    || (live !== null && (live.has("figure") || live.has("pieces")));
+  const items = m.sale && positionsDiffer ? orderbookItemsHref(m.sale.id, back ? { ...back, matchId: m.id } : null) : null;
   return (
-    <article aria-labelledby={headingId} data-category={m.category} data-tone={c.tone}
-             className={`rounded-sky-md bg-surface/60 p-3 ring-1 sm:p-4 ${TONE_RING[c.tone]}`}>
+    <article aria-labelledby={headingId} data-category={m.category} data-outcome={outcome} data-tone={c.tone}
+             className={`rounded-sky-md bg-surface/60 p-3 ring-1 sm:p-4 ${OUTCOME_RING[outcome]}`}>
       <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
         <div className="min-w-0">
           <h3 id={headingId} className="text-sm font-medium break-words">
@@ -259,11 +312,19 @@ export function MatchCard({ match: m }: { match: Match }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span title={copy.categoryHints[m.category]}
-                className={`rounded-sky-md px-2 py-0.5 text-xs ring-1 ${TONE_CHIP[c.tone]}`}>
-            {copy.categories[m.category]}
+          <span data-outcome-chip={outcome} title={copy.result.outcomeHints[outcome]}
+                className={`rounded-sky-md px-2 py-0.5 text-xs ring-1 ${OUTCOME_CHIP[outcome]}`}>
+            {copy.result.outcomes[outcome]}
           </span>
-          {c.deviations > 0 ? <span className="text-xs text-danger">{t.deviationCount(c.deviations)}</span> : null}
+          {work ? (
+            <span data-work={work} title={copy.result.workHints[work]}
+                  className={`rounded-sky-md px-2 py-0.5 text-xs ring-1 ${WORK_CHIP[work]}`}>
+              {copy.result.work[work]}
+            </span>
+          ) : null}
+          {done > 0 ? <span data-done="" className="text-xs text-success">{copy.result.doneCount(done)}</span> : null}
+          {/* The stored count describes the analysis; a sale judged again shows its current lines instead. */}
+          {c.deviations > 0 && !reassessed ? <span className="text-xs text-danger">{t.deviationCount(c.deviations)}</span> : null}
           {plan.supplements.length > 0 ? <span className="text-xs text-success">{t.additionCount(plan.supplements.length)}</span> : null}
           {c.state && c.state !== "unchanged" ? <span className="text-xs text-muted">{t.ledgerStates[c.state]}</span> : null}
           {/* Why it is not compared — in the head, not only in the details (0169: a reason exists only here). */}
@@ -279,15 +340,88 @@ export function MatchCard({ match: m }: { match: Match }) {
         <p className="mt-1 text-xs text-muted">{t.notCompared}. {t.reasonHints[m.reason]}</p>
       ) : null}
 
+      {reassessed ? <p data-reassessed="" className="mt-1 text-xs text-muted">{copy.result.reassessed}</p> : null}
       <PlanLines plan={plan} />
+      {why ? <p data-why="" className="mt-2 text-xs text-muted">{why}</p> : null}
+      {/* Who blocks the order number (`rival_sale`, 0180) — shown, not lifted. */}
+      {m.rivals && m.rivals.length > 0 ? (
+        <RivalSales rivals={m.rivals} back={back ? { ...back, matchId: m.id } : null} />
+      ) : null}
+
+      {/*
+        An unmatched order: a sale carries its number already → the link;
+        else the EXISTING create dialog, prefilled from the report (0184) —
+        not a second editor. Only when the lookup ran (`null`): fail closed.
+      */}
+      {!m.sale && m.order && m.category === "external_only" ? (
+        m.createdSaleId ? (
+          <div className="mt-2">
+            <p data-created-sale={m.createdSaleId} className="text-sm">
+              {copy.createSale.onCard(m.createdSaleId)}{" · "}
+              <Link href={`/business/orderbuch/verkauf/${m.createdSaleId}`} data-created-link=""
+                    className="focus-ring underline underline-offset-2">{copy.createSale.openSale}</Link>
+            </p>
+            {/* Judged again: what still differs between the report and the sale that carries its number. */}
+            {m.linkedComparison ? (
+              <div data-linked-comparison="" className="mt-1">
+                <p className="text-xs text-muted">{copy.candidates.linkedTitle(m.createdSaleId)}</p>
+                <CandidateComparison c={m.linkedComparison} back={back ? { ...back, matchId: m.id } : null} />
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            {/* ADR-0182: the existing sales it could be, looked for again at page load — a recommendation. */}
+            {m.candidates && back ? (
+              <section data-candidates="" className="mt-2">
+                <h4 className="text-sm font-medium">{copy.candidates.title}</h4>
+                <p className="text-xs text-muted">{copy.candidates.hint}</p>
+                {m.candidates.shown.length === 0 ? <p className="mt-1 text-xs text-muted">{copy.candidates.none}</p> : (
+                  <ul className="mt-1 flex flex-col gap-2">
+                    {m.candidates.shown.map((c) => (
+                      <li key={c.saleId}>
+                        <CandidateComparison c={c} back={{ ...back, matchId: m.id }}>
+                          <AssignSale c={c} orderRef={m.order!.orderRef} back={{ ...back, matchId: m.id }} />
+                        </CandidateComparison>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {m.candidates.more > 0 ? <p className="mt-1 text-xs text-muted">{copy.candidates.more(m.candidates.more)}</p> : null}
+                <CandidateSearch orderRef={m.order.orderRef} soldOn={m.order.soldOn} back={{ ...back, matchId: m.id }}
+                                 exclude={m.candidates.shown.map((c) => c.saleId)} />
+              </section>
+            ) : null}
+            {m.createdSaleId === null && back ? (
+              <div className="mt-2">
+                <Link href={newSaleFromReportHref({ ...back, matchId: m.id })} data-create-sale=""
+                      className="focus-ring -mx-1 inline-flex min-h-11 items-center rounded-sky-md px-1 text-sm underline underline-offset-2 sm:min-h-8">
+                  {copy.createSale.button}
+                </Link>
+              </div>
+            ) : null}
+          </>
+        )
+      ) : null}
 
       {isRelevant(plan) || m.sale ? (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          {/* Two separate acts: the financial values here, the order number beside it — never one confirmation. */}
           {isRelevant(plan) ? <ReconcileButton matches={[m]} /> : null}
-          {m.sale ? (
-            <Link href={orderbookSaleHref(m.sale.id)} data-orderbook=""
+          {m.sale && m.order && back && missingOrderNumber(m) ? (
+            <TakeOrderNumber back={{ ...back, matchId: m.id }} saleId={m.sale.id} version={m.ledger?.version.current ?? null}
+                             orderRef={m.order.orderRef} rivals={m.rivals ?? []} rivalOrders={m.rivalOrders ?? []} />
+          ) : null}
+          {edit ? (
+            <Link href={edit} data-orderbook=""
                   className="focus-ring -mx-1 inline-flex min-h-11 items-center rounded-sky-md px-1 text-sm underline underline-offset-2 sm:min-h-8">
               {copy.reconcile.orderbook}
+            </Link>
+          ) : null}
+          {items ? (
+            <Link href={items} data-orderbook-items=""
+                  className="focus-ring -mx-1 inline-flex min-h-11 items-center rounded-sky-md px-1 text-sm underline underline-offset-2 sm:min-h-8">
+              {copy.reconcile.positions}
             </Link>
           ) : null}
         </div>

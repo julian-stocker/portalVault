@@ -91,6 +91,7 @@ import { PendingButton } from "@/components/ui/pending";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { createSaleWithDetails } from "@/lib/orderbook/sales-actions";
+import { returnHref, type ReturnTarget } from "@/lib/reconciliation/routes";
 import {
   MAX_DRAFT_UNITS, draftPayload, draftUnitCount, type DraftLine,
 } from "@/lib/orderbook/draft";
@@ -137,10 +138,34 @@ function SettledToggle({ value, onChange, disabled, name }: {
   );
 }
 
-export function NewSale({ defaultTest = false, catalog = [] }: {
+/** A report amount as the money field shows it: German decimals, two places. */
+function moneyField(v: number): string {
+  return v.toFixed(2).replace(".", ",");
+}
+
+/**
+ * WAS DER CSV-ABGLEICH MITGIBT (0184), wenn eine nicht zugeordnete Bestellung
+ * hier angelegt wird. Nur, was der Bericht zuverlässig nennt — Kanal, Datum,
+ * Bestellnummer, Land, Warenwert, Versand —, und alles davon bleibt ein
+ * Startwert in einem gewöhnlichen, änderbaren Feld. Die Berichtszeilen sind
+ * Orientierung: übernommen wird keine. Käufer und Gebühren gibt es nicht.
+ */
+export type ReportEntry = {
+  back: ReturnTarget;
+  orderRef: string;
+  soldAt: string;
+  country: string | null;
+  subtotal: number;
+  shipping: number;
+  lines: readonly { name: string; quantity: number; unitPrice: number }[];
+};
+
+export function NewSale({ defaultTest = false, catalog = [], fromReport = null }: {
   /** Arrives as `?test=1` when the form was opened from the Test view. */
   defaultTest?: boolean;
   catalog?: readonly FigureChoice[];
+  /** Opened from the CSV reconciliation: starting values, orientation, the way back. */
+  fromReport?: ReportEntry | null;
 }) {
   const router = useRouter();
   const nextKey = useRef(0);
@@ -149,10 +174,10 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
   const [templateId, setTemplateId] = useState("ebay");
   const template = saleTemplate(templateId);
 
-  const [soldAt, setSoldAt] = useState("");
-  const [country, setCountry] = useState("DE");
+  const [soldAt, setSoldAt] = useState(fromReport?.soldAt ?? "");
+  const [country, setCountry] = useState(fromReport ? (fromReport.country ?? "") : "DE");
   const [buyer, setBuyer] = useState("");
-  const [reference, setReference] = useState("");
+  const [reference, setReference] = useState(fromReport?.orderRef ?? "");
   const [note, setNote] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([]);
   /*
@@ -162,8 +187,8 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
    * keine und bekommen auch keine erfundene. Siehe `free-items.ts`.
    */
   const [freeLines, setFreeLines] = useState<FreeItemLine[]>([]);
-  const [subtotal, setSubtotal] = useState("");
-  const [shipping, setShipping] = useState("");
+  const [subtotal, setSubtotal] = useState(fromReport ? moneyField(fromReport.subtotal) : "");
+  const [shipping, setShipping] = useState(fromReport ? moneyField(fromReport.shipping) : "");
   const [discount, setDiscount] = useState("");
   /*
    * The opening rows get their own key space, so the lazy initialiser never
@@ -186,6 +211,13 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
   const [adjustment, setAdjustment] = useState("");
   const [adjustmentNote, setAdjustmentNote] = useState("");
   const [isTest, setIsTest] = useState(defaultTest);
+  /*
+   * RESERVIEREN BEIM ANLEGEN (0184). Außerhalb des Abgleichs wie immer an —
+   * und nicht einmal sichtbar. Aus dem Abgleich standardmäßig AUS: die
+   * Bestellung wird offen angelegt, das Lager bearbeitet der Betrieb danach
+   * selbst. Der Wert geht beim Speichern ausdrücklich mit (`hold`).
+   */
+  const [hold, setHold] = useState(fromReport === null);
   const [error, setError] = useState<string | null>(null);
   /*
    * Der Verkauf steht, die Rückerstattung nicht.
@@ -292,6 +324,7 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
          */
         refunds: refundAmounts(refunds),
         adjustments: money.adjustments,
+        hold,
       });
       if (!created.ok) { setError(created.message); return; }
       if (created.refund === "failed") { setPartial(created.id); return; }
@@ -305,6 +338,8 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
        * Oberfläche für denselben Zweck. `/verkauf/[id]` bleibt für
        * Direktaufrufe erreichbar.
        */
+      /* Aus dem Abgleich: zurück zur Karte, die den neuen Verkauf jetzt verlinkt. */
+      if (fromReport) { router.push(returnHref(fromReport.back)); return; }
       router.push(`/business/orderbuch/verkauf?verkauf=${created.id}`);
     });
   }
@@ -332,6 +367,21 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
                 className="self-start text-xs underline underline-offset-2">
             {create.openCreatedSale}
           </Link>
+        </div>
+      ) : null}
+
+      {fromReport ? (
+        <div data-from-report="" className="flex flex-col gap-2 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-attention/60">
+          <p>{create.fromReport.intro(fromReport.orderRef)}</p>
+          <div>
+            <p className="text-xs font-medium">{create.fromReport.linesTitle}</p>
+            <ul data-report-lines="" className="mt-0.5 list-disc pl-4 text-xs">
+              {fromReport.lines.map((l, k) => (
+                <li key={k} className="break-words">{create.fromReport.line(l.quantity, l.name, formatPrice(l.unitPrice))}</li>
+              ))}
+            </ul>
+            <p className="mt-0.5 text-xs text-muted">{create.fromReport.linesHint}</p>
+          </div>
         </div>
       ) : null}
 
@@ -583,6 +633,15 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
         </label>
       </FormSection>
 
+      {fromReport ? (
+        <label className="flex items-start gap-2" data-hold-option="">
+          <input type="checkbox" checked={hold} disabled={pending} data-hold=""
+                 onChange={(e) => setHold(e.target.checked)} className="mt-0.5 size-4 shrink-0" />
+          <span className="text-sm">{create.fromReport.hold}
+            <span className="block text-xs text-muted">{create.fromReport.holdHint}</span></span>
+        </label>
+      ) : null}
+
       {/*
         Nach einem Teilerfolg GESPERRT: der Verkauf existiert, und ein
         zweiter Druck würde einen zweiten anlegen statt die fehlende
@@ -601,6 +660,13 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
           ? ` · ${de.business.orderbook.figures.freeUnits(freeItemCount(freeLines))}`
           : ""}
       </PendingButton>
+      {/* Abbrechen schreibt nichts: es ist ein Link, kein Formular-Knopf. */}
+      {fromReport ? (
+        <Link href={returnHref(fromReport.back)} data-cancel-to-reconciliation=""
+              className="self-start text-sm underline underline-offset-2">
+          {create.fromReport.cancel}
+        </Link>
+      ) : null}
     </form>
   );
 }

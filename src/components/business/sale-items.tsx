@@ -47,20 +47,21 @@
  */
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
-  addSaleItem, announceSaleItemReturn, bookSaleItem, holdSaleItem, loadOrderbookFigures,
-  receiveSaleItemReturn, removeSaleItem,
+  addLegacySaleItem, addSaleItem, announceSaleItemReturn, bookSaleItem, correctLegacySaleItem, holdSaleItem,
+  loadOrderbookFigures, loadSaleItemCorrections,
+  receiveSaleItemReturn, removeLegacyAddedItem, removeSaleItem,
   restockSaleItem, shipSaleItem,
   returnSaleItem, setSaleItemNotShipped, setSaleItemSky, settleSaleItem,
-  type ItemResult,
+  type ItemResult, type SaleItemCorrection,
 } from "@/lib/orderbook/sales-actions";
 import {
-  legacyOutcome, saleItemActions, saleItemEdits, saleItemHold, saleItemIndicator,
+  legacyItemCorrections, legacyOutcome, saleItemActions, saleItemEdits, saleItemHold, saleItemIndicator,
   type LegacyOutcome, type SaleItemHold,
 } from "@/lib/orderbook/sales-view";
 import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
@@ -108,9 +109,32 @@ const ITEM_MIN_WIDTH = "42.5rem";
  */
 const ADD_ITEM = -1;
 
+/*
+ * EINE KORREKTUR, DIE NOCH NICHT GESPEICHERT IST (0181).
+ *
+ * Bei einem importierten Verkauf schreibt die Figurensuche nicht sofort: sie
+ * merkt vor, was der Betreiber gewählt hat, und erst „Speichern“ ruft die
+ * Datenbank. Eine Korrektur der Historie geschieht nie aus Versehen.
+ */
+type PendingCorrection =
+  | { kind: "replace"; itemId: number; position: number; from: string; skyId: string; to: string }
+  | { kind: "add"; skyId: string | null; rawName: string | null; to: string }
+  | { kind: "remove"; itemId: number; position: number; from: string };
+const SAVE_CORRECTION = -2;
+
 export function SaleItems({ saleId, items, catalog, historical, internal,
-                           frozen, cancelled, shipped = false }: {
+                           frozen, cancelled, shipped = false,
+                           correctable = false, updatedAt = null, corrections = [] }: {
   saleId: number;
+  /**
+   * An imported workbook sale whose positions may be corrected by hand (0181):
+   * external, not cancelled. False everywhere else — the normal rules hold.
+   */
+  correctable?: boolean;
+  /** The sale's version (`updated_at`) the page was loaded with; every correction carries it. */
+  updatedAt?: string | null;
+  /** What was corrected so far, oldest first (`seller_sale_item_corrections`). */
+  corrections?: readonly SaleItemCorrection[];
   items: Record<string, unknown>[];
   /*
    * Der Figurenkatalog, falls der Aufrufer ihn schon hat.
@@ -145,6 +169,10 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
   /** Nachgeladener Katalog, falls der Aufrufer keinen übergeben hat. */
   const [figures, setFigures] = useState<readonly FigureChoice[] | null>(null);
   const [loadingFigures, setLoadingFigures] = useState(false);
+  /* 0181: the version the next correction carries, the trail, and what waits for "Speichern". */
+  const [version, setVersion] = useState<string | null>(updatedAt);
+  const [trail, setTrail] = useState<readonly SaleItemCorrection[]>(corrections);
+  const [pending, setPending] = useState<PendingCorrection | null>(null);
 
   const rows = fresh ?? items;
 
@@ -174,6 +202,10 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
          */
         const next = result.sale?.items;
         if (!internal && Array.isArray(next)) setFresh(next as Record<string, unknown>[]);
+        // The sale's new version — the next correction must carry it (0181, PT409 otherwise).
+        const head = result.sale?.sale as Record<string, unknown> | undefined;
+        if (typeof head?.updated_at === "string") setVersion(head.updated_at);
+        if (correctable) setTrail(await loadSaleItemCorrections(saleId));
       } finally {
         setBusy((current) => { const next = new Set(current); next.delete(key); return next; });
       }
@@ -188,13 +220,42 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
    * ist 2 — der Katalog ist da, bevor das erste Ergebnis gezeigt werden
    * dürfte. Einmal geladen, bleibt er.
    */
+  /*
+   * Ob diese Seite eine Hinzufügen-Suche zeigt — dann lädt der Katalog sofort
+   * (Effekt unten), sonst beim ersten Hineingreifen.
+   */
+  const showsAddSearch = !(internal || (historical && !correctable));
   const ensureFigures = useCallback(() => {
-    if (catalog !== undefined || figures !== null || loadingFigures) return;
+    if (catalog !== undefined || figures !== null || loadingFigures || showsAddSearch) return;
     setLoadingFigures(true);
     void loadOrderbookFigures()
       .then((loaded) => setFigures(loaded))
+      .catch(() => setFigures([]))
       .finally(() => setLoadingFigures(false));
-  }, [catalog, figures, loadingFigures]);
+  }, [catalog, figures, loadingFigures, showsAddSearch]);
+
+  /*
+   * UND SOFORT, SOBALD EINE HINZUFÜGEN-SUCHE ZU SEHEN IST (2026-11-09).
+   *
+   * Der Fokus allein reichte nicht: ein leerer, noch nicht geladener Katalog
+   * schaltet das Suchfeld ab (`FigureSearch`, Zustand `noCatalog`) — und ein
+   * abgeschaltetes Feld bekommt nie Fokus. Die Suche „Fehlende Position
+   * ergänzen“ (und die normale Hinzufügen-Suche dieser Seite) blieb deshalb
+   * für immer bei „Der Katalog konnte nicht geladen werden.“, ohne dass je
+   * geladen wurde. Diese Seite zeigt EINEN Verkauf; ein Laden beim Öffnen
+   * kostet eine Anfrage, nicht eine je Zeile. Ein Fehlschlag ist ein leerer
+   * Katalog und genau EIN Versuch. Bis die Antwort da ist, gilt die Suche als
+   * „lädt“ (`loading` unten), nicht als gescheitert.
+   */
+  useEffect(() => {
+    if (!showsAddSearch || catalog !== undefined) return;
+    let live = true;
+    loadOrderbookFigures()
+      .then((loaded) => { if (live) setFigures(loaded); })
+      .catch(() => { if (live) setFigures([]); });
+    return () => { live = false; };
+  }, [showsAddSearch, catalog]);
+  const catalogLoading = loadingFigures || (showsAddSearch && catalog === undefined && figures === null);
 
   const available = catalog ?? figures ?? [];
   /** Die offenen Ablehnungen, mit der Position davor, soweit bekannt. */
@@ -205,7 +266,7 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
   });
 
   return (
-    <section className="mt-6">
+    <section id="positionen" className="mt-6 scroll-mt-4">
       <h2 className="text-sm font-medium">{book.itemColumns.figure}</h2>
       {problems.length > 0 ? (
         <div role="alert" className="mt-2 flex flex-col gap-1 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">
@@ -253,6 +314,7 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
               || can.status === "settled" || can.status === "not_shipped";
             const outcome = historical && derived ? legacyOutcome(item as never) : null;
             const edits = saleItemEdits(item as never, { historical, internal });
+            const legacy = legacyItemCorrections(item as never, { correctable });
             const itemId = Number(item.id);
             const id = Number(item.id);
             /* One label per state, and the tick only where a movement is. */
@@ -308,6 +370,24 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
                 </span>
                 <span className="break-words" title={String(item.name ?? item.raw_name ?? "")}>
                   {String(item.name ?? item.raw_name ?? "")}
+                  {/*
+                    DIE HERKUNFT BLEIBT SICHTBAR (0181). Eine korrigierte
+                    Arbeitsmappenzeile nennt, was in der Mappe stand; eine
+                    ergänzte sagt, dass sie nicht aus der Mappe kommt.
+                  */}
+                  {(() => {
+                    const own = trail.filter((c) => c.saleItemId === itemId);
+                    const first = own.find((c) => c.action === "replace");
+                    if (first) {
+                      return (
+                        <span data-corrected="" className="block text-xs text-muted">
+                          {copy.correction.corrected(`${first.oldRawName ?? "—"}${first.oldSkyId ? ` (${first.oldSkyId})` : ""}`)}
+                        </span>
+                      );
+                    }
+                    return own.some((c) => c.action === "add")
+                      ? <span data-added="" className="block text-xs text-muted">{copy.correction.added}</span> : null;
+                  })()}
                 </span>
                 <span className="ob-money text-right tabular-nums">
                   {item.market_price === null || item.market_price === undefined
@@ -407,6 +487,26 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
                       {copy.detailsModal.remove}
                     </button>
                   ) : null}
+                  {/* 0181: an imported sale — correct, never overwrite; remove only what a correction added. */}
+                  {legacy.canCorrect ? (
+                    <button type="button" disabled={working} data-correct-item={itemId}
+                            aria-expanded={remapping === itemId}
+                            onClick={() => {
+                              ensureFigures();
+                              setRemapping(remapping === itemId ? null : itemId);
+                            }}
+                            className="min-h-9 text-xs text-muted underline underline-offset-2 disabled:opacity-50">
+                      {copy.correction.change}
+                    </button>
+                  ) : null}
+                  {legacy.canRemoveAdded ? (
+                    <button type="button" disabled={working} data-remove-added={itemId}
+                            onClick={() => setPending({ kind: "remove", itemId, position: Number(item.position),
+                              from: String(item.name ?? item.raw_name ?? "") })}
+                            className="min-h-9 text-xs text-muted underline underline-offset-2 disabled:opacity-50">
+                      {copy.detailsModal.remove}
+                    </button>
+                  ) : null}
                 </span>
               </LedgerItemRow>
             );
@@ -429,15 +529,24 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
             <FigureSearch
               catalog={available}
               autoFocus
-              loading={loadingFigures}
+              loading={catalogLoading}
               disabled={busy.has(remapping)}
               label={copy.changeFigureOne(name)}
               onCancel={() => setRemapping(null)}
-              onSelect={(choice) => act(remapping, async () => {
-                const r = await setSaleItemSky(remapping, choice.skyId, saleId);
-                if (r.ok) setRemapping(null);
-                return r;
-              })}
+              onSelect={(choice) => {
+                if (correctable) {
+                  // 0181: marked, not written — "Speichern" below writes it.
+                  setPending({ kind: "replace", itemId: remapping, position: Number(target?.position), from: name,
+                    skyId: choice.skyId, to: choice.name });
+                  setRemapping(null);
+                  return;
+                }
+                act(remapping, async () => {
+                  const r = await setSaleItemSky(remapping, choice.skyId, saleId);
+                  if (r.ok) setRemapping(null);
+                  return r;
+                });
+              }}
             />
           </div>
         );
@@ -447,10 +556,58 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
         An internal sale takes its items from the order — the database refuses
         to add one — and a historical sale is a reconstruction, not a workbench.
       */}
-      {internal || historical ? (
+      {/*
+        WAS NOCH GESPEICHERT WERDEN MUSS (0181). Eine Zeile, zwei Knöpfe.
+        Nichts davon ist geschrieben, bis „Speichern“ antwortet.
+      */}
+      {pending !== null ? (
+        <div role="status" data-pending-correction={pending.kind}
+             className="mt-3 flex flex-wrap items-center gap-2 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-attention/60">
+          <span className="flex-1 break-words">
+            <span className="font-medium">{copy.correction.pendingTitle}</span>{" "}
+            {pending.kind === "replace" ? copy.correction.replace(pending.position, pending.from, pending.to)
+              : pending.kind === "add" ? copy.correction.add(pending.to)
+                : copy.correction.remove(pending.position, pending.from)}
+          </span>
+          <button type="button" data-save-correction="" disabled={busy.has(SAVE_CORRECTION)}
+                  onClick={() => {
+                    const p = pending;
+                    act(SAVE_CORRECTION, async () => {
+                      const r = p.kind === "replace" ? await correctLegacySaleItem(p.itemId, p.skyId, saleId, version)
+                        : p.kind === "add" ? await addLegacySaleItem(saleId, p.skyId, p.rawName, version)
+                          : await removeLegacyAddedItem(p.itemId, saleId, version);
+                      if (r.ok) setPending(null);
+                      return r;
+                    });
+                  }}
+                  className={`${ACTION_PRIMARY} min-h-9 w-auto px-3 text-xs disabled:opacity-50`}>
+            {busy.has(SAVE_CORRECTION) ? copy.itemRunning : copy.correction.save}
+          </button>
+          <button type="button" data-cancel-correction="" disabled={busy.has(SAVE_CORRECTION)}
+                  onClick={() => setPending(null)}
+                  className={`${ACTION_NEUTRAL} min-h-9 w-auto px-3 text-xs disabled:opacity-50`}>
+            {copy.correction.cancel}
+          </button>
+        </div>
+      ) : null}
+
+      {internal || (historical && !correctable) ? (
         <p className="mt-2 text-xs text-muted">
           {internal ? copy.commerceOwned : copy.detailsModal.imported}
         </p>
+      ) : correctable ? (
+        <div onFocus={ensureFigures} data-add-legacy=""
+             className="mt-3 rounded-sky-lg bg-surface/60 p-3 ring-1 ring-border/70">
+          <p className="mb-1 text-xs font-medium">{copy.correction.addTitle}</p>
+          <FigureSearch
+            catalog={available}
+            loading={catalogLoading}
+            disabled={busy.has(SAVE_CORRECTION)}
+            onSelect={(choice) => setPending({ kind: "add", skyId: choice.skyId, rawName: null, to: choice.name })}
+            onFree={(name) => setPending({ kind: "add", skyId: null, rawName: name, to: name })}
+          />
+          <p className="mt-2 text-xs text-muted">{copy.correction.addHint}</p>
+        </div>
       ) : (
         <div onFocus={ensureFigures}
              className="mt-3 rounded-sky-lg bg-surface/60 p-3 ring-1 ring-border/70">
@@ -468,7 +625,7 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
           */}
           <FigureSearch
             catalog={available}
-            loading={loadingFigures}
+            loading={catalogLoading}
             disabled={busy.has(ADD_ITEM)}
             onSelect={(choice) =>
               act(ADD_ITEM, () => addSaleItem(saleId, choice.skyId, null, "loose"))}

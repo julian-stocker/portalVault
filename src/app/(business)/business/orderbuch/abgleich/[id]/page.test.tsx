@@ -1,6 +1,6 @@
 /**
- * /business/orderbuch/abgleich/<id> — the comparison page: its gates, its
- * states, the paging and the filter, and what it must never show or offer.
+ * /business/orderbuch/abgleich/<id> — the result page: its gates, its
+ * states, the three outcomes and their filter, and what it must never show or offer.
  * Rendered on the server the way Next renders it (static markup).
  */
 import { readFileSync } from "node:fs";
@@ -15,11 +15,20 @@ import { sessionPageView, type PageRequest } from "@/lib/reconciliation/view";
 const MOCK = vi.hoisted(() => ({
   environment: true,
   result: null as unknown as SessionPageResult,
+  complete: true,
   calls: [] as { id: number; request: unknown }[],
 }));
 vi.mock("@/lib/reconciliation/server/queries", () => ({
   reconciliationEnvironment: () => MOCK.environment,
-  fetchReconciliationSession: async (id: number, request: unknown) => { MOCK.calls.push({ id, request }); return MOCK.result; },
+  // The current positions of changed sales (0181) — here: none attached, the stored findings stand.
+  attachLivePieces: async (_channel: string, matches: unknown[]) => [...matches],
+  attachOrderContext: async (_channel: string, matches: unknown[]) => [...matches],
+  // The page reads EVERY match of the session; the mock answers with one page as the whole.
+  fetchReconciliationSessionAll: async (id: number) => {
+    MOCK.calls.push({ id, request: "all" });
+    const r = MOCK.result;
+    return r.status === "ok" ? { status: "ok", page: r.page, matches: r.page.matches, complete: MOCK.complete } : r;
+  },
 }));
 vi.mock("next/navigation", () => ({
   notFound: () => { throw new Error("NEXT_NOT_FOUND"); },
@@ -121,9 +130,18 @@ const card = (html: string, category: string) => {
   return html.slice(start, html.indexOf("</article>", start));
 };
 
+/** The markup of the card of one match, found by its id. */
+const cardOf = (html: string, id: number) => {
+  const heading = html.indexOf(`id="recon-match-${id}"`);
+  expect(heading, `match ${id}`).toBeGreaterThan(-1);
+  const start = html.lastIndexOf("<article", heading);
+  return html.slice(start, html.indexOf("</article>", heading));
+};
+
 beforeEach(() => {
   MOCK.environment = true;
   MOCK.result = ok({});
+  MOCK.complete = true;
   MOCK.calls = [];
 });
 
@@ -134,7 +152,7 @@ describe("the gates", () => {
     MOCK.environment = false;
     await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
     expect(MOCK.calls).toEqual([]);
-    expect(PAGE.indexOf("if (!reconciliationEnvironment()) notFound();")).toBeLessThan(PAGE.indexOf("await fetchReconciliationSession("));
+    expect(PAGE.indexOf("if (!reconciliationEnvironment()) notFound();")).toBeLessThan(PAGE.indexOf("await fetchReconciliationSessionAll("));
   });
 
   it.each(["0", "-1", "abc", "1.5", "01", "3%20OR%201", "1e3", "9".repeat(17), ""])("an id that is not a session id (%s): 404, nothing read", async (id) => {
@@ -156,52 +174,139 @@ describe("the gates", () => {
   });
 });
 
-describe("paging and filter are the server's", () => {
-  it("reads the page from the URL and asks for exactly that page", async () => {
+describe("the three outcomes and their filter", () => {
+  const r = copy.result;
+  const refFinding = (id: number) => finding({ id, key: "external_order_ref", field: "external_order_ref", kind: "addition",
+    ledger: null, external: "06-14260-71832", delta: null, allowedDecisions: ["take_external", "keep_ledger", "defer"] });
+  const noRef = () => ledger({ current: { ...ledger().current, externalOrderRef: null } });
+  const mixed = () => ok({ session: session({ state: "open", closed_at: null }), total: 5, matches: [
+    match(1),
+    // only the order number is missing → Ergänzen
+    match(2, { category: "exact", findings: [refFinding(42)], sale: sale({ id: 362, externalOrderRef: null }), ledger: noRef() }),
+    // a missing number AND another date → Abweichung, and the number can still be added
+    match(3, { category: "deviating", certainty: "unique", findings: [finding({ id: 33 }), refFinding(43)],
+      sale: sale({ id: 363, externalOrderRef: null }), ledger: noRef() }),
+    match(5, { category: "external_only", certainty: null, score: null, dateDelta: null, sale: null, ledger: null }),
+    match(7, { category: "not_comparable", certainty: null, score: null, dateDelta: null, reason: "after_coverage", order: null }),
+  ] });
+
+  it("reads every match once — no paging in the URL", async () => {
     await render("3", { kategorie: "deviating", seite: "2" });
-    expect(MOCK.calls).toEqual([{ id: 3, request: { category: "deviating", offset: 50, limit: 50 } }]);
+    expect(MOCK.calls).toEqual([{ id: 3, request: "all" }]);
   });
 
-  it("anything else in the URL falls back to the first page of everything", async () => {
-    await render("3", { kategorie: "<script>", seite: "-4" });
-    expect(MOCK.calls[0].request).toEqual({ category: null, offset: 0, limit: 50 });
+  it("counts Identisch, Ergänzen, Abweichung — and Nicht zugeordnet apart; the extra candidate in none of them", async () => {
+    MOCK.result = mixed();
+    const html = await render();
+    expect(html).toContain('data-count="all">4<');
+    expect(html).toContain('data-count="identical">1<');
+    expect(html).toContain('data-count="supplement">1<');
+    expect(html).toContain('data-count="deviation">1<');
+    expect(html).toContain('data-count="unmatched">1<');
+    for (const o of ["identical", "supplement", "deviation", "unmatched"] as const) expect(html).toContain(r.outcomes[o]);
   });
 
-  it("previous and next link to the neighbouring pages, keeping the filter", async () => {
-    MOCK.result = ok({ total: 120 }, { category: "deviating", offset: 50, limit: 50 });
-    const html = await render("3", { kategorie: "deviating", seite: "2" });
-    expect(html).toContain('href="/business/orderbuch/abgleich/3?kategorie=deviating" rel="prev"');
-    expect(html).toContain('href="/business/orderbuch/abgleich/3?kategorie=deviating&amp;seite=3" rel="next"');
-    expect(html).toContain(t.pageOf(2, 3));
+  it("a missing order number is never 'identical'; with another date it is a deviation that still adds the number", async () => {
+    MOCK.result = mixed();
+    const html = await render();
+    expect(cardOf(html, 1)).toContain('data-outcome="identical"');
+    expect(cardOf(html, 2)).toContain('data-outcome="supplement"');
+    const c3 = cardOf(html, 3);
+    expect(c3).toContain('data-outcome="deviation"');
+    expect(c3).toMatch(/data-plan="MISSING_IN_SKYISLES" data-plan-field="external_order_ref"/);
   });
 
-  it("one page only: no page navigation", async () => {
-    expect(await render()).not.toContain(`aria-label="${t.pagination}"`);
+  it("the filter links carry one word, mark the active one, and show only that outcome", async () => {
+    MOCK.result = mixed();
+    const html = await render("3", { ansicht: "ergaenzen" });
+    expect(html).toMatch(/href="\/business\/orderbuch\/abgleich\/3\?ansicht=ergaenzen" aria-current="page"/);
+    for (const w of ["identisch", "abweichung", "nicht-zugeordnet"]) expect(html).toContain(`href="/business/orderbuch/abgleich/3?ansicht=${w}"`);
+    expect(html).toContain('href="/business/orderbuch/abgleich/3"');
+    const list = html.slice(html.indexOf(`aria-label="${t.matchesHeading}"`));
+    expect(list.match(/<article/g)).toHaveLength(1);
+    expect(list).toContain('data-outcome="supplement"');
+    expect(html).not.toContain("data-extra-candidates");
   });
 
-  it("the filter links every category with its stored count, and marks the active one", async () => {
-    MOCK.result = ok({}, { category: "probable", offset: 0, limit: 50 });
-    const html = await render("3", { kategorie: "probable" });
-    for (const c of ["exact", "deviating", "probable", "ambiguous", "external_only", "ledger_only", "not_comparable"]) {
-      expect(html).toContain(`href="/business/orderbuch/abgleich/3?kategorie=${c}"`);
-    }
-    expect(html).toMatch(/href="\/business\/orderbuch\/abgleich\/3\?kategorie=probable" aria-current="page"/);
+  it("anything else in ?ansicht= is 'Alle'", async () => {
+    MOCK.result = mixed();
+    const html = await render("3", { ansicht: "<script>" });
+    expect(html).toMatch(/href="\/business\/orderbuch\/abgleich\/3" aria-current="page"/);
+    expect(html).not.toContain("&lt;script");
   });
 
-  it("a page beyond the end says so and links to the first page", async () => {
-    MOCK.result = ok({ total: 7, matches: [] }, { category: null, offset: 50, limit: 50 });
-    const html = await render("3", { seite: "2" });
-    expect(html).toContain(t.beyondEnd);
-    expect(html).toContain(`href="/business/orderbuch/abgleich/3"`);
+  it("in 'Alle' what needs work comes first: deviations, additions, one-sided, then identical", async () => {
+    MOCK.result = mixed();
+    const html = await render();
+    const order = [...html.matchAll(/data-outcome="(\w+)"/g)].map((m) => m[1]);
+    expect(order.slice(0, 4)).toEqual(["deviation", "supplement", "unmatched", "identical"]);
   });
 
-  it("an empty session and an empty category are said in words, not as an error", async () => {
+  it("an empty view and an empty session are said in words, not as an error", async () => {
+    MOCK.result = ok({ total: 1, matches: [match(1)] });
+    const html = await render("3", { ansicht: "abweichung" });
+    expect(html).toContain(r.emptyView);
+    expect(html).not.toContain('role="alert"');
     MOCK.result = ok({ total: 0, matches: [] });
     expect(await render()).toContain(t.empty);
-    MOCK.result = ok({ total: 0, matches: [] }, { category: "ambiguous", offset: 0, limit: 50 });
-    const html = await render("3", { kategorie: "ambiguous" });
-    expect(html).toContain(t.emptyCategory);
-    expect(html).not.toContain('role="alert"');
+  });
+
+  it("an incomplete read says so instead of counting a part as the whole", async () => {
+    MOCK.complete = false;
+    expect(await render()).toContain(r.incomplete);
+  });
+
+  it("values already taken over are marked as done", async () => {
+    MOCK.result = ok({ total: 1, matches: [match(2, { category: "exact", findings: [{ ...refFinding(42), applied: true }] })] });
+    const html = await render();
+    expect(html).toContain("data-done");
+    expect(html).toContain(r.doneCount(1));
+    expect(html).toContain('data-outcome="identical"');
+    expect(html).toContain('data-work="done"');
+    expect(html).toContain(r.work.done);
+  });
+
+  it("after a correction in the Orderbuch the order is judged again: the date now equal → Identisch, Erledigt", async () => {
+    // The analysis stored a date deviation (14.01. vs 12.01.); the sale was then corrected to 12.01.
+    const corrected = match(2, { category: "deviating", certainty: "unique", sale: sale({ id: 362, stale: true }),
+      findings: [finding({ lock: "stale" }), { ...refFinding(42), applied: true }],
+      ledger: ledger({ state: "changed" }, { soldOn: at("2026-01-14", "stored") }) });
+    MOCK.result = ok({ session: session({ state: "open", closed_at: null }), total: 1, matches: [corrected] });
+    const html = await render();
+    const c = cardOf(html, 2);
+    expect(c).toContain('data-outcome="identical"');
+    expect(c).toContain('data-work="done"');
+    expect(c).toContain(r.reassessed);
+    expect(c).not.toMatch(/data-plan-field="sold_on"/);
+    expect(html).toContain('data-count="identical">1<');
+    expect(html).toContain('data-count="deviation">0<');
+  });
+
+  it("corrected to another wrong day: still Abweichung, partly done — the date line stays", async () => {
+    const wrong = match(2, { category: "deviating", certainty: "unique", sale: sale({ id: 362, stale: true }),
+      findings: [finding({ lock: "stale" }), { ...refFinding(42), applied: true }],
+      ledger: ledger({ state: "changed", current: { ...ledger().current, soldOn: "2026-01-20" } }, { soldOn: at("2026-01-14", "stored") }) });
+    MOCK.result = ok({ session: session({ state: "open", closed_at: null }), total: 1, matches: [wrong] });
+    const c = cardOf(await render(), 2);
+    expect(c).toContain('data-outcome="deviation"');
+    expect(c).toContain('data-work="partial"');
+    expect(c).toMatch(/data-plan-field="sold_on"/);
+  });
+
+  it("the number taken over while the date still differs is partly done — never 'Erledigt'", async () => {
+    const half = match(2, { category: "deviating", certainty: "unique", findings: [finding(), { ...refFinding(42), applied: true }],
+      ledger: ledger({ state: "applied" }, { soldOn: at("2026-01-14", "stored") }) });
+    MOCK.result = ok({ session: session({ state: "open", closed_at: null }), total: 1, matches: [half] });
+    const c = cardOf(await render(), 2);
+    expect(c).toContain('data-work="partial"');
+    expect(c).not.toContain('data-work="done"');
+  });
+
+  it("no analysis header: no protocol, no record numbers, no stored-row counts", async () => {
+    const html = await render();
+    for (const gone of [t.chain, t.matchRecords, t.pairs, t.unpairedCount, t.moreFacts, `aria-label="${t.pagination}"`]) {
+      expect(html).not.toContain(gone);
+    }
   });
 });
 
@@ -216,32 +321,46 @@ describe("the states", () => {
     expect(html).not.toContain("data-category");
   });
 
-  it("the overview: platform, state, period, files, counts — and the way back to the list", async () => {
+  it("the head: period, report file, order count, the state of a finished session — and the way back", async () => {
     const html = await render();
     expect(html).toContain('href="/business/orderbuch/abgleich"');
     expect(html).toContain(t.backToList);
-    expect(html).toContain("eBay");
-    expect(html).toContain(`data-testid="state">${copy.states.closed}<`);
+    expect(html).toContain("01.01.2026 – 31.01.2026");
     expect(html).toContain("orders-2026-01.csv");
-    expect(html).toContain(t.fileOrders(7));
-    expect(html).toContain(t.deviatingMatches);
-    expect(html).toContain(t.readOnly);
+    expect(html).toContain(copy.result.orders(6));
+    expect(html).toContain(`data-testid="state">${copy.states.closed}<`);
+    expect(html).toContain(copy.result.readOnly);
   });
 
-  it("every session state is named", async () => {
-    for (const state of ["open", "closed", "discarded"]) {
+  it("an open session names no state; closed and discarded are named", async () => {
+    MOCK.result = ok({ session: session({ state: "open", closed_at: null }) });
+    expect(await render()).not.toContain('data-testid="state"');
+    for (const state of ["closed", "discarded"] as const) {
       MOCK.result = ok({ session: session({ state }) });
-      expect(await render()).toContain(`data-testid="state">${copy.states[state as "open"]}<`);
+      expect(await render()).toContain(`data-testid="state">${copy.states[state]}<`);
     }
   });
 });
 
 describe("every category, side by side", () => {
-  it("one card per match, each with its category in words", async () => {
+  it("one card per match, each with exactly one outcome in words — never a database category", async () => {
     const html = await render();
-    for (const c of ["exact", "deviating", "probable", "ambiguous", "external_only", "ledger_only", "not_comparable"]) {
-      expect(card(html, c)).toContain(copy.categories[c as "exact"]);
+    const expected = { exact: "identical", deviating: "deviation", probable: "deviation", ambiguous: "deviation",
+      external_only: "unmatched", ledger_only: "unmatched", not_comparable: "extra" } as const;
+    for (const [c, o] of Object.entries(expected)) {
+      const k = card(html, c);
+      expect(k, c).toContain(`data-outcome="${o}"`);
+      expect(k, c).toContain(copy.result.outcomes[o]);
+      expect(k.match(/data-outcome-chip=/g), c).toHaveLength(1);
     }
+    expect(html).not.toContain(copy.categories.exact);
+  });
+
+  it("unknown at analysis is never 'identical' — it is an unresolved comparison, and the card says why", async () => {
+    MOCK.result = ok({ total: 1, matches: [match(1, { ledger: ledger({}, { itemsNet: at(null, "unknown") }) })] });
+    const c = card(await render(), "exact");
+    expect(c).toContain('data-outcome="deviation"');
+    expect(c).toContain(copy.result.unproven);
   });
 
   it("exact: green; deviating: red with its count; everything else neutral", async () => {
@@ -329,18 +448,17 @@ describe("the value at analysis, as 0179 proved it", () => {
 describe("read-only, and nothing private where it does not belong", () => {
   it("a closed session: no decision, no button, no form — nothing to take over or keep", async () => {
     const html = await render();
-    expect(html).toContain(t.readOnly);
+    expect(html).toContain(copy.result.readOnly);
     expect(html).not.toMatch(/<button|<form|<input|<select|<textarea/);
     for (const d of Object.values(copy.decisions)) expect(html).not.toContain(d);
   });
 
-  it("every link is the list, a session page, or a session page with category and page — no report value in a URL", async () => {
-    MOCK.result = ok({ total: 120 }, { category: "deviating", offset: 50, limit: 50 });
-    const hrefs = [...(await render("3", { kategorie: "deviating", seite: "2" })).matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+  it("every link is the list, the result page with one filter word, or a sale — no report value in a URL", async () => {
+    const hrefs = [...(await render("3", { ansicht: "abweichung" })).matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
     expect(hrefs.length).toBeGreaterThan(5);
     for (const h of hrefs) {
-      // The list, a session page — or a sale in the Orderbuch, by its id only (AP1).
-      expect(h).toMatch(/^\/business\/orderbuch\/(abgleich(\/3(\?kategorie=[a-z_]+(&amp;seite=\d+)?|\?seite=\d+)?)?|verkauf\/\d+)$/);
+      // The list, the result page — or a sale in the Orderbuch, by its id only (AP1).
+      expect(h).toMatch(/^\/business\/orderbuch\/(abgleich(\/3(\?ansicht=(identisch|ergaenzen|abweichung|nicht-zugeordnet))?)?|verkauf\?verkauf=\d+&amp;abgleich=3&amp;bestellung=\d+&amp;ansicht=abweichung)$/);
       expect(h).not.toContain("01-0000");
     }
   });
@@ -452,16 +570,12 @@ describe("the period: pairs, one-sided rows and candidates at the edge", () => {
     });
   };
 
-  it("32 pairs and 3 unpaired candidates are counted apart; the 35 stored rows are named as such", async () => {
+  it("the 3 candidates at the edge are counted in no outcome — only the report's order is", async () => {
     MOCK.result = sessionFive();
     const html = await render("5");
-    expect(html).toContain(`data-count="pairs">32<`);
-    expect(html).toContain(`data-count="unpaired">3<`);
-    expect(html).toContain(`data-count="ledger-only">0<`);
-    expect(html).toContain(`data-count="report-only">0<`);
-    expect(html).toContain(`data-count="records">35<`);
-    for (const label of [t.pairs, t.unpairedCount, t.ledgerOnlyCount, t.reportOnlyCount, t.matchRecords]) expect(html).toContain(label);
-    expect(html).toContain(t.unpairedHint);
+    expect(html).toContain('data-count="all">1<');
+    expect(html).toContain('data-count="identical">1<');
+    expect(html).toContain(t.extraCandidates(3));
   });
 
   it("before and after the period are told apart in the head of the card, each with its own sentence", async () => {
@@ -527,8 +641,8 @@ describe("an open session", () => {
     openWith([match(1), match(2, { category: "deviating", certainty: "unique", findings: [finding(), ref()],
       sale: sale({ id: 362, externalOrderRef: null }), ledger: ledger({ current: noRef }, { soldOn: at("2026-01-14", "stored") }) })]);
     const html = await render();
-    expect(html).toContain(t.decideIntro);
-    expect(html).not.toContain(t.readOnly);
+    expect(html).toContain(copy.result.intro);
+    expect(html).not.toContain(copy.result.readOnly);
     for (const gone of ["CSV-Wert übernehmen", "Zurückstellen", "Vorschau prüfen", "Auswahl und Übernahme", 'type="checkbox"']) {
       expect(html).not.toContain(gone);
     }
@@ -550,7 +664,8 @@ describe("an open session", () => {
     expect(c).toMatch(/data-plan="READ_ONLY_DIFFERENCE" data-plan-field="sold_on"/);
     expect(c).toContain(r.badges.MISSING_IN_SKYISLES);
     expect(c).toContain(r.badges.READ_ONLY_DIFFERENCE);
-    expect(c).toContain(`href="/business/orderbuch/verkauf/362"`);
+    // Straight into the sale's edit dialog, remembering session and order (no filter in "Alle").
+    expect(c).toContain(`href="/business/orderbuch/verkauf?verkauf=362&amp;abgleich=3&amp;bestellung=2"`);
     expect(c).toContain(r.orderbook);
   });
 
@@ -561,10 +676,39 @@ describe("an open session", () => {
     expect(c).not.toMatch(/data-plan="(MISSING_IN_SKYISLES|CONFLICT)"/);
   });
 
-  it("several orders to reconcile: one action for the page as well", async () => {
+  it("several orders missing only their number: no financial batch — each its own 'Bestellnummer übernehmen' (2026-11-09)", async () => {
     openWith([1, 2, 3].map((id) => match(id, { findings: [ref({ id: 40 + id })], sale: sale({ id: 360 + id, externalOrderRef: null }),
       ledger: ledger({ current: noRef }) })));
-    expect(await render()).toContain(r.all(3));
+    const html = await render();
+    expect(html).not.toContain(copy.result.reconcileAll(3));
+    expect(html.match(/data-take-number="/g)).toHaveLength(3);
+    expect(html).not.toContain("data-reconcile");
+    // … and above the cards, the bulk act for all three — order numbers only
+    expect(html).toContain(copy.bulkNumbers.button(3));
+  });
+
+  it("both bulk actions above the cards, over the WHOLE session — also under a filter", async () => {
+    openWith([
+      ...[1, 2].map((id) => match(id, { findings: [ref({ id: 40 + id })], sale: sale({ id: 360 + id, externalOrderRef: null }),
+        ledger: ledger({ current: noRef }) })),
+      ...[3, 4].map((id) => match(id, { category: "deviating", findings: [finding({ id: 50 + id, key: "shipping", field: "shipping",
+        ledger: 4.99, external: 5.49, delta: -0.5 })] })),
+    ]);
+    expect((await render()).includes("data-take-number")).toBe(true); // the order check below is not vacuous
+    for (const query of [{}, { ansicht: "identisch" }] as Record<string, string>[]) {
+      const html = await render("3", query);
+      const group = html.slice(html.indexOf("data-bulk-actions"));
+      expect(group, JSON.stringify(query)).toContain(copy.bulkNumbers.button(2));
+      expect(group, JSON.stringify(query)).toContain(copy.result.reconcileAll(2));
+      // the bulk actions come before the first card
+      if (html.includes("data-take-number")) expect(html.indexOf("data-bulk-actions")).toBeLessThan(html.indexOf("data-take-number"));
+    }
+  });
+
+  it("several orders with financial values to reconcile: one action for the page as well", async () => {
+    openWith([1, 2, 3].map((id) => match(id, { category: "deviating", findings: [finding({ id: 50 + id, key: "shipping", field: "shipping",
+      ledger: 4.99, external: 5.49, delta: -0.5 })] })));
+    expect(await render()).toContain(copy.result.reconcileAll(3));
   });
 
   it("a closed session shows no Abgleichen at all", async () => {
@@ -592,12 +736,11 @@ describe("the report's orders first — extra candidates of the search window ap
     expect(extra).toContain('data-category="not_comparable"');
   });
 
-  it("their own filter still lists them as cards; an order of the report is never moved there", async () => {
-    MOCK.result = ok({ total: 1, matches: [match(7, { category: "not_comparable", certainty: null, reason: "after_coverage", order: null })] },
-      { category: "not_comparable", offset: 0, limit: 50 });
-    const html = await render("3", { kategorie: "not_comparable" });
+  it("a filtered view never shows them; an order of the report is never moved there", async () => {
+    MOCK.result = ok({ total: 2, matches: [match(1), match(7, { category: "not_comparable", certainty: null, reason: "after_coverage", order: null })] });
+    const html = await render("3", { ansicht: "identisch" });
     expect(html).not.toContain("data-extra-candidates");
-    expect(html).toContain('data-category="not_comparable"');
+    expect(html).not.toContain('data-category="not_comparable"');
     MOCK.result = ok({ total: 2, matches: [match(1, { order: order({ sold_on: "2026-03-01" }) }), match(5, { category: "external_only",
       certainty: null, score: null, dateDelta: null, sale: null, ledger: null, order: order({ sold_on: "2026-03-02" }) })] });
     expect(await render()).not.toContain("data-extra-candidates");

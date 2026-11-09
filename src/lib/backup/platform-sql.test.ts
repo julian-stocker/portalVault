@@ -165,8 +165,11 @@ describe("woher diese Datei liest", () => {
      *
      * Seit `0174` (Verkaufsabgleich, sieben Bereiche, Formatversion 3) ist es
      * diese Datei — NICHT ANGEWENDET, weder auf Staging noch auf Production.
+     *
+     * Seit `0182` (Handkorrekturen der Positionen, ein Bereich,
+     * Formatversion 4) ist es `0182` — ebenfalls NICHT ANGEWENDET.
      */
-    expect(DEFINITION.file).toBe("0174_backup_sales_reconciliation.sql");
+    expect(DEFINITION.file).toBe("0182_backup_sale_item_corrections.sql");
   });
 
   it("historische Prüfungen bleiben historisch", () => {
@@ -523,7 +526,7 @@ describe("kein jsonb_build_object überschreitet die Argumentgrenze", () => {
     const verkettet = proGruppe.flat();
     expect(verkettet).toEqual(PLATFORM_SECTIONS.map((s) => s.key));
     expect(new Set(verkettet).size, "ein Bereich kommt doppelt vor").toBe(verkettet.length);
-    expect(verkettet).toHaveLength(61);
+    expect(verkettet).toHaveLength(62);
   });
 
   it("die Gruppierung bleibt ein Ausdruck in einer Anweisung", () => {
@@ -562,7 +565,7 @@ describe(`die ${PLATFORM_SECTIONS.length} Bereiche stimmen mit dem Manifest übe
   it("es sind genau die des Manifests, nicht mehr und nicht weniger", () => {
     const imSql = [...BODY.matchAll(/^\s{8}'([a-z_0-9]+)', coalesce\(\(/gm)].map((m) => m[1]);
     expect(imSql).toEqual(PLATFORM_SECTIONS.map((s) => s.key));
-    expect(imSql).toHaveLength(61);
+    expect(imSql).toHaveLength(62);
   });
 
   for (const section of PLATFORM_SECTIONS) {
@@ -587,8 +590,9 @@ describe(`die ${PLATFORM_SECTIONS.length} Bereiche stimmen mit dem Manifest übe
        CAT-10). Drei FELDER und kein Bereich: die Bereichszahl bleibt 54 und
        `format_version` bleibt 2. **583** seit `0174`: 80 Felder in sieben
        neuen BEREICHEN (Verkaufsabgleich), deshalb 61 Bereiche und
-       `format_version` 3. */
-    expect(gesamt).toBe(583);
+       `format_version` 3. **593** seit `0182`: zehn Felder im neuen Bereich
+       `sale_item_corrections`, deshalb 62 Bereiche und `format_version` 4. */
+    expect(gesamt).toBe(593);
     expect(gebildet).toBe(4);
   });
 

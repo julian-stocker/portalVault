@@ -114,6 +114,21 @@ function message(error: { code?: string; message?: string }): string {
   if (text.includes("created from a paid order")) return copy.errors.internalAutomatic;
   if (text.includes("test status from the order")) return copy.errors.internalTestDerived;
   if (text.includes("outside the plausible range")) return copy.errors.dateRange;
+  /*
+   * 0181 — die Korrektur importierter Positionen. Vor `legacy workbook`, weil
+   * keiner dieser Sätze dieses Wort enthält, und vor den allgemeinen Mustern
+   * („already closed“), damit jeder seinen eigenen Satz bekommt.
+   */
+  if (text.includes("a workbook line stays")) return copy.errors.workbookLineStays;
+  if (text.includes("only an imported workbook sale is corrected")) return copy.errors.notAWorkbookSale;
+  if (text.includes("a cancelled sale is not corrected")) return copy.errors.saleCancelled;
+  if (text.includes("version of the sale is required")) return copy.errors.staleSale;
+  if (text.includes("it is not corrected here")) return copy.errors.correctionBlocked;
+  if (text.includes("no such catalog figure") || text.includes("a correction names a catalog figure")) {
+    return copy.errors.unknownFigure;
+  }
+  if (text.includes("the correction changes nothing")) return copy.errors.correctionUnchanged;
+  if (text.includes("a position needs a catalog figure or a name")) return copy.errors.needsFigure;
   // 0065. Distinct from `historical sales never move stock`, which is about
   // booking: these are about editing or deleting one imported line.
   if (text.includes("legacy workbook")) return copy.errors.historicalItem;
@@ -416,6 +431,13 @@ export async function createSaleWithDetails(input: {
   /** Beträge in Euro, alle > 0. Jeder wird eine Zeile in `sale_refunds`. */
   refunds?: readonly number[];
   adjustments: readonly { amount: number; reason?: string; note?: string }[];
+  /**
+   * Bestand beim Anlegen reservieren? (0184). PFLICHT, nie geraten: `true`
+   * ist das bisherige Verhalten (jede freie Figur wird gehalten), `false`
+   * legt dieselben Positionen ohne Reservierung an — reserviert und
+   * ausgebucht wird später von Hand im Orderbuch.
+   */
+  hold: boolean;
 }): Promise<CreatedSale> {
   if (!(await canOperateSeller())) return { ok: false as const, message: de.admin.notAllowed };
   /*
@@ -430,6 +452,7 @@ export async function createSaleWithDetails(input: {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(soldAt)) {
     return { ok: false as const, message: de.business.sales.create.dateRequired };
   }
+  if (typeof input.hold !== "boolean") return { ok: false as const, message: de.admin.writeFailed };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_create_sale_with_details", {
     p_channel: input.channel,
@@ -454,8 +477,20 @@ export async function createSaleWithDetails(input: {
      */
     p_payout_amount: null,
     p_payout_ref: null,
+    /*
+     * DER RESERVIERUNGSMODUS (0184). `false` wird ausdrücklich gesendet;
+     * `true` ist der Standard der Funktion und wird weggelassen — so ist der
+     * normale Aufruf byte-gleich mit dem vor 0184, auch auf einer Datenbank,
+     * die 0184 noch nicht hat. Dort scheitert NUR die Anlage ohne
+     * Reservierung (PGRST202) — und zwar laut, nie still mit Reservierung.
+     */
+    ...(input.hold ? {} : { p_hold: false }),
   });
   if (error || typeof data !== "number") {
+    if (error?.code === "PGRST202" && !input.hold) return { ok: false as const, message: copy.errors.holdOptionUnavailable };
+    if (error?.code === "23505" && (error.message ?? "").includes("sales_external_order_ref_per_channel")) {
+      return { ok: false as const, message: copy.errors.duplicateOrderRef };
+    }
     return { ok: false as const, message: message(error ?? {}) };
   }
 
@@ -510,6 +545,52 @@ export async function addSaleItem(saleId: number, skyId: string | null, rawName:
 
 export async function removeSaleItem(itemId: number, saleId: number) {
   return runItem("seller_remove_sale_item", { p_item_id: itemId }, saleId);
+}
+
+/*
+ * POSITIONEN EINES IMPORTIERTEN VERKAUFS KORRIGIEREN (0181).
+ *
+ * Ein eigener, engerer Weg neben den drei Aufrufen oben — die lehnen jede
+ * Arbeitsmappenzeile weiterhin ab. Jeder Aufruf trägt die Version des
+ * Verkaufs (`updated_at`), mit der der Bildschirm geladen wurde; die
+ * Datenbank verlangt sie hier und lehnt eine veraltete ab (PT409). Keine
+ * Reservierung, keine Lagerbewegung, kein Betrag.
+ */
+
+/** Die Katalogfigur einer Position korrigieren — `raw_name` und Herkunft bleiben. */
+export async function correctLegacySaleItem(itemId: number, skyId: string, saleId: number, expectedUpdatedAt: string | null) {
+  return runItem("seller_correct_legacy_sale_item",
+    { p_item_id: itemId, p_sky_id: skyId, p_expected_updated_at: expectedUpdatedAt }, saleId);
+}
+
+/** Eine fehlende Position ergänzen — ohne Herkunftszeile, ohne Reservierung. */
+export async function addLegacySaleItem(saleId: number, skyId: string | null, rawName: string | null, expectedUpdatedAt: string | null) {
+  return runItem("seller_add_legacy_sale_item", { p_sale_id: saleId, p_sky_id: skyId, p_raw_name: rawName,
+    p_condition: "loose", p_expected_updated_at: expectedUpdatedAt }, saleId);
+}
+
+/** Eine ergänzte Position wieder entfernen — nie eine Arbeitsmappenzeile. */
+export async function removeLegacyAddedItem(itemId: number, saleId: number, expectedUpdatedAt: string | null) {
+  return runItem("seller_remove_legacy_added_item", { p_item_id: itemId, p_expected_updated_at: expectedUpdatedAt }, saleId);
+}
+
+/** Was an den Positionen eines Verkaufs korrigiert wurde, älteste zuerst (0181). Leer, wenn nichts oder nicht lesbar. */
+export type SaleItemCorrection = {
+  id: number; saleItemId: number; action: "replace" | "add" | "remove"; position: number; sourceRow: number | null;
+  oldSkyId: string | null; oldRawName: string | null; newSkyId: string | null; newRawName: string | null; correctedAt: string;
+};
+export async function loadSaleItemCorrections(saleId: number): Promise<SaleItemCorrection[]> {
+  if (!(await canOperateSeller())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_sale_item_corrections", { p_sale_id: saleId });
+  if (error || !Array.isArray(data)) return [];
+  return (data as Record<string, unknown>[]).map((c) => ({
+    id: Number(c.id), saleItemId: Number(c.saleItemId), action: c.action as SaleItemCorrection["action"],
+    position: Number(c.position), sourceRow: c.sourceRow === null ? null : Number(c.sourceRow),
+    oldSkyId: (c.oldSkyId as string | null) ?? null, oldRawName: (c.oldRawName as string | null) ?? null,
+    newSkyId: (c.newSkyId as string | null) ?? null, newRawName: (c.newRawName as string | null) ?? null,
+    correctedAt: String(c.correctedAt),
+  }));
 }
 
 /**

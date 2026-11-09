@@ -723,7 +723,8 @@ describe("the filter as a URL", () => {
 
   it("the back link from a detail page returns to the same classification", () => {
     expect(EINKAUF).toContain("const here = ledgerHref(year, month, search, status);");
-    expect(VERKAUF).toContain("const here = salesHref(scope, year === UNDATED ? \"ohne\" : year, month, search, status);");
+    // The way back from the sales reconciliation is appended only when its checked parts are there (`withReturn`).
+    expect(VERKAUF).toContain("const here = withReturn(salesHref(scope, year === UNDATED ? \"ohne\" : year, month, search, status), fromReconciliation);");
   });
 });
 

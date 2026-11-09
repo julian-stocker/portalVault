@@ -115,6 +115,10 @@ describe("guard 1 — no table carries a seller", () => {
          aus `0164` ist. Die Betriebssicherung in derselben Datei nennt
          `seller_id` nicht. */
       "0174_backup_sales_reconciliation.sql",
+      /* `0182` zum siebten Mal: der Rumpf aus `0174` plus der eine Bereich
+         der Handkorrekturen (`0181`). Dieselbe Kopie von `t.seller_id`;
+         `backup-sale-item-corrections.test.ts` beweist neu = alt + Block. */
+      "0182_backup_sale_item_corrections.sql",
     ];
     for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && !MEMBERSHIP.includes(f))) {
       const body = readFileSync(`${MIGRATIONS}/${file}`, "utf8")

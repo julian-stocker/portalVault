@@ -596,7 +596,8 @@ describe("der Platz am Tag wird im Verkaufsfenster angezeigt und getauscht", () 
   });
 
   it("und der Käufername steht jetzt auch bei einer Bestellung (B-1)", () => {
-    expect(DETAILS).toContain("{sale.buyerLabel ? (");
+    // While reading (2026-11-08: while editing, the buyer is an input at the same place).
+    expect(DETAILS).toContain(") : sale.buyerLabel ? (");
     expect(DETAILS).toContain("value={sale.buyerLabel}");
     expect(DETAILS).toContain("hint={sale.buyerRepeat ? copy.repeatBuyer : null}");
   });

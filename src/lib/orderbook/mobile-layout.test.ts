@@ -312,7 +312,8 @@ describe("the creation forms at phone widths", () => {
      * Abrechnungsschalter und lässt die Zelle leer, statt sie wegzulassen:
      * sonst rutschte ihr × in die Spalte des Schalters.
      */
-    const list = NEW_SALE.slice(NEW_SALE.indexOf("{fees.map("), NEW_SALE.indexOf("</ul>"));
+    // The fee list's own </ul> — since 0184 the report's lines are a list above it (from the reconciliation only).
+    const list = NEW_SALE.slice(NEW_SALE.indexOf("{fees.map("), NEW_SALE.indexOf("</ul>", NEW_SALE.indexOf("{fees.map(")));
     const refund = list.slice(list.indexOf("{refunds.map("));
     expect(refund).not.toBe("");
     for (const [name, row] of [["Gebühr", list], ["Rückerstattung", refund]] as const) {

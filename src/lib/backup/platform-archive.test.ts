@@ -31,11 +31,13 @@ import {
   SECTIONS_BY_FORMAT_VERSION,
   STORAGE_BUCKETS_INCLUDED,
 } from "./platform-manifest";
-import { SALES_RECONCILIATION_SECTIONS } from "./manifest";
+import { SALE_ITEM_CORRECTIONS_SECTIONS, SALES_RECONCILIATION_SECTIONS } from "./manifest";
 import { isSafeZipPath } from "../zip/zip-path";
 
 /** Die sieben Bereiche, die `0174` hinzufügt (Formatversion 3). */
 const NEU_0174 = new Set(SALES_RECONCILIATION_SECTIONS.map((s) => s.key));
+/* Der eine Bereich, den `0182` (Version 4) brachte: die Handkorrekturen der Positionen. */
+const NEU_0182 = new Set(SALE_ITEM_CORRECTIONS_SECTIONS.map((s) => s.key));
 import { zipBytes, type ZipEntry } from "../zip/zip-writer";
 
 /**
@@ -360,8 +362,9 @@ describe("manifest.json trägt genau die Felder des Vertrags", () => {
   it("zählt die Bereiche aus dem fertigen Dokument", () => {
     expect(Object.keys(manifest.counts)).toHaveLength(EXPECTED_SECTION_COUNT);
     /* 54 seit `0144`: `purchase_calculations` ist dazugekommen. 61 seit
-       `0174`: die sieben Tabellen des Verkaufsabgleichs. */
-    expect(EXPECTED_SECTION_COUNT).toBe(61);
+       `0174`: die sieben Tabellen des Verkaufsabgleichs. 62 seit `0182`:
+       die Handkorrekturen der Positionen. */
+    expect(EXPECTED_SECTION_COUNT).toBe(62);
     expect(manifest.counts.skylanders).toBe(4);
     expect(manifest.counts.orders).toBe(1);
   });
@@ -618,7 +621,7 @@ describe("die Messwerte für admin_record_platform_export()", () => {
      */
     const alteBereiche = PLATFORM_SECTIONS
       .map((x) => x.key)
-      .filter((k) => k !== "purchase_calculations" && !NEU_0174.has(k));
+      .filter((k) => k !== "purchase_calculations" && !NEU_0174.has(k) && !NEU_0182.has(k));
     expect(alteBereiche).toHaveLength(53);
     const document: PlatformExportDocument = {
       format_version: 1,
@@ -726,8 +729,10 @@ describe("die Historie behauptet nie eine andere Version als das Archiv", () => 
   });
 
   const ALLE = PLATFORM_SECTIONS.map((x) => x.key);
-  /* Version 2: das Manifest ohne die sieben aus `0174`. */
-  const V2 = ALLE.filter((k) => !NEU_0174.has(k));
+  /* Version 3: das Manifest ohne den einen aus `0182`. */
+  const V3 = ALLE.filter((k) => !NEU_0182.has(k));
+  /* Version 2: zusätzlich ohne die sieben aus `0174`. */
+  const V2 = V3.filter((k) => !NEU_0174.has(k));
   /* Version 1: zusätzlich ohne `purchase_calculations` aus `0144`. */
   const OHNE_NEU = V2.filter((k) => k !== "purchase_calculations");
 
@@ -758,8 +763,8 @@ describe("die Historie behauptet nie eine andere Version als das Archiv", () => 
     expect(outcome.sectionCount).toBe(53);
     expect(messwerte.format_version).toBe(1);
     expect(messwerte.section_count).toBe(53);
-    /* Und zwar auch, wenn diese Codebasis längst 3 führt. */
-    expect(PLATFORM_FORMAT_VERSION).toBe(3);
+    /* Und zwar auch, wenn diese Codebasis längst 4 führt. */
+    expect(PLATFORM_FORMAT_VERSION).toBe(4);
     expect(messwerte.format_version).not.toBe(PLATFORM_FORMAT_VERSION);
   });
 
@@ -773,12 +778,28 @@ describe("die Historie behauptet nie eine andere Version als das Archiv", () => 
   });
 
   it("Datenbank auf 0174: Version 3, 61 Bereiche — und die Historie sagt 3", async () => {
-    expect(ALLE).toHaveLength(61);
-    const { outcome, messwerte } = await lauf(dokument(3, ALLE));
+    expect(V3).toHaveLength(61);
+    const { outcome, messwerte } = await lauf(dokument(3, V3));
     expect(outcome.manifest.format_version).toBe(3);
     expect(outcome.sectionCount).toBe(61);
     expect(messwerte.format_version).toBe(3);
     expect(messwerte.section_count).toBe(61);
+  });
+
+  it("Datenbank auf 0182: Version 4, 62 Bereiche — und die Historie sagt 4", async () => {
+    expect(ALLE).toHaveLength(62);
+    const { outcome, messwerte } = await lauf(dokument(4, ALLE));
+    expect(outcome.manifest.format_version).toBe(4);
+    expect(outcome.sectionCount).toBe(62);
+    expect(outcome.manifest.counts.sale_item_corrections).toBe(0);
+    expect(messwerte.format_version).toBe(4);
+    expect(messwerte.section_count).toBe(62);
+  });
+
+  it("ein Archiv, das 4 sagt und die Handkorrekturen nicht führt, wird verweigert", async () => {
+    /* Genau der Fall, für den die Version steigt: 61 Bereiche unter
+       Version 4 wären ein Archiv, dem die Korrekturspur abhandengekommen ist. */
+    await expect(lauf(dokument(4, V3))).rejects.toThrow(/Formatversion 4/);
   });
 
   it("ein Archiv, das 3 sagt und den Abgleich nicht führt, wird verweigert", async () => {
@@ -794,7 +815,7 @@ describe("die Historie behauptet nie eine andere Version als das Archiv", () => 
      * ist damit automatisch mitgeprüft, sobald sie in
      * `SECTIONS_BY_FORMAT_VERSION` steht.
      */
-    for (const [version, bereiche] of [[1, OHNE_NEU], [2, V2], [3, ALLE]] as const) {
+    for (const [version, bereiche] of [[1, OHNE_NEU], [2, V2], [3, V3], [4, ALLE]] as const) {
       const { outcome, messwerte } = await lauf(dokument(version, bereiche));
       expect(messwerte.format_version, `Version ${version}`)
         .toBe(outcome.manifest.format_version);

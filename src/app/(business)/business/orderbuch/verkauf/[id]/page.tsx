@@ -13,8 +13,10 @@ import { SaleItems } from "@/components/business/sale-items";
 import { TestFlag } from "@/components/business/test-flag";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
+import { loadSaleItemCorrections } from "@/lib/orderbook/sales-actions";
 import { fetchSale } from "@/lib/orderbook/sales-queries";
 import { CHANNEL_LABELS, countryLabel, safeSalesBackHref } from "@/lib/orderbook/sales-view";
+import { parseReturn, returnHref } from "@/lib/reconciliation/routes";
 
 export const metadata: Metadata = { title: de.business.sales.title };
 const copy = de.business.sales;
@@ -27,10 +29,16 @@ export default async function SalePage({
   params, searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ zurueck?: string }>;
+  searchParams: Promise<{ zurueck?: string; abgleich?: string; bestellung?: string; ansicht?: string }>;
 }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const back = safeSalesBackHref(query.zurueck);
+  /*
+   * AUS DEM CSV-ABGLEICH GEÖFFNET (2026-11-08): drei geprüfte Teile, nie eine
+   * URL. „Zurück zum Abgleich“ wird daraus gebaut — dieselbe Sitzung, derselbe
+   * Filter, dieselbe Bestellung. Ohne sie bleibt die Seite, wie sie war.
+   */
+  const fromReconciliation = parseReturn(query);
   /*
    * NUR DER VERKAUF.
    *
@@ -58,6 +66,13 @@ export default async function SalePage({
   const frozen = historical && (sale.stock_released_at ?? null) === null;
   const cancelled = (sale.cancelled_at ?? null) !== null;
   /*
+   * 0181: ein importierter externer Verkauf, nicht storniert — seine Positionen
+   * lassen sich von Hand korrigieren (Figur, fehlende Position). Die Sperren
+   * der normalen Wege bleiben; das ist ein eigener, engerer.
+   */
+  const correctable = historical && !internal && !cancelled;
+  const corrections = correctable ? await loadSaleItemCorrections(Number(id)) : [];
+  /*
    * The classification, as the database decided it (0063) — the operator's own
    * flag for an external sale, `orders.commerce_mode` for an internal one.
    * Never worked out again here: two answers to one question is how they start
@@ -72,9 +87,17 @@ export default async function SalePage({
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pt-8 pb-10 md:pt-12">
-      <Link href={back} className="inline-flex min-h-11 items-center text-sm text-muted hover:text-fg">
-        ← {copy.backToLedger}
-      </Link>
+      <div className="flex flex-wrap items-center gap-x-4">
+        <Link href={back} className="inline-flex min-h-11 items-center text-sm text-muted hover:text-fg">
+          ← {copy.backToLedger}
+        </Link>
+        {fromReconciliation ? (
+          <Link href={returnHref(fromReconciliation)} data-return-to-reconciliation=""
+                className="inline-flex min-h-11 items-center text-sm font-medium underline underline-offset-2">
+            ← {de.business.reconciliation.result.backToReconciliation}
+          </Link>
+        ) : null}
+      </div>
       <p className="mt-2 text-xs text-muted">
         {copy.title} · {internal ? copy.tabs.internal : copy.tabs.external}
         {historical ? ` · ${copy.detailsModal.imported}` : ""}
@@ -138,6 +161,8 @@ export default async function SalePage({
       */}
       <SaleItems saleId={Number(id)}
                  internal={internal} historical={historical}
+                 correctable={correctable} corrections={corrections}
+                 updatedAt={(sale.updated_at as string | null) ?? null}
                  frozen={frozen} cancelled={cancelled}
                  items={internal
                    ? ((order?.lines ?? []) as Record<string, unknown>[]).map((l, i) => ({

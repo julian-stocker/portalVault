@@ -1,10 +1,13 @@
 /**
- * Deciding, previewing and the LOCKED apply on the server (0180, step 6A).
+ * Deciding, previewing and the apply WITH THE EMERGENCY STOP SET on the
+ * server (0180, step 6A).
  *
  * The actions are called for real; Supabase, the role check and the cache
- * are replaced, and every database call is recorded. The release lock is in
- * its committed state (`APPLY_RELEASED = false`); the released path has its
- * own file (`selection-actions-released.test.ts`).
+ * are replaced, and every database call is recorded. The apply is committed
+ * released (ADR-0178, 2026-11-08); this file sets the emergency stop
+ * (`APPLY_RELEASED = false`) for itself and proves it still locks
+ * everything. The released path has its own file
+ * (`selection-actions-released.test.ts`).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,11 +27,12 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 vi.mock("@/lib/auth/capabilities", () => ({ canOperateSeller: async () => MOCK.allowed }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+// The emergency stop, for this file only.
+vi.mock("../release", () => ({ APPLY_RELEASED: false }));
 
 const { applySelection, confirmReconciliation, decideFinding, previewSelection } = await import("./actions");
 const { de } = await import("@/lib/i18n/de");
 const { STAGING_PROJECT_REF } = await import("@/lib/admin/catalog-source");
-const { APPLY_RELEASED } = await import("../release");
 const errors = de.business.reconciliation.errors;
 
 const TOKEN = "a".repeat(64);
@@ -151,11 +155,7 @@ describe("previewing", () => {
   });
 });
 
-describe("the apply is locked until its separate approval", () => {
-  it("is committed locked", () => {
-    expect(APPLY_RELEASED).toBe(false);
-  });
-
+describe("the emergency stop (APPLY_RELEASED = false) still locks the apply", () => {
   it("answers with a sentence and calls NO database function — not the preview, not either apply", async () => {
     MOCK.answer = () => ({ data: previewAnswer(), error: null });
     const r = await applySelection({ sessionId: 3, decisionIds: [7], token: TOKEN, confirmedDateGaps: [] });
@@ -166,7 +166,7 @@ describe("the apply is locked until its separate approval", () => {
   it("the confirmation of „Abgleichen“ writes nothing either — not even a decision", async () => {
     MOCK.answer = () => ({ data: 1, error: null });
     const r = await confirmReconciliation({ sessionId: 5, items: [
-      { findingId: 1, field: "external_order_ref", decision: "take_external", shownLedger: null, shownExternal: "55-00000-00001" }] });
+      { findingId: 1, field: "shipping", decision: "take_external", shownLedger: 4.99, shownExternal: 5.49 }] });
     expect(r).toEqual({ ok: false, message: errors.applyNotReleased });
     expect(MOCK.calls).toEqual([]);
   });

@@ -125,6 +125,15 @@ describe("the separation between preparing and applying", () => {
 
   it("the queries the pages use read only what Staging 0179 has", () => {
     const queries = readFileSync("src/lib/reconciliation/server/queries.ts", "utf8");
-    expect([...queries.matchAll(/rpc\("(\w+)"/g)].map((m) => m[1]).sort()).toEqual(["seller_recon_session", "seller_recon_sessions"]);
+    // 2026-11-08 (0181): the two READ functions of the analysis itself (0172) join — the current positions of a
+    // changed sale, so its figures are judged again (`attachLivePieces`). Still nothing that decides or applies.
+    // 2026-11-09: `attachRivals` reads `seller_recon_candidates` a second time — who blocks an order number
+    // (`rival_sale`), shown, never lifted.
+    expect([...queries.matchAll(/rpc\("(\w+)"/g)].map((m) => m[1]).sort())
+      .toEqual(["seller_recon_aliases", "seller_recon_aliases", "seller_recon_candidates", "seller_recon_candidates",
+        "seller_recon_session", "seller_recon_sessions", "seller_sales"]);
+    // 2026-11-09 (ADR-0182): the candidates of an unmatched order read the analysis' aliases too — still READ only.
+    // 2026-11-09 (0183): `seller_sales` — the Orderbuch's own READ — finds the sale that carries an unmatched
+    // order's number beyond the ±3-day window. Still nothing that decides, applies or creates.
   });
 });

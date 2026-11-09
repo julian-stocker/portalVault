@@ -495,6 +495,50 @@ export const SALES_RECONCILIATION_SECTIONS: readonly BackupSection[] = [
   },
 ];
 
+/* -------------------------------------------------------------------------
+ * Die Handkorrekturen importierter Verkaufspositionen (0181) — in BEIDEN
+ * Sicherungen, seit 0182
+ * ---------------------------------------------------------------------- */
+
+/**
+ * `sale_item_corrections`, als Bereich.
+ *
+ * WARUM, UND WARUM IN BEIDEN SICHERUNGEN. Die Spur ist nach einer
+ * Korrektur die EINZIGE Stelle, die die ursprüngliche Figur einer
+ * Arbeitsmappenzeile noch nennt — `sale_items.sky_id` trägt dann die
+ * korrigierte. Und sie ist, was der Arbeitsmappen-Sync (0181) vor jedem
+ * Schreiben prüft: ohne sie zurückgeholt, schriebe ein späterer Sync die
+ * alten Figuren zurück. Also gehört sie wie der Verkaufsabgleich (0174) in
+ * die Betriebs- UND die Plattformsicherung, und sie ist
+ * wiederherstellungsrelevant.
+ *
+ * Zehn von zwölf Spalten. Draußen bleiben, nach bestehender Regel beider
+ * Manifeste, `corrected_by` (Kontoidentität) und `source_row` — die
+ * Legacy-Maschinerie bleibt vollständig draußen (`FORBIDDEN_FIELDS`), auch
+ * `sale_items.source_row` geht nicht hinaus. Lesbar bleibt die Spur ohne sie:
+ * `sale_item_id` und `position` nennen die Zeile, `old_sky_id` und
+ * `old_raw_name`, was die Mappe sagte. Die Rohnamen gehen roh hinaus (Regel 4). `platform-manifest.ts` übernimmt diese Konstante; die
+ * SQL beider Funktionen (`0182`) hält `backup-sale-item-corrections.test.ts`
+ * Feld für Feld dagegen.
+ */
+export const SALE_ITEM_CORRECTIONS_SECTIONS: readonly BackupSection[] = [
+  {
+    key: "sale_item_corrections",
+    source: "sale_item_corrections",
+    purpose:
+      "Jede Handkorrektur einer Position eines importierten Verkaufs (0181): ersetzte Figur, " +
+      "ergänzte und wieder entfernte Position, mit altem und neuem Wert. Append-only — die erste " +
+      "Ersetzung einer Arbeitsmappenzeile nennt deren ursprüngliche Figur und Rohnamen für immer.",
+    fields: ["id", "sale_id", "sale_item_id", "action", "position", "old_sky_id",
+             "old_raw_name", "new_sky_id", "new_raw_name", "corrected_at"],
+    excluded: {
+      corrected_by: "Kontoidentität",
+      source_row: "Zeilennummer in der alten Arbeitsmappe",
+    },
+    restoreRelevant: true,
+  },
+];
+
 export const BACKUP_SECTIONS: readonly BackupSection[] = [
   /* ---------------------------------------------------------- Lager */
   {
@@ -748,6 +792,11 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
   /* Zwischen Orderbuch und Bestellungen, genau dort, wo `0174` den Block in
      den Rumpf aus `0140` einfügt. Begründung an der Konstante. */
   ...SALES_RECONCILIATION_SECTIONS,
+
+  /* ---------------------------- Handkorrekturen der Positionen (0182) */
+  /* Direkt nach dem Verkaufsabgleich, genau dort, wo `0182` den Bereich in
+     den Rumpf aus `0174` einfügt. Begründung an der Konstante. */
+  ...SALE_ITEM_CORRECTIONS_SECTIONS,
 
   /* ------------------------------------------- SkyIsles-Bestellungen */
   {

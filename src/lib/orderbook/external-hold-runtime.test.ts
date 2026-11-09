@@ -188,10 +188,31 @@ describe("die neun ersetzten Funktionen behalten ihren Vertrag", () => {
     seller_sale: "0113_sales_daily_index_and_repeat_buyers.sql",
   };
 
+  /*
+   * UND EIN NACHFOLGER MIT NEUEM KOPF, NAMENTLICH (0184). `seller_create_sale_with_details`
+   * bekommt `p_hold boolean default true` — die Anlage ohne Reservierung, nur
+   * auf ausdrücklichen Wunsch. Der Kopf ist deshalb NICHT byte-identisch; dafür
+   * entfernt `0184` die alte Signatur in derselben Transaktion (keine zweite
+   * Overload), und der neue Kopf ist der alte plus genau dieser Parameter.
+   */
+  const RESHAPED: Record<string, string> = {
+    seller_create_sale_with_details: "0184_create_sale_hold_option.sql",
+  };
+
   it("und 0110 ist für jede die geltende Fassung — bis auf benannte Nachfolger", () => {
     for (const name of Object.keys(REPLACED)) {
-      expect(latestFunction(name).file, name).toBe(SUCCESSOR[name] ?? FILE);
+      expect(latestFunction(name).file, name).toBe(SUCCESSOR[name] ?? RESHAPED[name] ?? FILE);
     }
+  });
+
+  it("der umgebaute Kopf ist der alte plus p_hold, und die alte Signatur wird entfernt", () => {
+    const sql = readFileSync("supabase/migrations/0184_create_sale_hold_option.sql", "utf8");
+    expect(sql).toContain("drop function public.seller_create_sale_with_details(text, date, text, text, text, text, boolean, numeric, numeric, numeric, jsonb, jsonb, jsonb, numeric, text);");
+    const from = sql.indexOf("create function public.seller_create_sale_with_details(");
+    const head = sql.slice(from, sql.indexOf("as $$", from)).replace("create function", "create or replace function")
+      .replace(/\s+/g, " ").trim();
+    expect(head.replace("p_payout_ref text default null, p_hold boolean default true )", "p_payout_ref text default null )"))
+      .toBe(header(FILE, "seller_create_sale_with_details"));
   });
 
   it("und ein Nachfolger erbt den Kopf byte-identisch", () => {
