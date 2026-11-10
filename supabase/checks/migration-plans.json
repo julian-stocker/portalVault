@@ -734,6 +734,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0187": {
+      "zweck": "Die Rechte von admin_set_shop_policies bereinigen (M-05B): kein EXECUTE mehr fuer PUBLIC und anon, weiter fuer authenticated und service_role; nur Rechte, der Rumpf aus 0041 bleibt; aendert keine Daten",
+      "preflight": "0187_preflight.sql",
+      "lauf": "staging-0187.sql",
+      "postflight": "0187_postflight.sql",
+      "angewendet": {
+        "beschreibung": "anon und PUBLIC duerfen admin_set_shop_policies(text, text, text, boolean, boolean, text, text, text, numeric) nicht mehr ausfuehren, authenticated darf es. Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select (not has_function_privilege('anon', 'public.admin_set_shop_policies(text,text,text,boolean,boolean,text,text,text,numeric)', 'execute') and has_function_privilege('authenticated', 'public.admin_set_shop_policies(text,text,text,boolean,boolean,text,text,text,numeric)', 'execute') and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure('public.admin_set_shop_policies(text,text,text,boolean,boolean,text,text,text,numeric)') and a.privilege_type = 'EXECUTE' and a.grantee = 0)) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

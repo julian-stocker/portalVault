@@ -248,3 +248,93 @@ Eine **Migration ist nicht nötig.**
 - Keine Migration, keine Änderung an Rechten, an `seller_delete_sale` oder an `seller_cancel_external_sale`.
 
 **Status: M-05A ist lokal abgeschlossen.** Noch nicht im Browser geprüft. M-05B und M-05C warten auf Freigabe.
+
+---
+
+## 10. Umsetzung M-05B (2026-11-10, lokal, nicht committet, nirgends angewendet)
+
+### 10.1 Erneute Prüfung vor der Umsetzung
+
+- **Signatur:** `admin_set_shop_policies(text, text, text, boolean, boolean, text, text, text, numeric)`. Es gibt **genau eine** Überladung im Staging-Schema; 0041 hat die alte 10-Parameter-Fassung aus 0040 ausdrücklich gelöscht.
+- **Funktionskörper:** wortgleich der aus 0041. `md5(prosrc)` = `db2dc5fb246f6789e5de62d78ea783ec`, im Staging-Schema und in der Migration identisch. `security definer`, `search_path = ''`. Die erste Anweisung ist `can_operate_active_seller()`.
+- **Rechte vorher (Staging):** EXECUTE für PUBLIC (Vorgabe, kein REVOKE), anon, authenticated und service_role. Ursache: Supabases Standardrechte auf neue Funktionen in `public`, weil 0041 keine Rechte setzt. Spätere Migrationen nennen die Funktion nicht.
+- **Aufrufer:** nur `setShopPolicies` (`src/lib/admin/actions.ts`), als angemeldeter Betreiber. Keine andere Funktion ruft sie auf.
+- **Verweigertes EXECUTE, gemessen auf PostgreSQL (PGlite):** SQLSTATE **`42501`**, „permission denied for function admin_set_shop_policies“. Die interne Rollenprüfung nutzt **dieselbe** SQLSTATE (`insufficient_privilege`) mit „seller operator role required“. Die Tests unterscheiden die beiden über die Meldung.
+
+### 10.2 Migration `0187_revoke_shop_policies_public.sql`
+
+Ein einziger `DO`-Block, eine Transaktion:
+
+1. **Vorbedingungen:** Die Funktion existiert mit exakt dieser Signatur. Es gibt genau eine Überladung. Sie ist `security definer` mit leerem `search_path`. Sonst bricht die Migration ab, ohne zu raten.
+2. **Änderung:** `revoke all on function public.admin_set_shop_policies(…) from public, anon; grant execute on function … to authenticated, service_role;`
+3. **Nachbedingungen, gemessen:**
+   - anon darf nicht,
+   - kein ACL-Eintrag für PUBLIC (grantee 0),
+   - authenticated und service_role dürfen,
+   - der Körper ist per md5 vorher und nachher gleich,
+   - `security definer` bleibt.
+
+Nichts anderes wird angefasst. Die Migration ist idempotent, ein zweiter Lauf ändert nichts. Rücknahme: `supabase/rollback/R0187_restore_shop_policies_grants.sql` stellt den gemessenen Stand vor 0187 wieder her, also auch die Lücke. Mit Warnhinweis.
+
+**Zusätzlich (Projektregel für jede Migration):**
+
+- Laufpaket `supabase/checks/0187_preflight.sql` und `0187_postflight.sql`, `supabase/operations/staging-0187.sql`:
+  - Umgebungsstempel,
+  - Messung vorher und nachher: Verkäufer, Lager, Sammlung, die Rechte jeder **anderen** Funktion, Tabellenrechte, Policies,
+  - Z1 blockiert jede Bewegung, Z2 pinnt den Körper aus 0041 und die beiden Helfer, Z3 prüft die Rechte.
+- Eintrag in `supabase/checks/migration-plans.json`.
+- Zeile „lokal vorbereitet“ in `APPLIED.md`.
+- `SHA256SUMS.txt`.
+
+### 10.3 Tests
+
+| Test | Ergebnis |
+|---|---|
+| `src/lib/admin/shop-policies-grants-0187.test.ts` (neu, PGlite mit Rollen, `SET ROLE` und Supabases Standardrechten nachgestellt) | **17 grün**. Die Lücke vor 0187 ist **nachgestellt**: anon und PUBLIC dürfen, der Körper weist anon trotzdem ab, nichts wird geschrieben. Nach 0187: PUBLIC und anon dürfen nicht (42501 „permission denied for function“), authenticated und service_role dürfen. authenticated ohne Betreiberrolle wird von der internen Prüfung abgewiesen, ein Betreiber schreibt die Policies wie bisher. Körper, `security definer` und `search_path` sind unverändert, die Rechte **aller anderen** Funktionen bytegleich. Ein zweiter Lauf ist idempotent. Die Migration bricht ab, wenn die Funktion fehlt oder eine zweite Überladung existiert, und hinterlässt dann nichts. Sie hat keine Abhängigkeit auf 0168–0186. Die Rücknahme stellt den Vorzustand her |
+| `src/lib/admin/staging-0187.test.ts` (neu) | Laufpaket: Migration zeichengleich eingebettet, eine Transaktion, Stempel, keine Production-Referenz, Messungen, Pins, Z3-Rechte, Plan |
+| `src/lib/commerce/revoke-coverage.test.ts` (umgebaut) | **10 grün**, siehe 10.4 |
+| `src/lib/business/purchase-receipt.test.ts` | Folge der Migrationen um 0187 ergänzt |
+| `npm run verify:check-sql` | 190 Dateien ohne Planfehler. `0187_preflight` und `0187_postflight` laufen als Eigner und als lesender Prüfzugang durch (1 Zeile für den Prüfzugang unlesbar, `sellers`) |
+| `verify:sums` | 588 Dateien, alle Prüfsummen stimmen |
+
+### 10.4 Die neun eingefrorenen Ausnahmen: vollständig bereinigt
+
+- **Acht waren nie offen.**
+  - `seller_set_sale_date`, `seller_set_sale_payout` und `seller_update_sale` setzen ihre Rechte in der Schleife von **0062**.
+  - `seller_create_purchase`, `seller_create_sale`, `seller_orderbook_ledger` und `seller_sales` setzen sie in der Schleife von **0063** (`foreach … loop execute format('revoke … ')`).
+  - `admin_platform_settings` wurde in **0094** mit Rechten neu angelegt.
+  - Das Staging-Schema bestätigt alle acht: `REVOKE … FROM PUBLIC`, nur authenticated und service_role.
+- **Eine war offen:** `admin_set_shop_policies`, geschlossen durch **0187**.
+- **Der Test misst jetzt, statt einzufrieren:**
+  - Er liest die Rechte-Schleifen.
+  - Eine Lücke gilt nur als geschlossen, wenn eine spätere Datei die Rechte für diesen Namen nennt.
+  - Es gibt **keine Ausnahmeliste mehr**.
+- **Neue Regel:** **Jede neu eingeführte `security definer`-Funktion** (ausgenommen Triggerfunktionen) muss ihre Rechte in ihrer eigenen Datei nennen. Seit 0098 hält sich jede Migration daran, gemessen; künftig schlägt der Test fehl. Eine Positivkontrolle belegt, dass die Regel anschlägt.
+
+### 10.5 Kompatibilität mit Staging und Production
+
+- **Inhaltlich auf beiden Ständen anwendbar.** Die Funktion stammt aus 0041; Staging (0186) und Production (0167) tragen sie. 0187 nennt nichts aus 0168–0186, das prüft ein Test.
+- **Staging:** Der Runner `npm run db:migrate:staging -- 0187` kennt das Paket. Die Migration ist die nächste in der Folge (0186 → 0187).
+- **Production — offener Punkt.**
+  - Das Werkzeug `db:migrate:staging` ist **nur für Staging** gebaut: feste Staging-ID, Stempel, lesender Prüfzugang.
+  - Für Production gibt es **kein Werkzeug**, das eine einzelne Migration außerhalb der Nummernfolge anwendet (Production ist bei 0167, 0168–0186 fehlen).
+  - Bisher liefen Production-Läufe manuell im SQL-Editor, mit eigenem Pre- und Postflight (`docs/history/`).
+  - Eine sichere Anwendung auf Production ist damit **nicht nachgewiesen**. Sie bräuchte ein eigenes Production-Laufpaket mit Production-Stempel und eine eigene Zeile im Production-Teil von `APPLIED.md`, mit ausdrücklicher Freigabe für die Ausnahme von der Nummernfolge. **Nichts davon ist gebaut**; die Nummernfolge wird nicht umgangen.
+
+### 10.6 Vor einer Datenbankanwendung
+
+1. Freigabe für Staging.
+2. `npm run db:migrate:staging -- 0187`: Preflight muss **9999 = 0** ergeben, dabei 111 = `true` (die Lücke steht noch), dann Baselines einfrieren.
+3. Der Betreiber führt `supabase/operations/staging-0187.sql` im SQL-Editor aus. Erwartet ist die NOTICE `0187 ok`.
+4. `npm run db:migrate:staging -- 0187 --resume`: Nachkontrolle **9999 = 0**.
+5. `npm run db:privileges:staging`: der Prüfzugang bleibt unverändert.
+6. Ein berechtigter Postflight als `postgres`, wenn gewünscht.
+7. `APPLIED.md`: die Zeile von „lokal vorbereitet“ auf „angewendet“ setzen.
+8. Ein Funktionstest: Policies als Betreiber im Browser speichern (`/business/legal`).
+9. Production: erst ein eigener Plan (siehe 10.5).
+
+### 10.7 Offene Risiken
+
+- Production bleibt mit der Lücke, bis es einen eigenen Production-Lauf gibt (siehe 10.5). Nicht ausnutzbar, siehe Abschnitt 3.
+- Supabases Standardrechte geben **jeder neuen** Funktion EXECUTE für anon. Die neue Testregel fängt das für `security definer`-Funktionen ab. Ein projektweites `alter default privileges … revoke …` wäre eine zweite Sicherung und eine eigene Entscheidung.
+- Der nicht verwendete Parameter `p_free_shipping_threshold` ist unverändert und eine eigene fachliche Frage.

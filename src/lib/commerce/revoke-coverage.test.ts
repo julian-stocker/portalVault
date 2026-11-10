@@ -39,11 +39,27 @@ function functionsIn(sql: string, file: string): Created[] {
   return [...new Set(created)].map((name) => ({ file, name, dropped: dropped.has(name) }));
 }
 
-/** Nennt die Datei für diesen Namen ein Recht — entzogen oder erteilt? */
+/**
+ * Die Namen, deren Rechte eine Datei in einer Schleife setzt:
+ * `foreach fn in array array['name(…)', …] loop execute format('revoke … on
+ * function public.%s …') … end loop` — so tun es `0062` und `0063`. Bis M-05B
+ * (2026-11-10) sah dieser Test diese Form nicht und führte ihre Funktionen
+ * deshalb als Lücken, obwohl das Staging-Schema sie längst gesperrt zeigt.
+ */
+function namesInRightsLoops(sql: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of sql.matchAll(/foreach\s+\w+\s+in\s+array\s+array\[([\s\S]*?)\]\s*loop([\s\S]*?)end loop/gi)) {
+    if (!/(revoke|grant)[^;]*on function public\.%s/i.test(m[2])) continue;
+    for (const n of m[1].matchAll(/'([a-z_]+)\(/g)) out.add(n[1]);
+  }
+  return out;
+}
+
+/** Nennt die Datei für diesen Namen ein Recht — entzogen oder erteilt, direkt oder in einer Schleife? */
 function statesRights(sql: string, name: string): boolean {
-  const revoke = new RegExp(`^revoke [^;]*on function public\\.${name}\\(`, "m");
-  const grant = new RegExp(`^grant [^;]*on function public\\.${name}\\(`, "m");
-  return revoke.test(sql) || grant.test(sql);
+  const revoke = new RegExp(`^\\s*revoke [^;]*on function public\\.${name}\\(`, "m");
+  const grant = new RegExp(`^\\s*grant [^;]*on function public\\.${name}\\(`, "m");
+  return revoke.test(sql) || grant.test(sql) || namesInRightsLoops(sql).has(name);
 }
 
 describe("0100 sperrt jede Funktion, die es neu anlegt", () => {
@@ -124,32 +140,78 @@ describe("die Regel gilt für jede Migration, nicht nur für 0100", () => {
     expect(recent, `neue Lücken:\n${recent.join("\n")}`).toEqual([]);
   });
 
-  it("und die geerbten Fälle sind genau diese neun — nicht mehr", () => {
+  it("und jede geerbte Lücke ist geschlossen — nachgewiesen, nicht eingefroren (M-05B)", () => {
     /*
-     * ÄLTER ALS DIESER BLOCK UND HIER NICHT REPARIERT.
+     * BIS 2026-11-10 STAND HIER EINE EINGEFRORENE LISTE VON NEUN FUNKTIONEN.
      *
-     * Diese neun Funktionen wurden in `0041`, `0062` und `0063` gelöscht und
-     * neu angelegt, ohne dass dieselbe Datei ihre Rechte nennt. Ob sie
-     * deshalb heute wirklich für `anon` oder `authenticated` ausführbar sind,
-     * ist damit NICHT gesagt — ein späterer `grant`/`revoke` in einer anderen
-     * Datei kann es längst geregelt haben, und die einzige verlässliche
-     * Antwort steht im Katalog (`information_schema.routine_privileges`),
-     * nicht im Migrationstext.
+     * Der Abgleich mit dem Staging-Schema vom 2026-11-09 (M-05) hat gezeigt:
+     * acht davon waren nie offen — `0062` und `0063` setzen ihre Rechte in
+     * Schleifen, die dieser Test nicht las (`namesInRightsLoops` liest sie
+     * jetzt), und `admin_platform_settings` wurde in `0094` mit Rechten neu
+     * angelegt. Offen war genau eine: `admin_set_shop_policies` aus `0041`;
+     * `0187` schließt sie.
      *
-     * Die Liste ist deshalb eine Bestandsaufnahme, keine Freigabe: sie ist
-     * eingefroren, damit sie nicht wächst, und sie wartet auf eine eigene
-     * Prüfung. Eine zehnte Zeile lässt diesen Test fehlschlagen.
+     * Die Regel jetzt: eine Lücke (gelöscht und neu angelegt ohne Rechte)
+     * gilt nur als geschlossen, wenn dieselbe Datei die Rechte in einer
+     * Schleife setzt oder eine SPÄTERE Datei sie für diesen Namen nennt. Was
+     * so nicht geschlossen ist, lässt den Test fehlschlagen — es gibt keine
+     * Ausnahmeliste mehr.
      */
-    expect(gaps.sort()).toEqual([
-      "0041_three_account_authorization.sql: admin_platform_settings",
-      "0041_three_account_authorization.sql: admin_set_shop_policies",
-      "0062_orderbook_sale_maintenance.sql: seller_set_sale_date",
-      "0062_orderbook_sale_maintenance.sql: seller_set_sale_payout",
-      "0062_orderbook_sale_maintenance.sql: seller_update_sale",
-      "0063_orderbook_test_classification.sql: seller_create_purchase",
-      "0063_orderbook_test_classification.sql: seller_create_sale",
-      "0063_orderbook_test_classification.sql: seller_orderbook_ledger",
-      "0063_orderbook_test_classification.sql: seller_sales",
-    ]);
+    const offen = gaps.filter((g) => {
+      const [file, name] = g.split(": ");
+      return !files.some((later) => later > file && statesRights(readFileSync(join(DIR, later), "utf8"), name));
+    });
+    expect(offen, `offene Lücken:\n${offen.join("\n")}`).toEqual([]);
+  });
+
+  it("die acht früher eingefrorenen Fälle sind durch ihre eigene Schleife oder eine spätere Datei belegt", () => {
+    const belegt = (file: string, name: string) => {
+      const sql = readFileSync(join(DIR, file), "utf8");
+      return namesInRightsLoops(sql).has(name);
+    };
+    for (const name of ["seller_set_sale_date", "seller_set_sale_payout", "seller_update_sale"]) {
+      expect(belegt("0062_orderbook_sale_maintenance.sql", name), name).toBe(true);
+    }
+    for (const name of ["seller_create_purchase", "seller_create_sale", "seller_orderbook_ledger", "seller_sales"]) {
+      expect(belegt("0063_orderbook_test_classification.sql", name), name).toBe(true);
+    }
+    expect(statesRights(readFileSync(join(DIR, "0094_catalog_market_boost.sql"), "utf8"), "admin_platform_settings")).toBe(true);
+    expect(statesRights(readFileSync(join(DIR, "0187_revoke_shop_policies_public.sql"), "utf8"), "admin_set_shop_policies")).toBe(true);
+  });
+});
+
+describe("jede NEU eingeführte security-definer-Funktion nennt ihre Rechte (M-05B)", () => {
+  /*
+   * Die zweite Falle neben drop + create: eine Funktion, die es vorher gar
+   * nicht gab. Auch sie bekommt die Vorgabe (EXECUTE für PUBLIC) und Supabases
+   * Standardrechte (anon). Seit `0098` setzt jede neu eingeführte
+   * `security definer`-Funktion ihre Rechte in derselben Datei — gemessen am
+   * 2026-11-10, ohne Ausnahme. Ab jetzt ist das eine Regel: eine neue
+   * Funktion ohne Rechte lässt diesen Test fehlschlagen. Triggerfunktionen
+   * sind ausgenommen (sie lassen sich nicht direkt aufrufen).
+   */
+  const files = readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort();
+  const seen = new Set<string>();
+  const missing: string[] = [];
+  for (const file of files) {
+    const sql = readFileSync(join(DIR, file), "utf8");
+    for (const m of sql.matchAll(/^create (?:or replace )?function public\.([a-z_]+)\(([\s\S]*?)\$\$/gm)) {
+      const [, name, head] = m;
+      const first = !seen.has(name);
+      seen.add(name);
+      if (!first || Number(file.slice(0, 4)) < 98) continue;
+      if (/returns\s+trigger/i.test(head) || !/security definer/i.test(head)) continue;
+      if (!statesRights(sql, name)) missing.push(`${file}: ${name}`);
+    }
+  }
+
+  it("ab 0098 nennt jede neue security-definer-Funktion ihre Rechte in ihrer Datei", () => {
+    expect(missing, `ohne Rechte:\n${missing.join("\n")}`).toEqual([]);
+  });
+
+  it("die Regel erkennt eine neue Funktion ohne Rechte (Positivkontrolle)", () => {
+    const sql = "create or replace function public.brand_new_writer(p int)\nreturns void language plpgsql security definer set search_path = ''\nas $$ begin end $$;";
+    expect(statesRights(sql, "brand_new_writer")).toBe(false);
+    expect(statesRights(sql + "\nrevoke all on function public.brand_new_writer(int) from public, anon;", "brand_new_writer")).toBe(true);
   });
 });

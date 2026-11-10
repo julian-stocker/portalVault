@@ -575,6 +575,12 @@ Vollständiger Bericht: `docs/stability/2026-11-10-m05-database-consistency-audi
   - `router.refresh()` ist nicht nötig, weil die Formularseiten in den Listen stehen.
   - 36 neue Tests und 1 671 Tests in 51 betroffenen Dateien sind grün.
   - Einzelheiten: M-05-Bericht, Abschnitt 9.
+- **M-05B umgesetzt am 2026-11-10 (lokal, nicht committet, nirgends angewendet):**
+  - Migration `0187` entzieht `admin_set_shop_policies(…9 Parameter…)` EXECUTE für PUBLIC und anon und erteilt es authenticated und service_role. Nur Rechte; Körper, `security definer` und `search_path` sind per md5 und Nachbedingung gesichert. Idempotent, mit Rücknahme und Laufpaket.
+  - **Getestet auf PostgreSQL:** Verweigerung 42501 „permission denied for function“, Betreiber weiter möglich, alle anderen Rechte bytegleich.
+  - **`revoke-coverage.test.ts`:** Die neun eingefrorenen Ausnahmen sind aufgelöst. Acht waren dank Rechte-Schleifen in 0062/0063 und 0094 nie offen, eine schließt 0187. Neu ist die Regel, dass jede neue `security definer`-Funktion ihre Rechte nennt.
+  - **Production:** inhaltlich anwendbar, aber ohne Werkzeug für einen Lauf außerhalb der Nummernfolge. Das ist ein offener Punkt.
+  - Einzelheiten: M-05-Bericht, Abschnitt 10.
 
 ### 3.6 Händlername, Handelsname, rechtliche Identität (offene Entscheidung)
 
