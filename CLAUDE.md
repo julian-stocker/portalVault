@@ -200,8 +200,10 @@ englisch. Bereits korrekt englische Namen werden **nicht** aus stilistischen Gr�
 3. Bestehenden Code untersuchen
 4. Kleinste sinnvolle Änderung planen
 5. Implementieren
-6. `npm run check` (Lint, Typecheck, Build) plus Unit-Tests kritischer Geschäftslogik
-   und Tests sicherheitskritischer RLS-Regeln, sobald es sie gibt (ADR-0013)
+6. Testen nach Risiko (Abschnitt „Tests nach Risiko"): gezielte Tests für die Änderung,
+   `npm run check` (Lint, Typecheck, Build, SQL-Planprüfung) am Integrations-Gate, die
+   volle Suite am Release-Gate. Unit-Tests kritischer Geschäftslogik und Tests
+   sicherheitskritischer RLS-Regeln gehören zu jeder Änderung, die sie berührt (ADR-0013)
 7. Ergebnis prüfen
 8. Relevante Dokumentation aktualisieren
 9. Änderungen zusammenfassen, erst dann Commit vorbereiten
@@ -210,6 +212,31 @@ Keine großen unkontrollierten Umbauten. Keine Architekturänderung aus Präfere
 Keine unnötige technische Komplexität — einfache, etablierte Lösungen bevorzugen.
 Der Nutzer hat Python-Erfahrung, aber wenig Erfahrung mit moderner Webentwicklung:
 Code soll lesbar, modular und kommentiert sein.
+
+## Tests nach Risiko — verbindlich (seit 2026-11-10)
+
+Der Aufwand richtet sich nach der Änderung, nicht nach dem Prompt. **Keine volle Suite
+(`npm test`, rund 13 Minuten) nach jedem Schritt.** Die Sicherheitsregeln oben — Staging-Guard,
+Production-Schreibregel, Migrationen nur über `db:migrate:staging` — gelten unverändert auf
+jeder Stufe.
+
+| Stufe | Wann | Befehle |
+|---|---|---|
+| **FAST** | jede kleine Änderung | `npx vitest run <testdateien oder verzeichnis>` oder `npx vitest related --run <geänderte .ts/.tsx>` · `npx eslint <geänderte dateien>` · keine Staging-Verbindung |
+| **FEATURE** | ein Feature ist fertig | `npx vitest run src/lib/<bereich>` · `npm run typecheck` · Datei in `supabase/checks/` geändert: `npm run verify:check-sql` · Datei in `supabase/` geändert: `node tools/checksums.mts --check` und `npx vitest run src/lib/admin/migration-integrity.test.ts src/lib/admin/check-fingerprints.test.ts` |
+| **INTEGRATION** | vor einem Commit-Paket oder Merge | `npx vitest run --changed origin/development/skyisles-v2` plus betroffene Verzeichnisse · `npm run check` · nur bei DB-Logik: `npm run test:recon-pg` bzw. die `RECON_REAL_PG=1`-Tests des Bereichs · nur bei Migrationen: `npm run db:check:staging` (lesend) |
+| **RELEASE** | vor einem Staging-Release oder Production-Plan | `npm test` · `npm run check` · `npm run db:check:staging` · `npm run db:privileges:staging` · je Migration `db:migrate:staging -- NNNN` und `--resume` · Workflow- und Konkurrenztests (je Werkzeug eigene Freigabe) |
+
+- **SQL, Migrationen und `tools/`: Tests ausdrücklich auswählen.** `vitest related` und
+  `--changed` folgen nur Imports; viele Tests lesen SQL- und Migrationsdateien per
+  `readFileSync` und würden sonst übergangen.
+- **Kein Schreibtest gegen Staging ohne ausdrückliche Freigabe** für genau dieses Werkzeug.
+  Auch `verify:seller:staging` und `verify:commerce:staging` schreiben: sie versuchen als anon
+  zu schreiben und erwarten die Ablehnung.
+- **Bei einem Fehler zuerst die Ursache**, dann gezielt den betroffenen Test wiederholen —
+  kein erneuter Gesamtlauf auf Verdacht, kein zweiter Lauf eines Schreibtests.
+- **Production: keine Aktion ohne ausdrückliche Freigabe** — kein Schreiben, keine Migration,
+  kein Deployment, auch keine Prüfung mit Schreibversuchen.
 
 ## Dokumentationspflichten
 
