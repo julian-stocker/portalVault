@@ -535,6 +535,25 @@ Vollständiger Bericht: `docs/stability/2026-11-09-m04-production-write-audit.md
   - 139 Guard-Tests und 2 324 Tests in 59 betroffenen Dateien sind grün, alles offline.
   - Einzelheiten: Audit-Bericht, Abschnitt 8.
 
+### 3.5c M-04E (2026-11-09): Deployment- und Push-Sicherheit
+
+Vollständiger Bericht: `docs/stability/2026-11-09-m04e-deployment-push-safety.md`. Kernpunkte:
+
+- **Was ein Push auslösen würde:**
+  - Ein Push von `development/skyisles-v2` (10 Commits voraus, Fast-Forward nach dem letzten `fetch`) löst **kein Production-Deployment** und **keine Migration** aus. Im Repository gibt es keine CI, kein `vercel.json` und keine Build-Hooks.
+  - Er erzeugt aber **wahrscheinlich ein Vercel-Preview**. Laut Doku (2026-10-26, Dashboard unbestätigt) trägt es die **Production-Supabase-Werte**.
+- **Was ein solches Preview könnte:** Mit Anon-Key und Sitzung wäre es echte Production. Konten, Bestellungen (`create_order` auch anonym), Orderbuch, Katalogpflege und Händlerprofil wären schreibbar, alles RLS-geschützt, aber real.
+  - Der CSV-Abgleich ist **serverseitig auf Staging gesperrt** (fail-closed), ebenso die Katalog-Aufräumfunktion.
+  - Funktionen aus 0181 und 0184 scheitern auf Production laut statt still.
+  - Einen allgemeinen Preview-Schutz gibt es nicht.
+- **Vorschlag:**
+  - Preview mit Staging-Werten und Deployment Protection, Production mit Production-Werten, Service-Role-Keys nur lokal.
+  - Ein Build-Wächter gegen Verwechslung von `VERCEL_ENV` und Projekt-ID.
+  - Übergangsweise ein `vercel.json`-Branch-Schalter.
+  - Keine Supabase-GitHub-Integration.
+  - Funktionen, die noch nicht ausgerollte Migrationen brauchen, serverseitig auf Staging begrenzen.
+- **Push: heute NO-GO**, bis die Dashboard-Punkte A.1–A.3 und B.5 der Checkliste bestätigt sind oder Previews für den Branch nachweislich aus sind.
+
 ### 3.6 Händlername, Handelsname, rechtliche Identität (offene Entscheidung)
 
 | Feld | Inhalt auf Staging | wirkt auf |
