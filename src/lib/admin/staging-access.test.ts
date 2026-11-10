@@ -806,10 +806,14 @@ describe("function-acl-audit: keine ungeschützte Schreibfunktion über PUBLIC",
     expect(bericht).toContain("Kein Befund");
   });
 
-  it("die 19 schreibenden Funktionen über PUBLIC sind alle benannt", () => {
+  it("die 18 schreibenden Funktionen über PUBLIC sind alle benannt", () => {
     const m = /== SCHREIBT_MIT_TOR: (\d+) ==/.exec(bericht);
     expect(m).not.toBeNull();
-    expect(Number(m![1])).toBe(19);
+    /* 19 bis M-05C: `0188` ersetzt `seller_delete_sale` und nennt seine Rechte
+       ausdrücklich (`revoke … from public, anon`) — seitdem ist sie aus der
+       Liste heraus, und das soll so bleiben. */
+    expect(Number(m![1])).toBe(18);
+    expect(bericht).not.toMatch(/^ +seller_delete_sale /m);
     /* Drei davon hatte eine frühere Fassung dieses Audits VERLOREN, weil sie
        `drop function` und `create` je Datei in zwei Durchgängen verarbeitete.
        Ein Audit, das seinen Gegenstand verliert, meldet „kein Befund". */

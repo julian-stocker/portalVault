@@ -3155,6 +3155,17 @@ Hold ist immer eine neue Zeile.
 | `seller_settle_sale_item`, `seller_set_sale_item_not_shipped` | Hold freigegeben; die Rücknahme hält wieder |
 | `seller_remove_sale_item`, `seller_delete_sale` | Hold freigegeben, **bevor** gelöscht wird |
 
+**Sperrreihenfolge beim Löschen und Storno (`0188`, `0189`, M-05C — lokal vorbereitet, nirgends
+angewendet).** `seller_delete_sale` und `seller_cancel_external_sale` sperren zuerst den Verkauf
+(`for update`; ein neuer Positions-Insert wartet daran über seinen Fremdschlüssel), dann jede
+vorhandene Position `for update nowait`. Hält eine laufende Buchung eine Position, brechen sie mit
+SQLSTATE 55P03 ab, statt zu warten (das wäre ein Deadlock) — nichts ist gelöscht oder storniert.
+Erst danach zählen, freigeben, löschen bzw. stornieren sie wie bisher. Bis zur Anwendung gilt die
+Fassung aus `0110` bzw. `0170`, deren Zählung ohne Sperre läuft: eine gleichzeitige Buchung ohne
+Hold kann eine Lagerbewegung ohne Verkauf hinterlassen (nachgewiesen in
+`src/lib/orderbook/sale-race-0188-0189.test.ts`). `0189` ist nur für Staging (Production hat `0170`
+nicht).
+
 **Ein Hold erfindet nie Bestand.** Ist nichts frei, entsteht kein Hold, keine Zeile, keine
 Bestandsänderung — die Verkaufsposition bleibt trotzdem gültig und meldet einen Grund. Eine
 teilweise reservierte externe Order ist ein zulässiger Zustand.

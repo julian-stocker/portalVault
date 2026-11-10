@@ -338,3 +338,148 @@ Nichts anderes wird angefasst. Die Migration ist idempotent, ein zweiter Lauf ä
 - Production bleibt mit der Lücke, bis es einen eigenen Production-Lauf gibt (siehe 10.5). Nicht ausnutzbar, siehe Abschnitt 3.
 - Supabases Standardrechte geben **jeder neuen** Funktion EXECUTE für anon. Die neue Testregel fängt das für `security definer`-Funktionen ab. Ein projektweites `alter default privileges … revoke …` wäre eine zweite Sicherung und eine eigene Entscheidung.
 - Der nicht verwendete Parameter `p_free_shipping_threshold` ist unverändert und eine eigene fachliche Frage.
+
+---
+
+## 11. Umsetzung M-05C (2026-11-10, lokal, nicht committet, nirgends angewendet)
+
+### 11.1 Reproduktion auf echtem PostgreSQL (vor der Korrektur)
+
+Test: `src/lib/orderbook/sale-race-0188-0189.test.ts` — ein eigener PostgreSQL-17-Cluster
+(nur Unix-Socket, temporäres Verzeichnis), vier echte Verbindungen. Eine dritte Verbindung hält
+genau **eine** Sperre, um einen Aufruf an einer bekannten Stelle anzuhalten; der Test wartet, bis
+`pg_stat_activity` für die angehaltene Verbindung `wait_event_type = 'Lock'` meldet. Keine
+Wartezeiten, keine Zufallstreffer. Alle Funktionskörper stammen wortgleich aus ihren Migrationen
+(0109, 0110, 0170); dazu die Cascades aus 0059/0109 und der Löschschutz `reservations_deny_delete`.
+Gestartet mit `RECON_REAL_PG=1`; in `npm test` übersprungen.
+
+| Fall | Alte Fassung (0110 / 0170) | Ergebnis |
+|---|---|---|
+| R1 Löschen ↔ Buchen **ohne** Hold (Verkauf mit einer gehaltenen und einer ungehaltenen Position) | **REPRODUZIERT** | Buchung committet, Cascade löscht ihre Position, die Lagerbewegung bleibt **verwaist**, Bestand um 1 zu niedrig |
+| R2 Löschen ↔ Buchen **mit** Hold | nicht als Schaden reproduzierbar | Löschschutz der Reservierung lässt das Löschen scheitern; konsistent |
+| R3 Storno ↔ Buchen ohne Hold | **REPRODUZIERT** | stornierter Verkauf mit gebuchter Position |
+| R4 Storno ↔ Buchen mit Hold | **REPRODUZIERT als Deadlock** | PostgreSQL bricht einen der beiden ab (40P01); das Übrige konsistent |
+| R5 zwei Löschungen gleichzeitig | sicher | die zweite wartet und löscht nichts; Holds genau einmal frei |
+| R6 zwei Stornos gleichzeitig | sicher | die zweite wartet und meldet „already cancelled“ |
+| R7 Löschen ↔ **neue** Position mit Hold | konsistent, aber nur dank Löschschutz | das alte Löschen sieht die neue Position nie; der Cascade trifft den aktiven Hold und scheitert |
+
+Nach jedem Lauf geprüft: keine Bewegung ohne Position · `quantity = Start − Bewegungen` ·
+`reserved = Σ aktive Holds` · kein stornierter Verkauf mit gebuchter Position.
+
+### 11.2 Sperranalyse und gewählte Lösung
+
+- **Buchung** (`seller_book_sale_item`, 0110): Position `for update` → Reservierung → Lagerzeile →
+  `update sale_items` → `update sales` (`FOR NO KEY UPDATE` auf den Verkauf).
+- **Neue Position** (`seller_add_sale_item`): kein Verkaufslock, aber der Fremdschlüssel nimmt
+  `FOR KEY SHARE` auf `sales` — das kollidiert mit `FOR UPDATE`, nicht mit einer Positionssperre.
+- **Gewählt, in dieser Reihenfolge:**
+  1. Verkauf `for update` (0189 hatte das schon aus 0170) — keine neue Position, solange es läuft.
+  2. jede vorhandene Position `order by id for update nowait`; `lock_not_available` wird mit klarer
+     Meldung und SQLSTATE **55P03** neu geworfen, nichts ist gelöscht bzw. storniert.
+  3. danach der bisherige Körper **wortgleich**.
+- **Warum nicht „Position vor Verkauf“ (Vorschlag in Abschnitt 8):** Die Positionen zuerst zu
+  sperren, ließe einen gleichzeitigen Insert einer **neuen** Position durch (R7), weil der nur den
+  Verkauf berührt. Den Verkauf zuerst und dann auf Positionen zu **warten**, wäre gegen eine
+  laufende Buchung ein Deadlock (die hält die Position und will den Verkauf). Deshalb: Verkauf
+  zuerst, Positionen **ohne Warten**. Eine laufende Buchung gewinnt immer; Löschen bzw. Storno
+  scheitert sauber und kann wiederholt werden.
+- **Verworfen:** Advisory Locks (jede Schreibfunktion müsste sie kennen), `serializable`
+  (Wiederholungslogik in jedem Aufrufer), ein Pflicht-Versionsparameter beim Storno (kein
+  zwingender Nachweis: das Problem ist eine Sperrlücke, keine veraltete Ansicht; `p_expected_updated_at`
+  bleibt optional wie bisher).
+- **Keine andere Funktion ändert sich.**
+
+### 11.3 Migrationen
+
+| Datei | Inhalt | Umgebung |
+|---|---|---|
+| `0188_sale_delete_lock_order.sql` | `seller_delete_sale(bigint)`: Schritte 1–3; Rumpf-md5 `e64a0822…` (0110) → `2498b653…` | Staging (0186) **und** Production (0167) anwendbar; setzt nichts aus 0168–0187 voraus |
+| `0189_external_cancel_lock_order.sql` | `seller_cancel_external_sale(bigint, text, date, timestamptz)`: Schritt 2 vor der Prüfung auf beendete Positionen; Rumpf-md5 `8b6496f3…` (0170) → `1a67b44d…` | **nur Staging**; bricht in der Vorbedingung ab, wo 0170 fehlt (Production), statt die Funktion anzulegen |
+
+Beide: Signatur, Rückgabe und Geschäftsregeln unverändert; `security definer`, `search_path = ''`;
+Rechte ausdrücklich (`revoke all … from public, anon`, `grant execute … to authenticated, service_role`)
+— genau der gemessene Staging-Stand, die ACL bleibt bytegleich; Vor- und Nachbedingungen im
+DO-Block. Rücknahmen `R0188`/`R0189` stellen den alten Rumpf wortgleich her (md5 geprüft).
+Laufpaket je Migration: `supabase/checks/018x_preflight.sql`, `supabase/operations/staging-018x.sql`,
+`supabase/checks/018x_postflight.sql`, Eintrag in `migration-plans.json`. Der Lauf prüft den
+Staging-Stempel (A1) und **den alten Rumpf** (A3, ein zweiter Lauf bricht ab), misst vorher und nachher
+Verkäufe, Positionen, Reservierungen, Lager, Bewegungen, Journal, Sammlung, die Rechte **jeder**
+Funktion (auch dieser), jeder Tabelle, jede Policy und jeden anderen Funktionsrumpf (Z1), pinnt
+neuen Rumpf und gerufene Helfer (Z2) und die Rechte (Z3).
+
+### 11.4 Nachweis nach der Korrektur
+
+- **Real-PG (`sale-race-0188-0189.test.ts`, 19 Tests, grün):**
+  - R1: die Buchung **wartet** auf das Löschen und findet danach keine Position — keine Bewegung,
+    Bestand unberührt.
+  - R2, R3, R4: Löschen bzw. Storno bricht **sofort** mit 55P03 ab, die Buchung läuft durch, **kein
+    Deadlock**, der Verkauf ist nicht storniert.
+  - R5, R6 unverändert sicher; R7: das Löschen wartet auf den Insert, sieht die neue Position, gibt
+    ihren Hold frei und löscht konsistent.
+  - Betreiber löscht und storniert weiter; Nicht-Betreiber wird abgewiesen; anon hat kein EXECUTE.
+  - 0189 bricht ohne 0170 ab und legt nichts an.
+  - **Die Laufdateien selbst** auf einer Staging-ähnlichen Datenbank (Stempel, Staging-Rechte): Lauf
+    geht durch, ACL bytegleich, zweiter Lauf bricht an A3, ohne Stempel an A1, Rücknahme stellt den
+    alten Rumpf her. Einzige Anpassung im Test: der Pin der Rollenprüfung (in der Testwelt ein Stub)
+    wird durch den md5 des Stubs ersetzt; alle anderen Pins bleiben.
+- **Gegenprobe durch Mutation** (Dateien vorübergehend geschwächt, danach bytegleich zurück,
+  Prüfsummen bestätigt): ohne `nowait` scheitern R2/R3/R4 (Warten bzw. Deadlock); ohne die
+  Verkaufssperre in 0188 scheitern R5/R7. Die Tests hängen also an genau diesen Sperren.
+- **Statisch:** `staging-0188-0189.test.ts` (18 Tests: Einbettung zeichengleich, eine Transaktion,
+  Pins, Rechte, Plan; nur diese eine Funktion je Datei; außerhalb des Sperrblocks wortgleich der alte
+  Körper).
+- **Regression:** `src/lib/orderbook`, `src/lib/admin`, `alerts-schema`, `purchase-receipt`,
+  `revoke-coverage`, `reconciliation-sql`, `ledger-proof-0179`, `staging-scenario` — grün nach zwei
+  begründeten Anpassungen:
+  - `external-hold-runtime.test.ts`: `seller_delete_sale` als benannter Nachfolger (0188), Kopf
+    bytegleich geprüft;
+  - `staging-access.test.ts`: der statische ACL-Bericht zählt 18 statt 19 schreibende Funktionen
+    „über PUBLIC“, weil 0188 die Rechte von `seller_delete_sale` jetzt ausdrücklich nennt (auf
+    Staging war sie laut Dump schon entzogen).
+- `tsc --noEmit` sauber, ESLint sauber, `validate-check-sql` (Plan, Rümpfe, P17) ohne Fehler,
+  `SHA256SUMS.txt` 596 Dateien stimmen.
+
+### 11.5 Staging und Production
+
+- **Staging:** 0188 und 0189 je mit eigener Freigabe über `npm run db:migrate:staging -- 0188` /
+  `-- 0189` (unabhängig voneinander; 0187 muss nicht vorher laufen).
+- **Production:** 0188 ist inhaltlich anwendbar, aber wie bei 0187 gibt es **kein Werkzeug** für einen
+  Lauf außerhalb der Nummernfolge — offener Punkt, eigene Freigabe. 0189 kommt erst mit 0170.
+  Bis dahin bleibt die Race R1 auf Production bestehen; **kein UI-Pfad** ruft `seller_delete_sale` auf.
+
+### 11.6 Offene Punkte
+
+- Ein Aufrufer, der Löschen oder Storno anbietet, muss 55P03 als „gerade in Bearbeitung, bitte
+  wiederholen“ zeigen (heute ruft keine Oberfläche die beiden Funktionen auf).
+- Die `APPLIED.md`-Zeile zu 0187 sagte, es fehle noch ein Laufpaket; das Staging-Laufpaket
+  existiert. Korrigiert beim M-05C-Abschluss; 0187 bleibt lokal vorbereitet und nirgends angewendet.
+
+### 11.7 Diagnose: verwaiste `sale_external`-Bewegungen (rein lesend)
+
+`supabase/checks/m05c_orphan_sale_external_readonly.sql` — eine einzige `select`-Anweisung, keine
+Reparatur. Sie steht **nicht** in `staging-suite.json`; sie läuft nur nach eigener Freigabe je
+Umgebung im SQL-Editor. Sie berücksichtigt jeden Fremdschlüssel auf `inventory_movements`
+(`sale_items`, `order_reservations`, `order_line_events`, `purchase_items`,
+`inventory_import_rows`) und den Vermerk, den `seller_book_sale_item` seit 0059 wortgleich schreibt.
+
+| Klasse | Bedeutung |
+|---|---|
+| A1 | Verkauf aus dem Vermerk fehlt, keine Rücknahme gleicht aus — **Race-Kandidat** |
+| A2 | Verkauf vorhanden, keine Position zeigt auf die Bewegung — einzeln ansehen |
+| B1 | Verkauf fehlt, eine verwaiste Ausbuch-Rücknahme auf demselben Posten gleicht aus — vermutlich in Ordnung |
+| B2 | ausgebucht und zurückgenommen — in Ordnung |
+| B3 | nur ein umgewandelter Hold zeigt darauf — Rücknahme nach Buchung mit Hold |
+| C | ohne Orderbuch-Vermerk (Handbuchung vor dem Orderbuch, Werkzeug, Fixture) — kein Race-Befund; auf Production seit 2026-09-19 61 bekannt |
+| Z | belegt (nur Übersicht) |
+
+**Falsch positiv / negativ (in der Datei benannt):** Der Ausgleich in B1 wird je Posten gezählt,
+nicht exakt zugeordnet (Rücknahme nennt die Position, Bewegung den Verkauf, beide gelöscht) — eine
+fremde Rücknahme kann einen echten Fall nach B1 verschieben. Ein von Hand gelöschter Verkauf mit
+Buchung landet ebenfalls in A1. Ein von Hand im Orderbuch-Wortlaut geschriebener Vermerk wird wie
+einer aus dem Orderbuch behandelt. Testverkäufe werden nicht ausgefiltert, sondern angezeigt. Die
+Notiz selbst wird nicht ausgegeben.
+
+**Lokal geprüft:** `src/lib/orderbook/orphan-sale-external-diagnosis.test.ts` (PGlite, `begin read
+only`; ein Fall je Klasse plus die beiden Grenzfälle Rücknahme vor der Bewegung und zwei Waisen mit
+einer Rücknahme; kein Notiztext in der Ausgabe; eine Anweisung ohne Schreibwort); geplant gegen das
+Stub-Schema in `validate-check-sql`.

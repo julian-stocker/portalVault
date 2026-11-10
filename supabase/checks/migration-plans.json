@@ -752,6 +752,42 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0188": {
+      "zweck": "seller_delete_sale gegen eine gleichzeitige Buchung absichern (M-05C): erst der Verkauf for update, dann jede Position for update nowait, dann der Rumpf aus 0110 wortgleich; Signatur, Rechte und Geschaeftsregeln bleiben; aendert keine Daten",
+      "preflight": "0188_preflight.sql",
+      "lauf": "staging-0188.sql",
+      "postflight": "0188_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_delete_sale(bigint) traegt den Rumpf aus 0188 (md5 2498b653971f54fe2b99cb76c9a98a34). Preflight-Zeile 103 meldet einen zweiten Lauf.",
+        "sql": "select coalesce((select md5(p.prosrc) = '2498b653971f54fe2b99cb76c9a98a34' from pg_proc p where p.oid = to_regprocedure('public.seller_delete_sale(bigint)')), false) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0189": {
+      "zweck": "seller_cancel_external_sale gegen eine gleichzeitige Buchung absichern (M-05C): nach dem Verkauf jede Position for update nowait, sonst der Rumpf aus 0170 wortgleich; Signatur, Rechte und Geschaeftsregeln bleiben; aendert keine Daten; NUR STAGING (Production hat 0170 nicht)",
+      "preflight": "0189_preflight.sql",
+      "lauf": "staging-0189.sql",
+      "postflight": "0189_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_cancel_external_sale(bigint,text,date,timestamptz) traegt den Rumpf aus 0189 (md5 1a67b44de9da7fa96349aa197a05c027). Preflight-Zeile 103 meldet einen zweiten Lauf.",
+        "sql": "select coalesce((select md5(p.prosrc) = '1a67b44de9da7fa96349aa197a05c027' from pg_proc p where p.oid = to_regprocedure('public.seller_cancel_external_sale(bigint,text,date,timestamptz)')), false) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

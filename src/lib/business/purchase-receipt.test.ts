@@ -438,10 +438,12 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * `0185`: an unmatched order assigned to an existing sale — one function, no receipt table.
      * `0186`: the order number despite rivals, each one excluded — one function, no receipt table.
      * `0187` (M-05B): the rights of admin_set_shop_policies only — no body, no receipt table.
+     * `0188` (M-05C): the lock order of seller_delete_sale — one body, no receipt table.
+     * `0189` (M-05C): the lock order of seller_cancel_external_sale — one body, no receipt table.
      */
-    expect(files[files.length - 1]).toBe("0187_revoke_shop_policies_public.sql");
-    expect(files[files.length - 2]).toBe("0186_recon_order_ref_with_exclusions.sql");
-    expect(files[files.length - 3]).toBe("0185_recon_assign_sale.sql");
+    expect(files[files.length - 1]).toBe("0189_external_cancel_lock_order.sql");
+    expect(files[files.length - 2]).toBe("0188_sale_delete_lock_order.sql");
+    expect(files[files.length - 3]).toBe("0187_revoke_shop_policies_public.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });

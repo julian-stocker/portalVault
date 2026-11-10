@@ -581,6 +581,13 @@ Vollständiger Bericht: `docs/stability/2026-11-10-m05-database-consistency-audi
   - **`revoke-coverage.test.ts`:** Die neun eingefrorenen Ausnahmen sind aufgelöst. Acht waren dank Rechte-Schleifen in 0062/0063 und 0094 nie offen, eine schließt 0187. Neu ist die Regel, dass jede neue `security definer`-Funktion ihre Rechte nennt.
   - **Production:** inhaltlich anwendbar, aber ohne Werkzeug für einen Lauf außerhalb der Nummernfolge. Das ist ein offener Punkt.
   - Einzelheiten: M-05-Bericht, Abschnitt 10.
+- **M-05C umgesetzt am 2026-11-10 (lokal, nicht committet, nirgends angewendet):**
+  - **Reproduziert auf echtem PostgreSQL** mit vier Verbindungen: Löschen ↔ Buchen ohne Hold (verwaiste Lagerbewegung), Storno ↔ Buchen ohne Hold (stornierter Verkauf mit gebuchter Position), Storno ↔ Buchen mit Hold (Deadlock 40P01).
+  - **`0188`** (`seller_delete_sale`, Staging und Production anwendbar) und **`0189`** (`seller_cancel_external_sale`, nur Staging): erst der Verkauf `for update`, dann jede Position `for update nowait` (55P03 statt Deadlock), dann der alte Körper wortgleich. Signatur, Rechte, Geschäftsregeln unverändert; kein Versionsparameter.
+  - **Nachweis:** 19 Real-PG-Tests grün, Gegenprobe durch Mutation (ohne `nowait` bzw. ohne Verkaufssperre werden die Tests rot), 18 statische Tests, Laufpakete mit Staging-Stempel und Pins, gezielte Regression, `tsc`, ESLint, `validate-check-sql`, Prüfsummen.
+  - **Production:** 0188 ohne Werkzeug für einen Lauf außerhalb der Nummernfolge (wie 0187), 0189 erst mit 0170.
+  - **Diagnose (rein lesend, nicht in der automatischen Suite):** `supabase/checks/m05c_orphan_sale_external_readonly.sql` klassiert jede nicht belegte `sale_external`-Bewegung (A1 Race-Kandidat … C Handbuchung); Lauf auf Staging/Production nur nach eigener Freigabe.
+  - Einzelheiten: M-05-Bericht, Abschnitt 11.
 
 ### 3.6 Händlername, Handelsname, rechtliche Identität (offene Entscheidung)
 

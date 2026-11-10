@@ -186,6 +186,8 @@ describe("die neun ersetzten Funktionen behalten ihren Vertrag", () => {
    */
   const SUCCESSOR: Record<string, string> = {
     seller_sale: "0113_sales_daily_index_and_repeat_buyers.sql",
+    // M-05C: sale row, then every position `for update nowait`, then the 0110 body word for word
+    seller_delete_sale: "0188_sale_delete_lock_order.sql",
   };
 
   /*
