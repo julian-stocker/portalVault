@@ -478,5 +478,6 @@ bricht weiter ab.
 | Unterschied | genau eine Zeile in R4: `seller_cancel_external_sale` erwartet md5 `1a67b44d…` statt `8b6496f3…` |
 
 **Folge:** Ein neuer Prüflauf auf Staging setzt `0189` voraus. Ohne `0189` bricht er in R4 ab,
-bevor irgendetwas geschieht. Lokal laufen die 32 Prüfungen des Prüflaufs gegen eine Welt mit
+bevor irgendetwas geschieht. **Seit 2026-11-10 erfüllt:** `0189` liegt auf Staging (siehe
+`APPLIED.md`); gefahren wird die Datei nur mit eigener Freigabe. Lokal laufen die 32 Prüfungen des Prüflaufs gegen eine Welt mit
 `0189` (`recon-probe-0180.test.ts`).
