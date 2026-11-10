@@ -336,6 +336,12 @@ describe("staging_pending_migrations.sql behauptet den Staging-Stand und prüft 
                  "seller_business_backup", "")), "0131"],
       [md5(rumpf("0136_business_backup_item_type.sql",
                  "seller_business_backup", "")), "0136"],
+      [md5(rumpf("0140_business_backup_sale_release.sql",
+                 "seller_business_backup", "")), "0140"],
+      [md5(rumpf("0174_backup_sales_reconciliation.sql",
+                 "seller_business_backup", "")), "0174"],
+      [md5(rumpf("0182_backup_sale_item_corrections.sql",
+                 "seller_business_backup", "")), "0182"],
     ];
     for (const [abdruck, fassung] of erwartet) {
       expect(W, `${fassung}: ${abdruck}`).toContain(`('${abdruck}', '${fassung}')`);

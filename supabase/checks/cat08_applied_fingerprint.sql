@@ -42,10 +42,27 @@ with pruef (nr, bereich, pruefung, befund, erwartet) as (values
                  'pg_proc') like '%0161%')::text, 'kein Kommentar')), 'true'),
 
   -- Die sechs, die unveraendert bleiben mussten (Anforderung 1).
-  (111, 'Unveraendert', 'admin_set_variant_base',
+  /*
+   * NACHGEZOGEN AUF 0168 am 2026-11-10 (M-05, F5) — belegt wie 117.
+   *
+   * `admin_set_variant_base` wird in dieser Reihenfolge definiert: `0159`,
+   * **`0168`** (`0168_variant_family_inheritance.sql`, auf Staging seit
+   * 2026-11-02). Aus den Migrationsdateien gerechnet:
+   *
+   *     0159  4928 Zeichen  ->  b47289cb9b630ba5d3b6b186955539f6
+   *     0168  3434 Zeichen  ->  62ecc99220dab9e1b80a5a2a11b9f6f9
+   *
+   * Der Suite-Lauf vom 2026-11-10 hat `62ecc992…` gemessen; eine lesende
+   * Katalogmessung am selben Tag dazu 3434 Zeichen und den Kommentar aus
+   * `0168` (md5 `1d311441…`, 526 Zeichen). Der alte Sollwert war der Rumpf aus
+   * `0159`; die Datenbank fuehrt den aus `0168`. Veraltet war die Erwartung.
+   * `src/lib/admin/check-fingerprints.test.ts` haelt jeden Sollwert dieser
+   * Datei gegen die LETZTE definierende Migration.
+   */
+  (111, 'Unveraendert', 'admin_set_variant_base (0168)',
       (select coalesce(md5(p.prosrc), '(fehlt)') from pg_proc p
         where p.oid = to_regprocedure('public.admin_set_variant_base(text,text,boolean)')),
-      'b47289cb9b630ba5d3b6b186955539f6'),
+      '62ecc99220dab9e1b80a5a2a11b9f6f9'),
   (112, 'Unveraendert', 'admin_publish_with_base',
       (select coalesce(md5(p.prosrc), '(fehlt)') from pg_proc p
         where p.oid = to_regprocedure('public.admin_publish_with_base(text,text,boolean)')),
@@ -101,11 +118,24 @@ with pruef (nr, bereich, pruefung, befund, erwartet) as (values
    * ein offener Widerspruch; er wird mit
    * `supabase/checks/prod_0159_0165_state.sql` geklaert, nicht hier
    * behauptet.
+   *
+   * NOCHMALS NACHGEZOGEN, AUF 0182, am 2026-11-10 (M-05, F5). Seit 2026-10-30
+   * kamen zwei weitere Definitionen dazu: `0174` (Abgleich in der Sicherung)
+   * und **`0182`** (Positionskorrekturen), beide auf Staging angewendet
+   * (`APPLIED.md`). Aus den Dateien:
+   *
+   *     0174  35 715 Zeichen  ->  23be72d581589b063d6938a863757b31
+   *     0182  36 366 Zeichen  ->  307e1c10a99afdaa683292e2a495e8ad
+   *
+   * Gemessen auf Staging: `307e1c10…`, 36 366 Zeichen, Kommentar aus `0182`
+   * (md5 `fa4cacbf…`, 1775 Zeichen). Weder `0164` noch `0174` wird hier
+   * angenommen: ein Rumpf aus einer frueheren Fassung waere eine stille
+   * Ruecknahme.
    */
-  (117, 'Unveraendert', 'system_platform_export (0164) — derselbe Abdruck wie nach 0164',
+  (117, 'Unveraendert', 'system_platform_export (0182) — derselbe Abdruck wie nach 0182',
       (select coalesce(md5(p.prosrc), '(fehlt)') from pg_proc p
         where p.oid = to_regprocedure('public.system_platform_export()')),
-      '7e9e58e2d84a9f8a7c660262aa21926b'),
+      '307e1c10a99afdaa683292e2a495e8ad'),
 
   -- Und der Bestand, als Auskunft fuer die Akte.
   (131, 'Bestand', 'Info: Entwuerfe',

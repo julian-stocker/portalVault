@@ -638,8 +638,11 @@ describe("0131_function_body_check.sql erwartet, was die Migration enthält", ()
     const felder = zeilen.filter((z) => /^ {10}'[a-z_0-9]+',/.test(z)).length;
     expect(bereiche).toBe(28);
     expect(felder).toBe(352);
-    /* 28 Bereiche sind in jedem Stand gleich und bleiben ein harter Sollwert. */
-    expect(pruefung).toContain("'28'");
+    /* 28 Bereiche bis `0140`; seit `0174`/`0182` wächst die Sicherung, die
+       Zahl gehört deshalb zum Stand (letzte Spalte) und 201 verlangt die des
+       ERKANNTEN Standes — ohne erkannten Stand schlägt 201 an. */
+    expect(pruefung).toContain("'STAND_0131_ZEICHENGLEICH', true, 28)");
+    expect(pruefung).toMatch(/\(201, 'Form', 'Bereiche im Rumpf passen zum erkannten Stand[\s\S]*?e\.bereiche = \(select bereiche from zahl\)[\s\S]*?from erkannt e\), 'ja'\)/);
     /* Die Feldzahl gehört zum Stand: 352 in `0131`, 353 ab `0136`. */
     expect(pruefung).toContain("674, 352, 'STAND_0131_ZEICHENGLEICH'");
   });

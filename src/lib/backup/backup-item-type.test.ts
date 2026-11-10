@@ -309,10 +309,10 @@ describe("R0135 verweigert, solange die Sicherung item_type liest", () => {
 describe("0131_function_body_check kennt 0131 UND 0136", () => {
   /** Die Zeilen der Standtabelle: md5, Länge, Kommentar-md5, Länge, Felder, Name. */
   const staende = [...PRUEFUNG.matchAll(
-    /\('([0-9a-f]{32})',\s*(\d+),\s*'([0-9a-f]{32})',\s*(\d+),\s*(\d+),\s*'([A-Z_0-9]+)',\s*(true|false)\)/g,
+    /\('([0-9a-f]{32})',\s*(\d+),\s*'([0-9a-f]{32})',\s*(\d+),\s*(\d+),\s*'([A-Z_0-9]+)',\s*(true|false),\s*(\d+)\)/g,
   )].map((m) => ({
     md5: m[1], laenge: Number(m[2]), kommMd5: m[3], kommLaenge: Number(m[4]),
-    felder: Number(m[5]), name: m[6], freigegeben: m[7] === "true",
+    felder: Number(m[5]), name: m[6], freigegeben: m[7] === "true", bereiche: Number(m[8]),
   }));
 
   it("vier Stände: 0130 bekannt aber überholt, 0131, 0136 und 0140 freigegeben", () => {
@@ -320,11 +320,14 @@ describe("0131_function_body_check kennt 0131 UND 0136", () => {
        `sale_released`, `delivery_scope` und `usk_rating`. Ohne diesen
        Eintrag meldete die Prüfdatei auf Staging „UNBEKANNT" für einen
        Rumpf, der genau so freigegeben wurde. */
-    expect(staende).toHaveLength(4);
+    expect(staende).toHaveLength(6);
+    /* `0182` kam am 2026-11-10 dazu (M-05, F5): auf Staging gemessen. `0174`
+       ist durch `0182` überholt — bekannt, nicht freigegeben, wie `0130`. */
     expect(staende.filter((s) => s.freigegeben).map((s) => s.name))
       .toEqual(["STAND_0131_ZEICHENGLEICH", "STAND_0136_ZEICHENGLEICH",
-                "STAND_0140_ZEICHENGLEICH"]);
+                "STAND_0140_ZEICHENGLEICH", "STAND_0182_ZEICHENGLEICH"]);
     expect(staende.find((s) => s.name === "STAND_0130")?.freigegeben).toBe(false);
+    expect(staende.find((s) => s.name === "STAND_0174")?.freigegeben).toBe(false);
   });
 
   it("und jede Zeile stimmt mit ihrer Migrationsdatei überein", () => {
@@ -336,6 +339,9 @@ describe("0131_function_body_check kennt 0131 UND 0136", () => {
         "supabase/migrations/0136_business_backup_item_type.sql",
       STAND_0140_ZEICHENGLEICH:
         "supabase/migrations/0140_business_backup_sale_release.sql",
+      STAND_0174: "supabase/migrations/0174_backup_sales_reconciliation.sql",
+      STAND_0182_ZEICHENGLEICH:
+        "supabase/migrations/0182_backup_sale_item_corrections.sql",
     };
     for (const s of staende) {
       const sql = datei(quelle[s.name]);
@@ -348,6 +354,9 @@ describe("0131_function_body_check kennt 0131 UND 0136", () => {
       const felder = r.split("\n")
         .filter((z) => /^ {10}'[a-z_0-9]+',/.test(z)).length;
       expect(felder, `${s.name} Feldzeilen`).toBe(s.felder);
+      const bereiche = r.split("\n")
+        .filter((z) => /^ {6}'[a-z_0-9]+', coalesce\(\($/.test(z)).length;
+      expect(bereiche, `${s.name} Bereiche`).toBe(s.bereiche);
     }
   });
 

@@ -66,6 +66,14 @@ bekannt (abdruck, fassung) as (values
   -- `0140_business_backup_sale_release.sql`. Das Verfahren ist an `0136`
   -- verifiziert, dessen Marke oben unabhaengig belegt ist.
   ('a32b148cebe00ee0d0d469f96fd2028e', '0140'),
+  -- Nachgezogen am 2026-11-10 (M-05, F5): `0174` und `0182` definieren die
+  -- Sicherung neu, beide auf Staging angewendet. Gerechnet wie oben aus
+  -- `0174_backup_sales_reconciliation.sql` und
+  -- `0182_backup_sale_item_corrections.sql`; der Staging-Rumpf ist der aus
+  -- `0182` (gemessen, siehe `0131_function_body_check.sql`). `0174` ist
+  -- bekannt, damit der Befund ihn benennt, aber in 233 nicht zugelassen.
+  ('3a798f506f5f43e5b1b69dc242a1b16f', '0174'),
+  ('b42609b64d8771f1792a09b344ba80de', '0182'),
   ('2ec43969fb6ea7adb0b1a4616e6889f4', '0133')
 ),
 stand as (
@@ -126,10 +134,10 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
          from information_schema.columns
         where table_schema = 'public' and table_name = 'skylanders'
           and column_name = 'item_type'), null),
-  (232, 'Z1', 'Info: Stand der Betriebssicherung (0131 vor 0136, 0136 danach)',
+  (232, 'Z1', 'Info: Stand der Betriebssicherung (0131 vor 0136, 0136 danach; seit 0182: 0182)',
       (select fassung from stand where funktion = 'seller_business_backup'), null),
   (233, 'Z1', 'der Stand der Betriebssicherung ist bekannt, nicht UNBEKANNT',
-      (select case when fassung in ('0131', '0136', '0140') then 'ja'
+      (select case when fassung in ('0131', '0136', '0140', '0182') then 'ja'
                    else 'nein: ' || fassung end
          from stand where funktion = 'seller_business_backup'), 'ja'),
 

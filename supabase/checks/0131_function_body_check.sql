@@ -29,6 +29,29 @@
 -- `0130` steht in der Tabelle, ist aber NICHT freigegeben: beide Umgebungen
 -- fuehren `0131`: ein Rumpf aus `0130` waere eine stille Ruecknahme.
 --
+-- NACHTRAG 2026-11-10 (M-05, F5): ZWEI WEITERE STAENDE, EINER FREIGEGEBEN.
+-- `0174` (Abgleich in der Sicherung) und `0182` (Positionskorrekturen)
+-- definieren `seller_business_backup()` neu; beide sind auf Staging
+-- angewendet (`APPLIED.md`). Der Suite-Lauf vom 2026-11-10 meldete deshalb
+-- „UNBEKANNT" und 36 statt 28 Bereiche. Eine lesende Katalogmessung am selben
+-- Tag ergab md5 `b42609b6…`, 27009 Zeichen, Kommentar `b8796209…` (1444
+-- Zeichen) — zeichengleich dem Rumpf und Kommentar aus `0182`.
+--
+--   0174   md5(prosrc) = 3a798f506f5f43e5b1b69dc242a1b16f   26388 Zeichen
+--          md5(Kommentar) = b423607fe32b1e295e5152383712aff6   (1109 Zeichen)
+--          35 Bereiche, 436 Feldzeilen — BEKANNT, NICHT freigegeben: auf
+--          Staging liegt `0182` darueber, ein Rumpf aus `0174` waere eine
+--          stille Ruecknahme (wie `0130`)
+--   0182   md5(prosrc) = b42609b64d8771f1792a09b344ba80de   27009 Zeichen
+--          md5(Kommentar) = b8796209fc8e6378181eae673b3d486e   (1444 Zeichen)
+--          36 Bereiche, 446 Feldzeilen — freigegeben
+--
+-- DIE BEREICHSZAHL GEHOERT SEITDEM ZUM STAND. Bis `0140` hatte jeder Stand 28
+-- Bereiche, und 201 hielt das als festen Sollwert. Seit `0174` waechst die
+-- Sicherung um Bereiche; 201 verlangt deshalb die Zahl des ERKANNTEN Standes
+-- (Spalte `bereiche`). Ohne erkannten Stand gibt es keine Zahl — 201 schlaegt
+-- dann an, zusaetzlich zu 101.
+--
 -- Alle Werte stammen aus den Migrationsdateien selbst, gerechnet ueber genau
 -- den Text zwischen den Dollarzeichen — das ist, was `prosrc` enthaelt.
 -- `src/lib/admin/migration-integrity.test.ts` rechnet sie bei jedem Testlauf
@@ -112,19 +135,27 @@ zahl as (
  * ueberholt.
  * ---------------------------------------------------------------------------
  */
-stand (md5, laenge, komm_md5, komm_laenge, felder, bezeichnung, freigegeben) as (values
+stand (md5, laenge, komm_md5, komm_laenge, felder, bezeichnung, freigegeben, bereiche) as (values
   ('24c3810288bb20929fe995554a267adf', 21458,
-   '6b980ac961d1d6ac704587ecc6e9524f',   674, 352, 'STAND_0131_ZEICHENGLEICH', true),
+   '6b980ac961d1d6ac704587ecc6e9524f',   674, 352, 'STAND_0131_ZEICHENGLEICH', true, 28),
   ('f6d08440707ba72a8040a8d1e666c092', 21494,
-   'c12618f312b413571eeabe912ca03651',   890, 353, 'STAND_0136_ZEICHENGLEICH', true),
+   'c12618f312b413571eeabe912ca03651',   890, 353, 'STAND_0136_ZEICHENGLEICH', true, 28),
   -- Seit dem 2026-10-20 auf Staging: `0140` nimmt `sale_released`,
   -- `delivery_scope` und `usk_rating` in die Sicherung auf (ADR-0129/0130).
   -- 353 Feldzeilen werden 356. Nachgerechnet aus der Migrationsdatei, wie
   -- die beiden darueber.
   ('a32b148cebe00ee0d0d469f96fd2028e', 21622,
-   'ffc66ad2060e89b7cf982c3f95012ffa',  1245, 356, 'STAND_0140_ZEICHENGLEICH', true),
+   'ffc66ad2060e89b7cf982c3f95012ffa',  1245, 356, 'STAND_0140_ZEICHENGLEICH', true, 28),
+  -- Seit dem 2026-11-09 auf Staging: `0182` (Positionskorrekturen). Nachgerechnet
+  -- aus der Migrationsdatei und auf Staging gemessen (siehe Kopf).
+  ('b42609b64d8771f1792a09b344ba80de', 27009,
+   'b8796209fc8e6378181eae673b3d486e',  1444, 446, 'STAND_0182_ZEICHENGLEICH', true, 36),
+  -- `0174` ist durch `0182` ueberholt: bekannt, damit der Befund ihn benennt,
+  -- aber NICHT freigegeben.
+  ('3a798f506f5f43e5b1b69dc242a1b16f', 26388,
+   'b423607fe32b1e295e5152383712aff6',  1109, 436, 'STAND_0174',               false, 35),
   ('a27b61db988df7627a4992b1770ac626', 20814,
-   '3c0054303767590cfc8b7e3d980ab9b1',   651, 339, 'STAND_0130',               false)
+   '3c0054303767590cfc8b7e3d980ab9b1',   651, 339, 'STAND_0130',               false, 28)
 ),
 erkannt as (
   select s.* from fn f join stand s on s.md5 = md5(f.prosrc)
@@ -156,18 +187,24 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
                        = coalesce((select length(obj_description(f.oid, 'pg_proc')) from fn f), -1)
                       then 'ja' else 'nein' end
           from erkannt e), 'ja'),
-  (105, 'Anker', 'und dieser Stand ist freigegeben (0131, 0136 oder 0140)',
+  (105, 'Anker', 'und dieser Stand ist freigegeben (0131, 0136, 0140 oder 0182)',
        (select case when e.freigegeben then 'ja' else 'nein: ' || e.bezeichnung end
           from erkannt e), 'ja'),
 
   -- --- Die Form, unabhaengig von md5 ------------------------------------
-  (201, 'Form', 'Bereiche im Rumpf',   ((select bereiche from zahl))::text, '28'),
+  (201, 'Form', 'Bereiche im Rumpf passen zum erkannten Stand (28 bis 0140, 36 ab 0182)',
+       (select case when e.bereiche = (select bereiche from zahl)
+                      then 'ja' else 'nein: ' || (select bereiche from zahl)::text
+                        || ' statt ' || e.bereiche::text end
+          from erkannt e), 'ja'),
+  (212, 'Form', 'Bereiche im Rumpf (Messung ohne Sollwert)',
+       ((select bereiche from zahl))::text, null),
   (202, 'Form', 'Feldzeilen im Rumpf passen zum erkannten Stand',
        (select case when e.felder = (select felder from zahl)
                       then 'ja' else 'nein: ' || (select felder from zahl)::text
                         || ' statt ' || e.felder::text end
           from erkannt e), 'ja'),
-  (211, 'Form', 'Feldzeilen im Rumpf (Messung ohne Sollwert; 352 in 0131, 353 ab 0136)',
+  (211, 'Form', 'Feldzeilen im Rumpf (Messung ohne Sollwert; 352 in 0131, 353 in 0136, 446 in 0182)',
        ((select felder from zahl))::text, null),
   (203, 'Form', 'Sprache ist sql (nicht plpgsql)',
        (select l.lanname from fn f join pg_language l on l.oid = f.prolang),
