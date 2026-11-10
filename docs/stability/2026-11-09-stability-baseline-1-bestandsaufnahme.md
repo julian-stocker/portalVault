@@ -554,6 +554,28 @@ Vollständiger Bericht: `docs/stability/2026-11-09-m04e-deployment-push-safety.m
   - Funktionen, die noch nicht ausgerollte Migrationen brauchen, serverseitig auf Staging begrenzen.
 - **Push: heute NO-GO**, bis die Dashboard-Punkte A.1–A.3 und B.5 der Checkliste bestätigt sind oder Previews für den Branch nachweislich aus sind.
 
+### 3.5d M-05 (2026-11-10): Datenbankkonsistenz und Berechtigungen (Audit)
+
+Vollständiger Bericht: `docs/stability/2026-11-10-m05-database-consistency-audit.md`.
+
+- **`seller_delete_sale`: Race bestätigt als konstruierbar, nicht beobachtet (P2).**
+  - Das Zählen gebuchter Positionen läuft ohne Sperre. Eine gleichzeitige Buchung **ohne Hold** hinterlässt eine `sale_external`-Bewegung ohne Verkauf, also einen dauerhaft fehlenden Bestand ohne Beleg.
+  - Mit Hold bricht das Löschen am Trigger `reservations_deny_delete` ab und bleibt konsistent.
+  - `seller_cancel_external_sale` hat eine verwandte Lücke: entweder ein stornierter Verkauf mit gebuchter Position, oder ein Deadlock.
+  - **Kein UI-Pfad** ruft eine der beiden Funktionen auf.
+- **`admin_set_shop_policies`: im Staging-Schema bestätigt (P1, nicht ausnutzbar).** Die Funktion ist für anon, authenticated, service_role und PUBLIC ausführbar, weil 0041 sie neu anlegt, ohne die Rechte zu setzen. Die erste Anweisung ist die Rollenprüfung. Es ist die einzige solche Lücke: Von den neun in `revoke-coverage.test.ts` eingefrorenen Fällen sind acht längst korrekt.
+- **Revalidierung: bestätigt (P2, keine Datenwirkung).** Keine der fünf Actions revalidiert die Seite ihres Formulars (`/business/offers`, `/business/shipping`, `/business/legal`). Zwei Formulare laden nicht selbst nach.
+- **Vorschlag und Reihenfolge:**
+  - **M-05A** Revalidierung mit `"/", "layout"`, ohne Migration.
+  - **M-05B** `0187`, Rechte bereinigen.
+  - **M-05C** Real-PG-Test zuerst rot, dann `0188` (Löschen, beide Umgebungen) und `0189` (Storno, nur Staging, weil 0170 auf Production fehlt).
+  - Angewendete Migrationen bleiben unverändert. Production nur einzeln, mit eigener Freigabe.
+- **M-05A umgesetzt am 2026-11-10 (nicht committet):**
+  - Die fünf Settings-Actions revalidieren jetzt gezielt die Seite ihres Formulars und die Seiten, die den Wert lesen (Preise, Kasse, Versand). Einen globalen Purge gibt es nicht, `/admin` bleibt in der Liste.
+  - `router.refresh()` ist nicht nötig, weil die Formularseiten in den Listen stehen.
+  - 36 neue Tests und 1 671 Tests in 51 betroffenen Dateien sind grün.
+  - Einzelheiten: M-05-Bericht, Abschnitt 9.
+
 ### 3.6 Händlername, Handelsname, rechtliche Identität (offene Entscheidung)
 
 | Feld | Inhalt auf Staging | wirkt auf |

@@ -42,9 +42,10 @@ describe("saving the trade name", () => {
     expect(form).toMatch(/if \(result\.ok\) \{\s*setSaved\(true\);[\s\S]*?router\.refresh\(\);/);
   });
 
-  it("Geschäftsdaten refresh their own page too (/business/legal since ADR-0077)", () => {
+  it("Geschäftsdaten refresh their own pages too (/business/legal and /business/shipping, M-05A)", () => {
     const actions = readFileSync("src/lib/admin/actions.ts", "utf8");
     const details = actions.slice(actions.indexOf("export async function setSellerDetails"));
-    expect(details.slice(0, details.indexOf("\n}\n"))).toContain('["/admin", "/business/legal"]');
+    expect(details.slice(0, details.indexOf("\n}\n"))).toContain('["/admin", ...SHOP_PROFILE_PAGES]');
+    expect(actions).toContain('const SHOP_PROFILE_PAGES: readonly RevalidationTarget[] = ["/business/legal", "/business/shipping"];');
   });
 });

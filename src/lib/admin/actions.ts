@@ -103,10 +103,48 @@ function protokolliere(fn: string, args: Record<string, unknown>, error: RpcFehl
   }));
 }
 
+/**
+ * What a write revalidates: a literal path, or a route pattern with its type
+ * (`["/(public)/skylanders/[slug]", "page"]`) for pages behind a dynamic
+ * segment — `revalidatePath` needs the type there (Next 16).
+ */
+type RevalidationTarget = string | readonly [path: string, type: "page" | "layout"];
+
+/*
+ * WHERE THE SHOP SETTINGS ARE SHOWN (M-05A, 2026-11-10). Until then the five
+ * settings actions revalidated `/admin` — where their forms lived before
+ * ADR-0077 — but not the `/business` page the form is on now, so the page
+ * one had just saved on kept showing the old values (the same defect as the
+ * seller name, 2026-11-09). Each action now revalidates the page(s) of its
+ * form and every page that reads the value, measured in `src/app`:
+ *
+ *   prices and offers (`shop_offers`, `fetchOffers`) — the catalog, shop,
+ *   accessories and figure pages, favourites, cart, checkout, and the two
+ *   business pages that show the price formula.
+ *
+ * Narrow on purpose rather than `revalidatePath("/", "layout")`: a settings
+ * save should not throw away every cached page of every visitor. `/admin`
+ * stays in the lists — nothing is removed that was revalidated before.
+ */
+const OFFER_PAGES: readonly RevalidationTarget[] = [
+  "/", "/shop", "/zubehoer", "/favoriten", "/cart", "/checkout",
+  ["/(public)/skylanders/[slug]", "page"], ["/(public)/zubehoer/[slug]", "page"],
+  "/business/offers", "/business/inventory",
+];
+/** The shop profile panel is rendered on both of these (`shop-profile-panel.tsx`). */
+const SHOP_PROFILE_PAGES: readonly RevalidationTarget[] = ["/business/legal", "/business/shipping"];
+
+function revalidate(targets: readonly RevalidationTarget[]): void {
+  for (const path of targets) {
+    if (typeof path === "string") revalidatePath(path);
+    else revalidatePath(path[0], path[1]);
+  }
+}
+
 async function call(
   fn: string,
   args: Record<string, unknown>,
-  paths: readonly string[],
+  paths: readonly RevalidationTarget[],
   capability: Capability,
   /**
    * Turns one specific database refusal into a sentence worth reading.
@@ -136,7 +174,7 @@ async function call(
                                     : de.admin.writeFailedCode(code) };
   }
 
-  for (const path of paths) revalidatePath(path);
+  revalidate(paths);
   return { ok: true };
 }
 
@@ -1241,7 +1279,8 @@ export async function setShopPercentage(percentage: number): Promise<AdminResult
   return call(
     "admin_set_shop_percentage",
     { p_percentage: percentage },
-    ["/admin", "/business/inventory", "/", "/cart"],
+    // The form is on /business/offers; the percentage changes every shop price.
+    ["/admin", ...OFFER_PAGES],
     "seller",
   );
 }
@@ -1323,8 +1362,9 @@ export async function setSellerDetails(fields: {
       p_vat_id: fields.vatId ?? null,
       p_w_id: fields.wId ?? null,
     },
-    // The form lives under Geschäftsdaten & Kontakt (`/business/legal`) since ADR-0077.
-    ["/admin", "/business/legal"],
+    // The form (the shop profile panel) is on /business/legal and
+    // /business/shipping since ADR-0077 (M-05A: the second page was missing).
+    ["/admin", ...SHOP_PROFILE_PAGES],
     "seller",
   );
 }
@@ -1378,8 +1418,9 @@ export async function setShopPolicies(fields: {
       p_dispatch_statement: fields.dispatchStatement ?? null,
       p_free_shipping_threshold: fields.freeShippingThreshold ?? null,
     },
-    // The threshold and the countries reach the checkout, so it re-reads too.
-    ["/admin", "/checkout", "/cart"],
+    // The form is on /business/legal and /business/shipping (M-05A). The
+    // threshold and the countries reach the checkout, so it re-reads too.
+    ["/admin", ...SHOP_PROFILE_PAGES, "/checkout", "/cart"],
     "seller",
   );
 }
@@ -1443,7 +1484,9 @@ export async function setShippingCountry(
       p_label: label.trim(),
       p_enabled: enabled,
     },
-    ["/admin", "/checkout"],
+    // The form is on /business/shipping and /business/legal (M-05A); the
+    // country list is read by the checkout and the shipping rates on /versand.
+    ["/admin", ...SHOP_PROFILE_PAGES, "/checkout", "/versand"],
     "seller",
   );
 }
@@ -1532,9 +1575,9 @@ export async function setCommerceMode(mode: string): Promise<AdminResult> {
   const { error } = await supabase.rpc("admin_set_commerce_mode", { p_mode: mode });
   if (error) return { ok: false, message: de.admin.commerce.modeFailed };
 
-  revalidatePath("/admin");
-  revalidatePath("/checkout");
-  revalidatePath("/cart");
+  // The form is on /business/offers (M-05A); the mode decides whether the
+  // checkout accepts orders (`checkoutAccess`, /checkout) and the cart's way there.
+  revalidate(["/admin", "/business/offers", "/checkout", "/cart"]);
   return { ok: true };
 }
 
