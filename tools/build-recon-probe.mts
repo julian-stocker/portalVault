@@ -102,7 +102,31 @@ export const USED: readonly { signature: string; file: string; header: string }[
   { signature: "orderbook_log(bigint,text,bigint,text,text,text,text)", file: "0062_orderbook_sale_maintenance.sql", header: "create or replace function public.orderbook_log(" },
   { signature: "orderbook_touch_sale(bigint)", file: "0062_orderbook_sale_maintenance.sql", header: "create or replace function public.orderbook_touch_sale(" },
   { signature: "seller_add_sale_refund(bigint,numeric,timestamptz,text,text,text)", file: "0062_orderbook_sale_maintenance.sql", header: "create or replace function public.seller_add_sale_refund(" },
-  { signature: "seller_cancel_external_sale(bigint,text,date,timestamptz)", file: "0170_external_sale_cancel.sql", header: "create or replace function public.seller_cancel_external_sale(" },
+  // 0170's body plus the lock block of 0189 (M-05C) — see SUCCESSORS
+  { signature: "seller_cancel_external_sale(bigint,text,date,timestamptz)", file: "0189_external_cancel_lock_order.sql", header: "create or replace function public.seller_cancel_external_sale(" },
+];
+
+/**
+ * KNOWN SUCCESSORS. A later migration that redefines a used function stops
+ * the build (`usedHashes`), because the probe would then pin a body Staging
+ * does not hold, or a body nobody checked. A redefinition passes ONLY when it
+ * is listed here: USED points at the successor, and both bodies are pinned —
+ * the predecessor the probe was accepted with, and the successor it pins
+ * now. Any other redefinition, or any further change to either file, still
+ * stops the build.
+ *
+ * `0189` (M-05C) puts a lock block before 0170's body of
+ * `seller_cancel_external_sale` and keeps the rest word for word (checked in
+ * `src/lib/orderbook/staging-0188-0189.test.ts`). The probe calls it once on
+ * a test sale of its own; the locks change nothing for a single session.
+ * Consequence: the probe pins 0189's body, so on a Staging without 0189 it
+ * stops at R4 before anything else — it never runs against an unchecked body.
+ * `0188` redefines `seller_delete_sale`, which the probe does not use.
+ */
+export const SUCCESSORS: readonly { signature: string; from: string; fromMd5: string; by: string; byMd5: string }[] = [
+  { signature: "seller_cancel_external_sale(bigint,text,date,timestamptz)",
+    from: "0170_external_sale_cancel.sql", fromMd5: "8b6496f3c20f8b706db7eb1df2d8c32b",
+    by: "0189_external_cancel_lock_order.sql", byMd5: "1a67b44de9da7fa96349aa197a05c027" },
 ];
 
 /** The six functions copied into pg_temp, by their header in 0180. */
@@ -183,6 +207,14 @@ export function postconditionHashes(): Map<string, string> {
 export function usedHashes(): [string, string][] {
   const post = postconditionHashes();
   const files = readdirSync(MIG).filter((f) => f.endsWith(".sql")).sort();
+  for (const k of SUCCESSORS) {
+    const u = USED.find((x) => x.signature === k.signature);
+    if (!u || u.file !== k.by) throw new Error(`${k.signature}: successor ${k.by} is listed, but USED does not point at it`);
+    const before = md5(definition(k.from, u.header).prosrc);
+    if (before !== k.fromMd5) throw new Error(`${k.signature}: body in ${k.from} is ${before}, not the known ${k.fromMd5}`);
+    const after = md5(definition(k.by, u.header).prosrc);
+    if (after !== k.byMd5) throw new Error(`${k.signature}: body in ${k.by} is ${after}, not the known ${k.byMd5}`);
+  }
   return USED.map((u) => {
     const hash = md5(definition(u.file, u.header).prosrc);
     if (post.has(u.signature) && post.get(u.signature) !== hash) {

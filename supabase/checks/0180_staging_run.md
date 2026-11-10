@@ -461,3 +461,22 @@ Ohne diese Meldung kann `--evidence-b` nicht belegt werden. **B wird dafür nich
 4. Abnahme von 0180 insgesamt. Erst danach `APPLIED.md` „abgenommen“, und `APPLY_RELEASED` nur mit
    eigener Entscheidung.
 5. Optional: md5 231–246 gegen 0179; Herkunft der zwei neuen Abgleichssitzungen.
+
+## Nachtrag 2026-11-10 — Prüfdatei für 0189 neu erzeugt (M-05C)
+
+`0189` definiert `seller_cancel_external_sale` neu (Sperrblock vor dem Rumpf aus `0170`, Rest
+wortgleich). Der Generator (`tools/build-recon-probe.mts`) bricht bei jeder späteren Neudefinition
+einer benutzten Funktion ab; diese eine ist dort jetzt **ausdrücklich** als bekannte Nachfolge
+eingetragen (`SUCCESSORS`: md5 vorher `8b6496f3…` aus 0170, nachher `1a67b44d…` aus 0189, beide
+festgehalten). Jede andere Neudefinition und jede weitere Änderung an einer der beiden Dateien
+bricht weiter ab.
+
+| | |
+|---|---|
+| Gefahrene Fassung (Prüflauf B, 2026-11-06) | SHA-256 `49bb803ca41f7d43f353969083d643494f4de008e46867a653d39cc72241899d`, Commit `bba36ca` |
+| Heutige Fassung | SHA-256 `e4bf3bdb8ca84174fbd4776beb54373272cba277cb427531844485771e5079f7` (1102 Zeilen) |
+| Unterschied | genau eine Zeile in R4: `seller_cancel_external_sale` erwartet md5 `1a67b44d…` statt `8b6496f3…` |
+
+**Folge:** Ein neuer Prüflauf auf Staging setzt `0189` voraus. Ohne `0189` bricht er in R4 ab,
+bevor irgendetwas geschieht. Lokal laufen die 32 Prüfungen des Prüflaufs gegen eine Welt mit
+`0189` (`recon-probe-0180.test.ts`).

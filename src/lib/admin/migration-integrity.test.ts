@@ -302,8 +302,9 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        und `0182` am 2026-11-09 als zweiundfünfzigste und dreiundfünfzigste (ADR-0179,
        ein gemeinsamer Lauf `staging-0181-0182.sql`), `0183` am selben Tag als
        vierundfünfzigste (ADR-0180), `0184` am selben Tag als fünfundfünfzigste (ADR-0181), `0185` als
-       sechsundfünfzigste (ADR-0182), `0186` am selben Tag als siebenundfünfzigste (ADR-0183). */
-    expect(zeilen.length).toBe(57);
+       sechsundfünfzigste (ADR-0182), `0186` am selben Tag als siebenundfünfzigste (ADR-0183), `0187` am 2026-11-10 als
+       achtundfünfzigste (M-05B). */
+    expect(zeilen.length).toBe(58);
     expect(zeilen.map((z) => z.datei)).toContain("0180_sales_recon_selected_apply.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0181_legacy_sale_item_corrections.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0182_backup_sale_item_corrections.sql");
@@ -311,6 +312,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     expect(zeilen.map((z) => z.datei)).toContain("0184_create_sale_hold_option.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0185_recon_assign_sale.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0186_recon_order_ref_with_exclusions.sql");
+    expect(zeilen.map((z) => z.datei)).toContain("0187_revoke_shop_policies_public.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0178_sales_recon_comparison_and_pending.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0179_sales_recon_ledger_proof.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0176_sales_recon_validate_before_dedup.sql");
@@ -421,7 +423,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        und siebenundvierzig seit `0176` am selben Tag, achtundvierzig seit
        `0178` am 2026-11-04, neunundvierzig seit `0179` am 2026-11-05, fünfzig
        seit `0180` am 2026-11-05/06, zweiundfünfzig seit `0181`/`0182` am 2026-11-09
-       (ein gemeinsamer Lauf), dreiundfünfzig seit `0183` und vierundfünfzig seit `0184` und fünfundfünfzig seit `0185` und sechsundfünfzig seit `0186` am selben Tag. Nur
+       (ein gemeinsamer Lauf), dreiundfünfzig seit `0183` und vierundfünfzig seit `0184` und fünfundfünfzig seit `0185` und sechsundfünfzig seit `0186` am selben Tag, siebenundfünfzig seit `0187` am 2026-11-10. Nur
        `0130` weicht ab und
        zeigt auf ihren Nachtrag.
 
@@ -436,7 +438,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        geändert (Regel 1), und `gleich` ist die Behauptung, dass sie es nicht
        wurde. Bei `0147` hat das Gewicht: die Fassung, die lief, ist die mit
        der benannten Triggererwartung — nicht die, die abgebrochen ist. */
-    expect(gleiche.length).toBe(56);
+    expect(gleiche.length).toBe(57);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }

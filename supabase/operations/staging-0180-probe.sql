@@ -111,7 +111,7 @@ begin
       ('orderbook_log(bigint,text,bigint,text,text,text,text)', 'a8a7e665d64e656e0ecc6515f55b3cb7'),
       ('orderbook_touch_sale(bigint)', 'cd7584eabbe65b43d834b2709d6ff792'),
       ('seller_add_sale_refund(bigint,numeric,timestamptz,text,text,text)', '91c2fab893113fc951e086ae0e631109'),
-      ('seller_cancel_external_sale(bigint,text,date,timestamptz)', '8b6496f3c20f8b706db7eb1df2d8c32b')
+      ('seller_cancel_external_sale(bigint,text,date,timestamptz)', '1a67b44de9da7fa96349aa197a05c027')
   loop
     select md5(p.prosrc) into v_body from pg_proc p where p.oid = to_regprocedure('public.' || v_fn);
     if v_body is distinct from v_expected then

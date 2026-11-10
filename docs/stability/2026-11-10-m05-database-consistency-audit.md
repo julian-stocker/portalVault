@@ -393,7 +393,7 @@ Nach jedem Lauf geprüft: keine Bewegung ohne Position · `quantity = Start − 
 
 | Datei | Inhalt | Umgebung |
 |---|---|---|
-| `0188_sale_delete_lock_order.sql` | `seller_delete_sale(bigint)`: Schritte 1–3; Rumpf-md5 `e64a0822…` (0110) → `2498b653…` | Staging (0186) **und** Production (0167) anwendbar; setzt nichts aus 0168–0187 voraus |
+| `0188_sale_delete_lock_order.sql` | `seller_delete_sale(bigint)`: Schritte 1–3; Rumpf-md5 `e64a0822…` (0110) → `2498b653…` | Staging (seit 2026-11-10 auf 0187) **und** Production (0167) anwendbar; setzt nichts aus 0168–0187 voraus |
 | `0189_external_cancel_lock_order.sql` | `seller_cancel_external_sale(bigint, text, date, timestamptz)`: Schritt 2 vor der Prüfung auf beendete Positionen; Rumpf-md5 `8b6496f3…` (0170) → `1a67b44d…` | **nur Staging**; bricht in der Vorbedingung ab, wo 0170 fehlt (Production), statt die Funktion anzulegen |
 
 Beide: Signatur, Rückgabe und Geschäftsregeln unverändert; `security definer`, `search_path = ''`;

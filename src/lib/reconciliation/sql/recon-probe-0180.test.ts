@@ -17,10 +17,11 @@
  *                   replacements, and the committed file is current
  */
 import type { PGlite } from "@electric-sql/pglite";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildPrecheck, buildProbe, COPIED, KNOWN_TRIGGERS, namingLine, PROBE_FILE, probeCopy, REPLACEMENTS, runFile, TEMP_FUNCTIONS, usedHashes,
+  buildPrecheck, buildProbe, COPIED, KNOWN_TRIGGERS, namingLine, PROBE_FILE, probeCopy, REPLACEMENTS, runFile, SUCCESSORS, TEMP_FUNCTIONS,
+  USED, usedHashes,
 } from "@/../tools/build-recon-probe.mts";
 import { OPERATOR, one, RECONCILIATION_MIGRATIONS, reconciliationWorld } from "./schema";
 import { analyseSpecs, applySession, decideOn, everything, findingOf, seedSales, type Spec } from "./session-fixture";
@@ -29,7 +30,9 @@ vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 const WITH_0180 = [...RECONCILIATION_MIGRATIONS, "0175_sales_recon_account_deletion.sql",
   "0176_sales_recon_validate_before_dedup.sql", "0178_sales_recon_comparison_and_pending.sql",
-  "0179_sales_recon_ledger_proof.sql", "0180_sales_recon_selected_apply.sql"] as const;
+  "0179_sales_recon_ledger_proof.sql", "0180_sales_recon_selected_apply.sql",
+  // M-05C: the probe pins this body of seller_cancel_external_sale (SUCCESSORS in the generator)
+  "0189_external_cancel_lock_order.sql"] as const;
 const PROBE = readFileSync(PROBE_FILE, "utf8");
 const CHECKS = 32;
 
@@ -393,6 +396,19 @@ describe("the generator: the copies are 0180, plus exactly the documented replac
     const changed = Object.values(REPLACEMENTS).flat().filter((r) => !r.why.startsWith("der Name") && r.why !== "ruft die Kopie");
     expect(changed.map((r) => r.from)).toEqual(["  if s.is_test then return 'test_sale'; end if;", "not s2.is_test", "not s2.is_test"]);
     expect(probeCopy("sales_recon_take_check").probe).toContain("then return 'not_probe'");
+  });
+
+  it("a later redefinition passes only as a listed successor: 0189, both bodies pinned, nothing else", () => {
+    expect(SUCCESSORS.map((k) => `${k.signature} ${k.from}->${k.by}`)).toEqual([
+      "seller_cancel_external_sale(bigint,text,date,timestamptz) 0170_external_sale_cancel.sql->0189_external_cancel_lock_order.sql"]);
+    expect(SUCCESSORS[0]).toMatchObject({ fromMd5: "8b6496f3c20f8b706db7eb1df2d8c32b", byMd5: "1a67b44de9da7fa96349aa197a05c027" });
+    // Independent of the generator: every used function sits in its LATEST defining migration.
+    const files = readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql")).sort();
+    for (const u of USED) {
+      const name = u.signature.slice(0, u.signature.indexOf("("));
+      const defining = files.filter((f) => readFileSync(`supabase/migrations/${f}`, "utf8").includes(`create or replace function public.${name}(`));
+      expect(defining.at(-1), u.signature).toBe(u.file);
+    }
   });
 
   it("every body the probe checks is the one PostgreSQL holds after the migrations", async () => {
