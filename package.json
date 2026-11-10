@@ -64,6 +64,7 @@
     "ui-fixtures:ship-day:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/ui-fixtures-ship-day.mts",
     "verify:settled:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-settled.mts",
     "verify:sale-locks:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sale-locks.mts",
+    "verify:sale-refusals:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sale-refusals.mts",
     "cards:build": "node tools/build-card-templates.mts",
     "designs:build": "node tools/build-design-icons.mts",
     "verify:payment-mode:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-payment-mode.mts",
