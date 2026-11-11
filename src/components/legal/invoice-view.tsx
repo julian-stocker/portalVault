@@ -20,19 +20,42 @@ const money = (value: string) => formatPrice(Number(value));
 export function InvoiceView({
   invoice,
   token,
+  specimen,
 }: {
   invoice: InvoiceDocument;
   token: string | null;
+  /**
+   * The management page's sample invoice (ADR-0184, AP6): the same layout,
+   * embedded in that page instead of being one, with its label on top and
+   * its own PDF address. Absent for every real invoice, which renders as
+   * before.
+   */
+  specimen?: { label: string; pdfHref: string };
 }) {
   const copy = de.invoice;
   const { seller, customer } = invoice;
-  const pdfHref = `/rechnung/${invoice.order_number}/pdf${token ? `?t=${encodeURIComponent(token)}` : ""}`;
+  const pdfHref = specimen
+    ? specimen.pdfHref
+    : `/rechnung/${invoice.order_number}/pdf${token ? `?t=${encodeURIComponent(token)}` : ""}`;
+  /* Embedded, the page around it owns <main> and <h1>. */
+  const Frame = specimen ? "div" : "main";
+  const Title = specimen ? "h3" : "h1";
+  /* One level below the title in either mode: h2 under h1, h4 under h3. */
+  const Part = specimen ? "h4" : "h2";
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 pt-8 pb-16 md:pt-12">
+    <Frame className={specimen ? "w-full" : "mx-auto w-full max-w-2xl px-4 pt-8 pb-16 md:pt-12"}>
+      {specimen ? (
+        <p
+          role="note"
+          className="mb-6 rounded-sky-md bg-danger/10 px-3 py-2 text-center text-sm font-semibold tracking-wide text-danger ring-1 ring-danger/40"
+        >
+          {specimen.label}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{copy.title}</h1>
+          <Title className="text-2xl font-semibold tracking-tight md:text-3xl">{copy.title}</Title>
           <p className="mt-2 text-sm text-muted tabular-nums">{invoice.invoice_number}</p>
         </div>
         {/* A real download, not a print dialogue. */}
@@ -55,9 +78,9 @@ export function InvoiceView({
 
       <div className="mt-8 grid gap-8 sm:grid-cols-2">
         <section aria-labelledby="inv-seller">
-          <h2 id="inv-seller" className="text-sm font-semibold">
+          <Part id="inv-seller" className="text-sm font-semibold">
             {copy.seller}
-          </h2>
+          </Part>
           <address className="mt-2 text-sm not-italic leading-relaxed">
             {seller.legal_name}
             {seller.trade_name ? (
@@ -84,9 +107,9 @@ export function InvoiceView({
         </section>
 
         <section aria-labelledby="inv-customer">
-          <h2 id="inv-customer" className="text-sm font-semibold">
+          <Part id="inv-customer" className="text-sm font-semibold">
             {copy.customer}
-          </h2>
+          </Part>
           <address className="mt-2 text-sm not-italic leading-relaxed">
             {customer.name}
             {customer.company ? (
@@ -178,7 +201,7 @@ export function InvoiceView({
       {/* § 34a UStDV Nr. 5 — the note belongs with the sum. */}
       <p className="mt-6 text-sm">{SMALL_BUSINESS_NOTE}</p>
       <p className="mt-2 text-sm text-muted">{copy.paid}</p>
-    </main>
+    </Frame>
   );
 }
 

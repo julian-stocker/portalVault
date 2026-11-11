@@ -1000,6 +1000,52 @@ export const de = {
           "Wer rechtlich verkauft: auf Rechnungen und künftig in Impressum und AGB. Der Shopname " +
           "ersetzt diese Angaben nie.",
       },
+      /* AP6/AP7: Musterdokumente und die Stripe-Übersicht. */
+      invoices: {
+        heading: "Rechnungen",
+        hint:
+          "So sieht die nächste Rechnung mit den aktuellen Verkäuferdaten aus. Käufer, Bestellung " +
+          "und Positionen sind Beispieldaten; es wird keine Rechnung ausgestellt und keine Nummer " +
+          "vergeben.",
+        pdf: "Muster als PDF öffnen",
+      },
+      mails: {
+        heading: "Kunden-E-Mails",
+        hint:
+          "Der Inhalt der Mails, die Kundinnen und Kunden bei einer Bestellung erhalten — mit dem " +
+          "aktuellen Shopnamen und Beispieldaten. Es wird nichts versendet.",
+        received: "Eingangsbestätigung",
+        receivedWhen: "Sofort nach der Bestellung, vor der Zahlung (§ 312i BGB). Keine Annahme.",
+        confirmation: "Bestell- und Zahlungsbestätigung",
+        confirmationWhen:
+          "Nach erfolgreicher Zahlung. Sie ist die Annahme der Bestellung; eine eigene, " +
+          "reine Zahlungsbestätigung wird nicht versandt — die Mailart „Zahlungsbestätigung“ " +
+          "erzeugt genau diese Mail.",
+        subject: "Betreff",
+        from: "Absender",
+        fromUnknown:
+          "Festgelegt im Secret MAIL_FROM der Function send-order-mail — hier nicht lesbar. Ist " +
+          "das Secret nicht gesetzt, verwendet die Function:",
+        replyTo: "Antwortadresse",
+        replyToNone: "Keine — Antworten gehen ins Leere, solange keine Kontakt-E-Mail hinterlegt ist.",
+        to: "Empfänger",
+        links: "Links in der Vorschau zeigen auf diese Umgebung; im Versand setzt SITE_URL der Function den Ursprung.",
+        plainText: "Textfassung anzeigen",
+        frameTitle: (name: string) => `Vorschau: ${name}`,
+      },
+      stripe: {
+        heading: "Stripe & Zahlungsdarstellung",
+        hint:
+          "Was SkyIsles an Stripe übergibt, was nur im Stripe-Dashboard eingestellt wird und was " +
+          "Stripe oder die Bank bestimmen. SkyIsles liest keine Stripe-Kontodaten; Werte aus dem " +
+          "Dashboard sind hier deshalb unbekannt.",
+        sent: "Von SkyIsles übermittelt",
+        notSent: "Bewusst nicht übermittelt",
+        dashboard: "Nur im Stripe-Dashboard einstellbar — Wert hier unbekannt",
+        bank: "Bestimmen Stripe oder die Bank",
+        unknown: "unbekannt",
+        dashboardLink: "Stripe-Dashboard öffnen",
+      },
       usage: {
         heading: "Wo erscheint welcher Name?",
         hint:

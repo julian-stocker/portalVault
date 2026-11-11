@@ -92,6 +92,8 @@ ist keine aktive Identität mehr.
 |---|---|
 | Identitätsmodell: Plattform, Shop und rechtlicher Betreiber getrennt; Pflichtfelder; Widersprüche (auch zu den festen Werten der Rechtstexte); „Wo erscheint welcher Name?“ | `src/lib/identity/` |
 | **„Identität & Dokumente“** unter `/business/profile`: Hinweise, Plattform, Shopidentität, rechtlicher Betreiber, Verwendungsübersicht. `/business/legal` leitet auf `#betreiber` weiter. Die Kontakt-E-Mail ist nur im Shopformular bearbeitbar | `business/profile/page.tsx`, `identity-overview.tsx` |
+| **AP6: Musterrechnung und Mailvorschau.** Die echte `InvoiceView` und `renderInvoicePdf` (mit optionaler Muster-Kennzeichnung) zeigen die aktuellen Verkäuferdaten, wie `issue_invoice()` sie kopiert, und Beispieldaten für den Käufer. Es wird keine Rechnungsnummer vergeben und nichts gespeichert. Das PDF kommt über die eigens geschützte Route `/business/profile/rechnung-muster`. Die Eingangsbestätigung und die Bestell- und Zahlungsbestätigung entstehen über `render()` aus `templates.ts` und werden in einem abgeschotteten Rahmen gezeigt; versendet wird nichts. Der Absender (`MAIL_FROM`) steht als nicht lesbar da | `specimen.ts`, `document-previews.tsx`, `rechnung-muster/route.ts` |
+| **AP7: Stripe-Übersicht.** Was übermittelt wird und was bewusst nicht (geprüft gegen `buildSessionForm()`), was nur im Dashboard einstellbar ist (dort als „unbekannt“) und was Stripe oder die Bank bestimmen. Kein Stripe-Aufruf | `stripe-facts.ts` |
 | `sellers.trading_name` heißt jetzt „Frühere Geschäftsbezeichnung“: Das Feld wird nirgends angezeigt, und ein abweichender Wert erscheint als Widerspruch. Gespeicherte Werte werden nicht automatisch geändert | `shop-profile-panel.tsx`, `de.ts` |
 
 **Unverändert:** Rechtstexte (lesen bis AP5 weiter `SELLER_IDENTITY` und nennen yulez.collectibles),
@@ -109,8 +111,7 @@ Rechnungen, Mails, Stripe, Verkäuferdaten, Migrationen.
 - Der Betreiber leert `trading_name` auf Staging; dort steht laut Seed noch „yulez.collectibles“.
 - AP4: Migration `seller_legal_public()` und neue Versionen der Rechtstexte (eigene Freigabe).
 - AP5: Rechtstexte auf das Identitätsmodell umstellen.
-- AP6: Rechnungs- und Mailvorschau.
-- AP7: Stripe-Übersicht.
+- AP6/AP7 gebaut (2026-11-11), nicht committet; Browserprüfung steht aus.
 - Zu entscheiden:
   - die Vertragspartner-Zeile;
   - der Absendername in `MAIL_FROM`;

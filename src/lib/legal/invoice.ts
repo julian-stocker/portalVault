@@ -110,14 +110,26 @@ const EUR = (value: string) => `${Number(value).toFixed(2).replace(".", ",")} EU
  * Deliberately plain: a sender block, the parties, a table, a total, and the
  * § 19 sentence. An invoice is read once and filed; it does not need a design.
  */
-export function renderInvoicePdf(invoice: InvoiceDocument): Uint8Array {
+export function renderInvoicePdf(
+  invoice: InvoiceDocument,
+  /**
+   * `specimen` — the management page's sample invoice (ADR-0184, AP6). The
+   * label is printed in bold above everything else, carried in the footer of
+   * every page and in the document title. Without it — every real invoice —
+   * not one byte of the output changes (`invoice-specimen.test.ts`).
+   */
+  options: { specimen?: string } = {},
+): Uint8Array {
   const page = new PdfPage();
   const { seller, customer } = invoice;
+  const { specimen } = options;
+
+  if (specimen !== undefined) page.text(specimen, { size: 13, font: "bold" });
 
   // Sender line above the address block, as on a letter.
   page.text(
     `${seller.legal_name} · ${seller.street} · ${seller.postal_code} ${seller.city}`,
-    { size: 7.5 },
+    { size: 7.5, ...(specimen !== undefined ? { dy: 22 } : {}) },
   );
 
   page.text(customer.name, { size: 10, dy: 28 });
@@ -237,7 +249,9 @@ export function renderInvoicePdf(invoice: InvoiceDocument): Uint8Array {
   page.text(seller.email, { size: 8.5, dy: 11 });
   if (seller.vat_id) page.text(`USt-IdNr. ${seller.vat_id}`, { size: 8.5, dy: 11 });
 
-  return page.render(`Rechnung ${invoice.invoice_number}`);
+  return specimen === undefined
+    ? page.render(`Rechnung ${invoice.invoice_number}`)
+    : page.render(`${specimen} · Rechnung ${invoice.invoice_number}`, specimen);
 }
 
 function germanDate(value: string): string {

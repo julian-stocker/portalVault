@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { SellerSettings } from "@/components/admin/seller-settings";
 import { ShopProfilePanel } from "@/components/admin/shop-profile-panel";
+import { InvoicePreview, MailPreviews, StripeOverview } from "@/components/business/document-previews";
 import { IdentityFindings, NameUsage, PlatformIdentity } from "@/components/business/identity-overview";
 import { canOperateSeller, capabilities } from "@/lib/auth/capabilities";
 import { identityFindings, nameUsage } from "@/lib/identity/model";
@@ -25,6 +27,10 @@ export const metadata: Metadata = { title: de.business.identity.title };
  *                            `setShopPolicies`) — the contact e-mail is shown
  *                            there, not edited a second time
  *   4 Wo erscheint welcher Name?
+ *   5 Rechnungen        sample invoice, real `InvoiceView`, PDF via the
+ *                       seller-gated `rechnung-muster` route (AP6)
+ *   6 Kunden-E-Mails    the real templates with sample data, nothing sent (AP6)
+ *   7 Stripe            what is sent, what lives in the dashboard (AP7)
  *
  * THE GATE FIRST. The layout's `notFound()` does not stop a page that renders
  * in parallel from reading, so this page asks the same request-cached
@@ -52,6 +58,11 @@ export default async function BusinessIdentityPage() {
 
   const { identity, settings } = load;
   const findings = identityFindings(identity, SELLER_IDENTITY);
+  /* The sample mails link to this environment; a real mail uses SITE_URL. */
+  const requestHeaders = await headers();
+  const host = requestHeaders.get("host") ?? "localhost";
+  const origin = `${requestHeaders.get("x-forwarded-proto") ?? "http"}://${host}`;
+  const now = new Date();
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-8 pb-10 md:pt-12">
@@ -89,6 +100,10 @@ export default async function BusinessIdentityPage() {
       </div>
 
       <NameUsage rows={nameUsage(identity, SELLER_IDENTITY)} />
+
+      <InvoicePreview identity={identity} now={now} />
+      <MailPreviews identity={identity} now={now} origin={origin} />
+      <StripeOverview />
     </main>
   );
 }
