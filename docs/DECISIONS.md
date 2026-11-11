@@ -17138,6 +17138,45 @@ vom 2026-11-09 (M-08) hält den Widerspruch fest: Shop, Mails und neue Rechnunge
 - Mehrere Verkäufer bleiben möglich: alles liest vom aktiven Verkäufer, Dokumente kopieren dessen
   Angaben; kein `seller_id` (ADR-0021).
 
+### AP4 — die öffentliche Lesefunktion (2026-11-11; auf Staging angewendet und nachgeprüft am selben Tag, Production nicht)
+
+Migration `0190_seller_legal_public.sql` legt `seller_legal_public()` an: `stable`, `security definer`,
+`search_path = ''`, EXECUTE für `anon` und `authenticated`, entzogen für PUBLIC und `service_role`
+(Supabases Standardrecht auf neue Funktionen wird ausdrücklich zurückgenommen). Sie liefert die
+**aktive** Verkäuferzeile als ausdrückliche Spaltenliste — leere Werte als NULL, ohne aktiven
+Verkäufer keine Zeile:
+
+| geliefert | ausdrücklich nicht geliefert |
+|---|---|
+| `display_name`, `legal_name`, `legal_form`, `street`, `postal_code`, `city`, `country_code`, `contact_email`, `direct_contact`, `vat_id`, `w_id`, `register_court`, `register_number`, `small_business_19`, `dispute_participation`, `dispute_body`, `withdrawal_contact_email`/`complaints_contact_email` (aufgelöst auf `contact_email`), `return_postage_borne_by` | `transactional_reply_to`, `phone` (Veröffentlichung nicht entschieden), `trading_name` (abgelöst), `dispatch_statement`, `free_shipping_threshold`, `id`, `is_active`, Zeitstempel, `updated_by` |
+
+Keine Tabelle, keine Zeile, kein bestehendes Recht, kein bestehender Rumpf; Steuermodell, Rechnungen,
+Bestellungen und Snapshots unverändert. Laufpaket: `supabase/checks/0190_preflight.sql`,
+`supabase/operations/staging-0190.sql`, `supabase/checks/0190_postflight.sql`, Plan in
+`migration-plans.json`; Rücknahme `supabase/rollback/R0190_seller_legal_public.sql`.
+
+**Die Versionen der Rechtstexte steigen NICHT in 0190.** Ein Eintrag in `legal_document_versions`
+ohne den zugehörigen Text hieße, dass neue Bestellungen eine Version tragen, deren Text es nicht gibt.
+
+### Was AP5 voraussetzt
+
+1. `0190` auf Staging angewendet und nachkontrolliert (`db:migrate:staging -- 0190`, `--resume`,
+   berechtigter Postflight) — **erfüllt am 2026-11-11**; für Production eigene Freigabe.
+2. Die Daten stehen: `display_name` = „skyisles.shop“ in jeder Umgebung, `trading_name` geleert,
+   alle Pflichtangaben gefüllt (die Hinweise auf „Identität & Dokumente“ sind leer).
+3. Entschieden: die Vertragspartner-Zeile (Vorschlag „{legal_name}, handelnd unter {display_name}“),
+   ob `phone` veröffentlicht wird, und die rechtliche Prüfung von „skyisles.shop“ als
+   Geschäftsbezeichnung.
+4. **Eine eigene Migration mit den neuen Versionen** in `legal_document_versions` für `impressum`,
+   `agb`, `widerruf`, `datenschutz` (Datum der Veröffentlichung) — im selben Commit wie
+   `LEGAL_VERSIONS` in `src/lib/legal/documents.ts` und die neuen Texte, angewendet unmittelbar
+   vor dem Deployment von AP5. Bestehende Bestellungen behalten ihre Version.
+5. Code: `src/lib/identity/` liest `seller_legal_public()` für die öffentlichen Seiten (ohne
+   Anmeldung, pro Anfrage zwischengespeichert); Footer, Impressum, AGB, Widerruf, Datenschutz und
+   Serviceseiten lesen daraus; `SELLER_IDENTITY` und `SELLER_ADDRESS_LINES` entfallen; fehlt eine
+   Pflichtangabe oder der aktive Verkäufer, zeigt die Seite einen Fehlerzustand statt erfundener
+   Angaben; ein Wächtertest verbietet „yulez“ in ausgelieferten Texten.
+
 ---
 
 ## ADR-0183 · Bestellzuordnung und finanzieller Abgleich getrennt — Zuordnung trotz Konkurrenz nur mit Einzelausschluss

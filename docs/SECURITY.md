@@ -110,6 +110,11 @@ sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
    entzogen, weil sie `select s.*` macht; `admin_seller()` bleibt auf `is_shop_admin()`
    gegattert. Geprüft von `npm run verify:seller:staging` und von
    `src/lib/shop/seller-schema.test.ts`.
+7. **Die Anbieterkennzeichnung wird öffentlich lesbar — sobald `0190` angewendet ist (ADR-0184;
+   auf Staging seit 2026-11-11, Production nicht).** `seller_legal_public()` (anon, authenticated; nicht PUBLIC, nicht
+   service_role) liefert nur, was im Impressum ohnehin steht oder stehen muss, als ausdrückliche
+   Spaltenliste. Reply-To, Telefon, `trading_name` und die Verwaltungsspalten bleiben gesperrt;
+   `sellers` selbst bleibt für anon unlesbar.
 
 **Stand.** Umgesetzt sind Shop-Tabellen und Rolle (`0003`), die Lager-Lesefunktionen (`0005`),
 das öffentliche Angebot (`0006`) und der Legacy-Bestandsimport als Werkzeug. Bestellungen,

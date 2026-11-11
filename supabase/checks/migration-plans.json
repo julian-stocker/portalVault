@@ -788,6 +788,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0190": {
+      "zweck": "Die oeffentliche Anbieterkennzeichnung lesbar machen (ADR-0184, AP4): neue, nur lesende Funktion seller_legal_public() mit ausdruecklicher Spaltenliste, EXECUTE fuer anon und authenticated; aendert keine Daten, kein bestehendes Recht, keinen bestehenden Rumpf",
+      "preflight": "0190_preflight.sql",
+      "lauf": "staging-0190.sql",
+      "postflight": "0190_postflight.sql",
+      "angewendet": {
+        "beschreibung": "public.seller_legal_public() steht und anon darf sie ausfuehren. Preflight-Zeile 102 meldet einen zweiten Lauf.",
+        "sql": "select (to_regprocedure('public.seller_legal_public()') is not null and coalesce(has_function_privilege('anon', to_regprocedure('public.seller_legal_public()'), 'execute'), false)) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

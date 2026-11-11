@@ -109,7 +109,7 @@ Rechnungen, Mails, Stripe, Verkäuferdaten, Migrationen.
   - die Weiterleitung von `/business/legal`;
   - keine Konsolenfehler.
 - Der Betreiber leert `trading_name` auf Staging; dort steht laut Seed noch „yulez.collectibles“.
-- AP4: Migration `seller_legal_public()` und neue Versionen der Rechtstexte (eigene Freigabe).
+- AP4: Migration `0190_seller_legal_public.sql` **auf Staging angewendet und nachgeprüft (2026-11-11)**: Runner-Nachkontrolle 9999 = 0, berechtigter Postflight 9998 = 0 und 9999 = 0, Baselines unverändert (Nachweis und Grenzen der Belegkette in `supabase/migrations/APPLIED.md`). **Production: nicht angewendet**, eigene Freigabe. Maskierte Prüfung der Verkäuferangaben vor dem Lauf und `db:privileges:staging` (Abdruck `13f9f823…` unverändert) bestanden. Vor AP5 offen auf Staging: `trading_name` nennt noch yulez, `direct_contact` ist leer. Die neuen Versionen der Rechtstexte kommen erst mit AP5 (ADR-0184, „Was AP5 voraussetzt“).
 - AP5: Rechtstexte auf das Identitätsmodell umstellen.
 - AP6/AP7 gebaut (2026-11-11), nicht committet; Browserprüfung steht aus.
 - Zu entscheiden:
