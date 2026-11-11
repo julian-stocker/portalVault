@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { InventoryView } from "@/components/admin/inventory-view";
 import { fetchInventory, fetchShopSettings, fetchTradeTotals } from "@/lib/admin/inventory";
@@ -32,6 +33,16 @@ export const metadata: Metadata = { title: `${de.inventory.title} · ${de.admin.
  * verglichen.
  */
 export default async function InventoryPage() {
+  /*
+   * THE GATE, ALSO HERE (2026-11-11). Next renders layout and page in
+   * parallel, so the layout's `notFound()` does not stop this page from
+   * starting its reads. For an anonymous request that meant calling
+   * `admin_shop_settings()` as `anon`, which has no EXECUTE on it (0007) —
+   * the answer was still a 404, but the server logged "permission denied".
+   * Asking the same, request-cached question first ends it before any read.
+   */
+  if (!(await canOperateSeller())) notFound();
+
   /*
    * FOUR QUERIES FOR THE WHOLE PAGE, AND NONE PER POSITION.
    *
@@ -89,10 +100,11 @@ export default async function InventoryPage() {
    * CSV: der Verkaufsabgleich des Orderbuchs (ADR-0174/0178). Er ändert
    * keinen Bestand. Gezeigt nur unter GENAU den Bedingungen, unter denen
    * seine Route antwortet — dieselbe Umgebungsprüfung und dieselbe
-   * Betreiberprüfung, die `queries.ts` vor jedem Lesen stellt. Auf
-   * Production fehlt der Einstieg also, wie auf der Verkaufsliste.
+   * Betreiberprüfung, die `queries.ts` vor jedem Lesen stellt — die zweite
+   * ist oben bereits beantwortet, sonst stünde hier nichts. Auf Production
+   * fehlt der Einstieg also, wie auf der Verkaufsliste.
    */
-  const csvReconciliation = reconciliationEnvironment() && (await canOperateSeller());
+  const csvReconciliation = reconciliationEnvironment();
   const links = de.inventory.reconcile;
 
   return (

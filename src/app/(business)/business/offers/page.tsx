@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { CommercePanel } from "@/components/admin/commerce-panel";
 import { ShopSettings } from "@/components/admin/shop-settings";
 import { fetchCommerceState } from "@/lib/admin/commerce";
 import { fetchShopSettings } from "@/lib/admin/inventory";
+import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = { title: de.business.offersHeading };
@@ -22,6 +24,16 @@ export const metadata: Metadata = { title: de.business.offersHeading };
  * redesign set out to remove.
  */
 export default async function BusinessOffersPage() {
+  /*
+   * THE GATE, ALSO HERE (2026-11-11). Next renders layout and page in
+   * parallel, so the layout's `notFound()` does not stop this page from
+   * starting its reads. For an anonymous request that meant calling
+   * `admin_shop_settings()` as `anon`, which has no EXECUTE on it (0007) —
+   * the answer was still a 404, but the server logged "permission denied".
+   * Asking the same, request-cached question first ends it before any read.
+   */
+  if (!(await canOperateSeller())) notFound();
+
   const [settings, commerce] = await Promise.all([fetchShopSettings(), fetchCommerceState()]);
 
   return (

@@ -172,12 +172,12 @@ describe("the history is one list from two sources", () => {
     expect(PAGE).not.toContain("fetchMovements");
     expect(PAGE).not.toMatch(/positions\s*\.\s*map/);
     expect(PAGE).not.toMatch(/Promise\.all\(\s*positions/);
-    // Three awaits on the whole page: the one batch, the position read, and
-    // since Lagerverwaltung V2 the one operator check that decides whether
-    // the CSV entry is shown. None of them per position.
+    // Three awaits on the whole page: the operator gate first (request-
+    // cached, 2026-11-11), the one batch, and the position read. None of
+    // them per position.
     expect((PAGE.match(/await Promise\.all\(/g) ?? []).length).toBe(1);
     const awaited = [...PAGE.matchAll(/await\s+([A-Za-z]+)\(/g)].map((m) => m[1]);
-    expect(awaited).toEqual(["fetchInventory", "canOperateSeller"]);
+    expect(awaited).toEqual(["canOperateSeller", "fetchInventory"]);
   });
 
   it("keeps the timeline limit small and purely visual", () => {
