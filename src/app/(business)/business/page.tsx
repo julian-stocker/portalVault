@@ -51,6 +51,9 @@ const AREAS: readonly {
      Posteingänge. */
   channel?: "orders" | "messages";
 }[] = [
+  /* Identität & Dokumente (ADR-0184): Shopname UND Geschäftsdaten — die
+     frühere Karte „Geschäftsdaten & Kontakt" (`/business/legal`) leitet
+     hierher und hat deshalb keine eigene Karte mehr. */
   { href: "/business/profile", copy: de.business.areas.profile },
   { href: "/business/offers", copy: de.business.areas.offers },
   /*
@@ -66,7 +69,6 @@ const AREAS: readonly {
   { href: "/business/nachrichten", copy: de.business.areas.messages, channel: "messages" },
   { href: "/business/orderbuch", copy: de.business.areas.orderbook },
   { href: "/business/shipping", copy: de.business.areas.shipping },
-  { href: "/business/legal", copy: de.business.areas.legal },
   { href: "/business/reports", copy: de.business.areas.reports },
   { href: "/business/widerrufe", copy: de.business.areas.withdrawals },
   { href: "/business/datensicherung", copy: de.business.areas.backup },

@@ -213,7 +213,8 @@ describe("PHONE B — the shop", () => {
     const page = code("src/app/(business)/business/page.tsx");
     for (const href of [
       "/business/profile", "/business/offers", "/business/inventory",
-      "/business/orders", "/business/shipping", "/business/legal",
+      "/business/orders", "/business/shipping",
+      /* Geschäftsdaten: on /business/profile since ADR-0184; /business/legal redirects. */
     ]) {
       expect(page, href).toContain(href);
     }

@@ -77,6 +77,7 @@ export function ShopProfilePanel({
   groups,
   heading,
   hint,
+  contactEmailEditable = true,
 }: {
   settings: Settings;
   /**
@@ -91,6 +92,14 @@ export function ShopProfilePanel({
   groups: readonly ShopProfileGroup[];
   heading: string;
   hint: string;
+  /**
+   * False where the same page already edits `sellers.contact_email` in the
+   * shop form (`SellerSettings`, "Identität & Dokumente", ADR-0184). The
+   * address is then shown, not edited, and the contact save leaves it out —
+   * so a value loaded with the page can never overwrite the one just saved
+   * above it. `setShopPolicies` treats an absent field as "leave alone".
+   */
+  contactEmailEditable?: boolean;
 }) {
   const shows = (group: ShopProfileGroup) => groups.includes(group);
   const copy = de.admin.shopProfile;
@@ -206,9 +215,17 @@ export function ShopProfilePanel({
         <p className="mt-1 mb-4 text-sm text-muted">{copy.contactHint}</p>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text id="c-seller" label={copy.sellerContact} value={field(contacts.contactEmail)}
-            hint={copy.sellerContactHint}
-            onChange={(v) => setContacts({ ...contacts, contactEmail: v })} />
+          {contactEmailEditable ? (
+            <Text id="c-seller" label={copy.sellerContact} value={field(contacts.contactEmail)}
+              hint={copy.sellerContactHint}
+              onChange={(v) => setContacts({ ...contacts, contactEmail: v })} />
+          ) : (
+            <div>
+              <p className={LABEL}>{copy.sellerContact}</p>
+              <p className="min-h-11 py-2.5 text-sm">{contacts.contactEmail ?? copy.noneYet}</p>
+              <p className="mt-1 text-xs text-muted">{copy.sellerContactElsewhere}</p>
+            </div>
+          )}
           <Text id="c-withdraw" label={copy.withdrawalContact}
             value={field(contacts.withdrawalContactEmail)}
             hint={`${copy.fallbackHint} ${withdrawalContact(contacts) ?? copy.noneYet}`}
@@ -225,7 +242,7 @@ export function ShopProfilePanel({
             onClick={() =>
               save("contact", () =>
                 setShopPolicies({
-                  contactEmail: field(contacts.contactEmail),
+                  ...(contactEmailEditable ? { contactEmail: field(contacts.contactEmail) } : {}),
                   withdrawalContactEmail: field(contacts.withdrawalContactEmail),
                   complaintsContactEmail: field(contacts.complaintsContactEmail),
                 }),

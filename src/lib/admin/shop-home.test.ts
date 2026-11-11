@@ -115,10 +115,12 @@ describe("the shop has a management home", () => {
   it("reaches every area it owns", () => {
     for (const href of [
       "/business/profile", "/business/offers", "/business/inventory",
-      "/business/orders", "/business/shipping", "/business/legal",
+      "/business/orders", "/business/shipping",
     ]) {
       expect(hub, href).toContain(href);
     }
+    /* Geschäftsdaten are reached through /business/profile (ADR-0184). */
+    expect(hub).not.toContain('"/business/legal"');
   });
 
   it("navigates rather than edits", () => {
@@ -164,16 +166,25 @@ describe("each area owns its own subject, once", () => {
 
   it("splits the five settings groups across the pages that own them", () => {
     expect(pages.shipping).toContain('groups={["shipping"]}');
-    expect(pages.legal).toContain('groups={["seller", "contact", "tax", "withdrawal"]}');
+    /* Since ADR-0184 the legal groups are on "Identität & Dokumente";
+       /business/legal only redirects there. */
+    expect(pages.profile).toContain('groups={["seller", "contact", "tax", "withdrawal"]}');
+    expect(pages.legal).toContain('redirect("/business/profile#betreiber")');
+    expect(pages.legal).not.toContain("ShopProfilePanel");
     // No group is rendered twice.
-    expect(pages.profile).not.toContain("ShopProfilePanel");
+    expect((pages.profile.match(/<ShopProfilePanel/g) ?? []).length).toBe(1);
     expect(pages.offers).not.toContain("ShopProfilePanel");
   });
 
   it("puts the public trade name on the profile and the legal name elsewhere", () => {
+    /* One page, two sections, never one field (ADR-0184): the shop name in
+       the shop form, the legal name in the legal panel. */
     expect(pages.profile).toContain("<SellerSettings");
-    expect(pages.legal).toContain('"seller"');
-    expect(pages.profile).not.toContain("legalName");
+    expect(pages.profile).toContain("displayName={identity.shop.displayName}");
+    expect(pages.profile).toContain('"seller"');
+    expect(pages.profile).not.toContain("legalName={");
+    /* The contact e-mail is edited in the shop form only. */
+    expect(pages.profile).toContain("contactEmailEditable={false}");
   });
 
   it("keeps shop-wide commerce controls apart from per-figure ones", () => {

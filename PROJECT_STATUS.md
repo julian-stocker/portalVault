@@ -82,6 +82,41 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Identität & Dokumente, AP1–AP3 (2026-11-11, ADR-0184) — **gebaut, keine Migration**
+
+Entscheidung: Die Plattform heißt **SkyIsles**, der Shop **skyisles.shop** (`sellers.display_name`), und
+der rechtliche Betreiber steht in den Geschäftsdaten (`sellers.legal_name` usw.). yulez.collectibles
+ist keine aktive Identität mehr.
+
+| Was | Wo |
+|---|---|
+| Identitätsmodell: Plattform, Shop und rechtlicher Betreiber getrennt; Pflichtfelder; Widersprüche (auch zu den festen Werten der Rechtstexte); „Wo erscheint welcher Name?“ | `src/lib/identity/` |
+| **„Identität & Dokumente“** unter `/business/profile`: Hinweise, Plattform, Shopidentität, rechtlicher Betreiber, Verwendungsübersicht. `/business/legal` leitet auf `#betreiber` weiter. Die Kontakt-E-Mail ist nur im Shopformular bearbeitbar | `business/profile/page.tsx`, `identity-overview.tsx` |
+| `sellers.trading_name` heißt jetzt „Frühere Geschäftsbezeichnung“: Das Feld wird nirgends angezeigt, und ein abweichender Wert erscheint als Widerspruch. Gespeicherte Werte werden nicht automatisch geändert | `shop-profile-panel.tsx`, `de.ts` |
+
+**Unverändert:** Rechtstexte (lesen bis AP5 weiter `SELLER_IDENTITY` und nennen yulez.collectibles),
+Rechnungen, Mails, Stripe, Verkäuferdaten, Migrationen.
+
+**Offen:**
+- **Visuelle Prüfung auf Desktop und Mobil im Browser steht aus.** Es gab keine Browseranbindung;
+  geprüft sind nur Komponententests und die fehlerfreie Auslieferung beider Routen auf dem
+  Entwicklungsserver. Zu prüfen sind:
+  - Reihenfolge der Bereiche;
+  - die Kontakt-E-Mail ist nur einmal bearbeitbar;
+  - die Tabelle scrollt auf dem Handy waagerecht;
+  - die Weiterleitung von `/business/legal`;
+  - keine Konsolenfehler.
+- Der Betreiber leert `trading_name` auf Staging; dort steht laut Seed noch „yulez.collectibles“.
+- AP4: Migration `seller_legal_public()` und neue Versionen der Rechtstexte (eigene Freigabe).
+- AP5: Rechtstexte auf das Identitätsmodell umstellen.
+- AP6: Rechnungs- und Mailvorschau.
+- AP7: Stripe-Übersicht.
+- Zu entscheiden:
+  - die Vertragspartner-Zeile;
+  - der Absendername in `MAIL_FROM`;
+  - welcher `display_name` auf Production steht;
+  - die rechtliche Prüfung von „skyisles.shop“ als Geschäftsbezeichnung.
+
 ## Lagerverwaltung V2 (2026-11-10) — **gebaut, nicht committet, keine Migration**
 
 Die Lagerseite `/business/inventory` ist die **Lagerverwaltung**. Reine Oberfläche: Es gibt keine

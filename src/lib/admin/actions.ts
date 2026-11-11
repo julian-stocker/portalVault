@@ -131,8 +131,13 @@ const OFFER_PAGES: readonly RevalidationTarget[] = [
   ["/(public)/skylanders/[slug]", "page"], ["/(public)/zubehoer/[slug]", "page"],
   "/business/offers", "/business/inventory",
 ];
-/** The shop profile panel is rendered on both of these (`shop-profile-panel.tsx`). */
-const SHOP_PROFILE_PAGES: readonly RevalidationTarget[] = ["/business/legal", "/business/shipping"];
+/**
+ * The shop profile panel is rendered on these (`shop-profile-panel.tsx`).
+ * Since ADR-0184 the legal groups live on `/business/profile`; `/business/legal`
+ * only redirects there and stays in the list — nothing revalidated before is
+ * dropped.
+ */
+const SHOP_PROFILE_PAGES: readonly RevalidationTarget[] = ["/business/profile", "/business/legal", "/business/shipping"];
 
 function revalidate(targets: readonly RevalidationTarget[]): void {
   for (const path of targets) {

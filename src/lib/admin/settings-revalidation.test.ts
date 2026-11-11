@@ -41,11 +41,11 @@ const CASES = [
   { name: "setCommerceMode", run: () => setCommerceMode("sandbox"), rpc: "admin_set_commerce_mode",
     form: ["/business/offers"], reads: ["/checkout", "/cart"] },
   { name: "setShippingCountry", run: () => setShippingCountry("at", "Österreich", true), rpc: "admin_set_shipping_country",
-    form: ["/business/shipping", "/business/legal"], reads: ["/checkout", "/versand"] },
+    form: ["/business/shipping", "/business/legal", "/business/profile"], reads: ["/checkout", "/versand"] },
   { name: "setShopPolicies", run: () => setShopPolicies({ dispatchStatement: "Versand in 2 Tagen" }), rpc: "admin_set_shop_policies",
-    form: ["/business/legal", "/business/shipping"], reads: ["/checkout", "/cart"] },
+    form: ["/business/profile", "/business/legal", "/business/shipping"], reads: ["/checkout", "/cart"] },
   { name: "setSellerDetails", run: () => setSellerDetails({ city: "Teststadt" }), rpc: "admin_set_seller_details",
-    form: ["/business/legal", "/business/shipping"], reads: [] },
+    form: ["/business/profile", "/business/legal", "/business/shipping"], reads: [] },
 ] as const;
 
 describe.each(CASES)("$name", (c) => {

@@ -38,6 +38,14 @@ zwischen Plattform- und Verkäuferidentität bleibt bestehen und ist weiterhin r
 zwei **Rollen**, nicht zwei **Rechtspersonen**. Wo der frühere Sprachgebrauch „zwei Rechtssubjekte"
 sagte, ist er falsch und wird korrigiert.
 
+> **Entschieden, noch nicht veröffentlicht (ADR-0184, 2026-11-11):** yulez.collectibles ist keine
+> aktive Identität mehr. Plattform: **SkyIsles**. Shop: **skyisles.shop** (`sellers.display_name`).
+> Rechtlicher Verkäufer: die Geschäftsdaten (`sellers.legal_name` usw.). Die Rechtstexte oben und
+> unter `/impressum`, `/agb`, `/widerruf`, `/datenschutz` nennen bis zur Umstellung (AP4/AP5) weiter
+> „Julian Stocker, handelnd unter yulez.collectibles“; die Seite „Identität & Dokumente“ zeigt den
+> Widerspruch an. **Offen:** ob „skyisles.shop“ als Geschäftsbezeichnung zulässig ist, ist rechtlich
+> nicht geprüft.
+
 ---
 
 ## 2. Geprüfte Normen und was daraus folgt

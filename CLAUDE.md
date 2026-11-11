@@ -15,14 +15,13 @@ schneller Owned/Not-Owned-Toggle, Fortschritt. **Kein Marketplace** (ADR-0021).
 Handel, Tausch, Angebote und Zahlungen werden erst wieder bewertet, wenn PortalVault
 nachweislich Nutzer gewinnt. Produktvision und -prinzipien: `docs/ROADMAP.md`.
 
-**Zwei Identitäten, die nie zusammenfallen (ADR-0064):** **SkyIsles** ist die **Plattform** —
-Katalog, Konten, Sammlung, Checkout, Zahlung. **yulez.collectibles** ist der **erste und vorerst
-einzige gewerbliche Verkäufer auf SkyIsles** — Vertragspartner des Kunden, Rechnungsaussteller,
-Versender. **Beides ist dasselbe Rechtssubjekt** — ein Einzelunternehmen von Julian Stocker —,
-aber **zwei Rollen**: die Plattform betreibt Katalog, Konten und Kasse, der Verkäufer ist
-Vertragspartner des Kunden. Vertragspartner heißt überall „Julian Stocker, handelnd unter
-yulez.collectibles" (ADR-0086, `docs/LEGAL.md`). Die frühere Formulierung „zwei Rechtssubjekte"
-war falsch.
+**Identitäten, die nie zusammenfallen (ADR-0064, geändert durch ADR-0184 am 2026-11-11):**
+**SkyIsles** ist die **Plattform** — Katalog, Konten, Sammlung, Checkout, Zahlung. **skyisles.shop**
+ist der **Shop**, unter dem der erste und vorerst einzige Verkäufer auftritt (`sellers.display_name`).
+Der **rechtliche Verkäufer** ist der in den Geschäftsdaten hinterlegte Betreiber (`sellers.legal_name`
+usw.) — heute Julian Stocker, Einzelunternehmen; eine Marke ersetzt ihn nie. **yulez.collectibles ist
+keine aktive Identität mehr**; Historie bleibt unverändert. Bis zur Umstellung der Rechtstexte (AP5)
+nennen Impressum und AGB noch „Julian Stocker, handelnd unter yulez.collectibles“ (`docs/LEGAL.md`).
 
 Der **Shop** (ein Verkäufer) ist **teilweise gebaut** — ADR-0032, ADR-0033, ADR-0037, ADR-0043,
 ADR-0044. Die Plattform wird konzeptionell seller-fähig gedacht, **die laufende Implementierung

@@ -828,9 +828,11 @@ export const de = {
      * wäre die Startseite ein Formular mit vierzig Feldern.
      */
     areas: {
+      /* Seit ADR-0184 eine Seite für Plattform, Shopname und rechtlichen
+         Betreiber — die frühere Karte „Geschäftsdaten & Kontakt" führt hierher. */
       profile: {
-        title: "Händlerprofil",
-        hint: "Der Name, unter dem Kunden dich im Katalog sehen.",
+        title: "Identität & Dokumente",
+        hint: "Shopname, rechtlicher Betreiber, Kontakt- und Steuerangaben an einer Stelle.",
       },
       offers: {
         title: "Angebote & Preise",
@@ -850,10 +852,6 @@ export const de = {
       shipping: {
         title: "Versand",
         hint: "Lieferländer, Versandarten, Preise und die Versandkostengrenze.",
-      },
-      legal: {
-        title: "Geschäftsdaten & Kontakt",
-        hint: "Rechtliche Angaben, Kontaktadressen, Steuer, Widerruf.",
       },
       reports: {
         title: "Berichte",
@@ -955,12 +953,6 @@ export const de = {
 
     /* Überschriften der Unterseiten. Der Panel-Titel kommt von der Seite, die
        ihn zeigt — dieselbe Gruppe darf nicht an zwei Stellen stehen. */
-    profileHeading: "Händlerprofil",
-    profileHint:
-      "Was Kunden von dir sehen, wenn ein Angebot dir gehört. Rechtliche Angaben stehen unter " +
-      "„Geschäftsdaten & Kontakt“.",
-    profileNameSource:
-      "Der Händlername kommt aus den Verkäuferangaben, nicht aus deinem Benutzernamen.",
     profileIconMissing:
       "Ein Händler-Icon gibt es noch nicht. Es kommt, sobald SkyIsles Bilder für Händler " +
       "speichern kann.",
@@ -973,10 +965,60 @@ export const de = {
     shippingPageHint:
       "Wohin geliefert wird, womit und ab welchem Warenwert versandkostenfrei. Gilt für alle " +
       "Bestellungen in diesem Shop.",
-    legalHeading: "Geschäftsdaten & Kontakt",
-    legalPageHint:
-      "Die Angaben, die später im Impressum, auf Rechnungen und in der Widerrufsbelehrung " +
-      "stehen. Noch wird nichts davon veröffentlicht.",
+    /*
+     * „Identität & Dokumente" (ADR-0184, AP3): Plattform, Shop und rechtlicher
+     * Betreiber auf einer Seite. Die Werte kommen aus `sellers` und — für den
+     * Support-Kontakt — aus `platform_settings`; die Seite erfindet keinen.
+     */
+    identity: {
+      title: "Identität & Dokumente",
+      hint:
+        "Wer SkyIsles ist, unter welchem Namen dein Shop auftritt und wer rechtlich " +
+        "verkauft — an einer Stelle.",
+      unavailable:
+        "Die Geschäftsdaten konnten nicht gelesen werden. Nichts davon wird als leer angenommen; " +
+        "bitte die Seite neu laden.",
+      findingsHeading: "Hinweise",
+      findingsNone: "Keine fehlenden oder widersprüchlichen Angaben.",
+      levels: { missing: "Fehlt", conflict: "Widerspruch", notice: "Hinweis" } as Record<string, string>,
+      platform: {
+        heading: "Plattform",
+        hint: "Die Plattform, auf der dein Shop läuft — ein Produktname, kein Shopname.",
+        name: "Plattformname",
+        support: "Support-Kontakt der Plattform",
+        supportMissing: "Nicht hinterlegt.",
+        supportHidden: "Nur für Plattformadministratoren lesbar.",
+        supportEdit: "Im Adminbereich ändern",
+      },
+      shop: {
+        heading: "Shopidentität",
+        hint: "Unter diesem Namen tritt dein Shop gegenüber Kundinnen und Kunden auf.",
+      },
+      legal: {
+        heading: "Rechtlicher Betreiber",
+        hint:
+          "Wer rechtlich verkauft: auf Rechnungen und künftig in Impressum und AGB. Der Shopname " +
+          "ersetzt diese Angaben nie.",
+      },
+      usage: {
+        heading: "Wo erscheint welcher Name?",
+        hint:
+          "Für neue Bestellungen und Rechnungen. Bereits ausgestellte Rechnungen und Bestellungen " +
+          "behalten die Angaben, die beim Ausstellen galten.",
+        area: "Bereich",
+        shows: "Zeigt",
+        source: "Quelle",
+        notReadable: "hier nicht lesbar",
+        empty: "—",
+        kinds: {
+          database: "Datenbank",
+          snapshot: "Bestellsnapshot",
+          code: "fest im Code",
+          secret: "Secret",
+          unused: "nicht verwendet",
+        } as Record<string, string>,
+      },
+    },
     /**
      * Widerrufe (ADR-0086).
      *
@@ -4723,8 +4765,12 @@ export const de = {
         "ohne Registereintrag bleibt das Registerfeld leer.",
       legalName: "Rechtlicher Name",
       legalNameHint: "Die natürliche oder juristische Person, die haftet.",
-      tradingName: "Geschäftsname",
-      tradingNameHint: "Unter welchem Namen verkauft wird. Steht später im Impressum.",
+      /* ADR-0184: die Geschäftsbezeichnung ist der Shopname. Dieses Feld wird
+         nirgends angezeigt und bleibt nur, damit ein alter Wert sichtbar ist. */
+      tradingName: "Frühere Geschäftsbezeichnung",
+      tradingNameHint:
+        "Wird nirgends angezeigt. Der Name, unter dem verkauft wird, ist der Shopname " +
+        "unter „Shopidentität“. Leer lassen.",
       legalForm: "Rechtsform",
       street: "Straße und Hausnummer",
       postalCode: "PLZ",
@@ -4746,6 +4792,7 @@ export const de = {
         "Fragen zum Konto oder zur Website die Plattform.",
       sellerContact: "Verkäuferkontakt",
       sellerContactHint: "Der Verkäufer — Bestellungen, Ware, Versand.",
+      sellerContactElsewhere: "Wird oben unter „Shopidentität“ gepflegt.",
       withdrawalContact: "Widerruf",
       complaintsContact: "Reklamationen",
       fallbackHint: "Leer lassen heißt: es gilt der Verkäuferkontakt. Aktuell:",

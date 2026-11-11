@@ -1444,6 +1444,12 @@ Widerrufsbelehrung steht: `legal_name`, `trading_name`, `legal_form`, `street`, 
 Impressumsfeld wäre eine falsche Aussage über eine echte Person. Ein CHECK je Spalte verbietet
 zusätzlich den Leerstring.
 
+**Seit ADR-0184 (2026-11-11):** `display_name` ist der Shopname (skyisles.shop) und zugleich die
+Geschäftsbezeichnung auf Rechnungen, in Mails und Eigenbelegen. **`trading_name` ist abgelöst** —
+kein Kundendokument liest es (`issue_invoice()`, Bestellsnapshot und Eigenbelege kopieren
+`display_name`); die Spalte bleibt für Sicherung, Export und alte Werte. Gelesen wird die
+Identität für die Verwaltungsseite über `admin_shop_profile()` (`src/lib/identity/`).
+
 **Kontakte.** `contact_email` bleibt maßgeblich. `withdrawal_contact_email` und
 `complaints_contact_email` sind NULL-bar und heißen „keine eigene Adresse" — aufgelöst per
 `coalesce`, **nie kopiert**. `admin_shop_settings()` liefert die aufgelösten Werte gleich mit, damit

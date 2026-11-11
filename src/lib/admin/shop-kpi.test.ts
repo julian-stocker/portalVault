@@ -176,7 +176,8 @@ describe("the page stays a management hub", () => {
   it("still leads to all six areas", () => {
     for (const href of [
       "/business/profile", "/business/offers", "/business/inventory",
-      "/business/orders", "/business/shipping", "/business/legal",
+      "/business/orders", "/business/shipping",
+      /* Geschäftsdaten: on /business/profile since ADR-0184; /business/legal redirects. */
     ]) {
       expect(hub, href).toContain(href);
     }

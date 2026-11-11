@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-11-09 (ADR-0183, Bestellzuordnung und finanzieller Abgleich getrennt, Zuordnung trotz Konkurrenz `0186` auf Staging angewendet; ADR-0182, Kandidaten und ausdrückliche Zuordnung, `0185`; ADR-0181, CSV-Abgleich öffnet den bestehenden Verkaufsdialog, `0184`; ADR-0180, nicht zugeordnete Bestellung als offene Bestellung anlegen, `0183`; ADR-0179 ergänzt: korrigiertes Datum vor dem Sync geschützt,
+Letzte Aktualisierung: 2026-11-11 (ADR-0184, Plattform SkyIsles, Shop skyisles.shop, rechtlicher Betreiber aus den Geschäftsdaten — ersetzt ADR-0064 teilweise; davor 2026-11-09 ADR-0183, Bestellzuordnung und finanzieller Abgleich getrennt, Zuordnung trotz Konkurrenz `0186` auf Staging angewendet; ADR-0182, Kandidaten und ausdrückliche Zuordnung, `0185`; ADR-0181, CSV-Abgleich öffnet den bestehenden Verkaufsdialog, `0184`; ADR-0180, nicht zugeordnete Bestellung als offene Bestellung anlegen, `0183`; ADR-0179 ergänzt: korrigiertes Datum vor dem Sync geschützt,
 Korrekturspur in beiden Sicherungen, `0182`; davor 2026-11-08 ADR-0179, Positionen importierter Verkäufe korrigieren; davor
 ADR-0171, die Variante erbt die Familie ihrer Basisfigur,
 leere Familien auf Staging; davor ADR-0170, Familie im kompakten Editor und SKY-ID-Suche).
@@ -5022,6 +5022,11 @@ Filter definieren (das war die Ursache).
 ## ADR-0064 — SkyIsles ist die Plattform, yulez.collectibles ist der Verkäufer
 
 **Status:** ANGENOMMEN (2026-09-12) · M0, reine Dokumentation · umgesetzt in `0026` (M2)
+
+> **Teilweise ersetzt durch ADR-0184 (2026-11-11):** Die Verkäufermarke ist nicht mehr
+> yulez.collectibles, sondern der Shopname skyisles.shop (`sellers.display_name`); der rechtliche
+> Verkäufer steht in den Geschäftsdaten. Die Trennung von Plattform- und Verkäuferrolle und der
+> Single-Seller-Betrieb gelten unverändert.
 
 **Entscheidung.** SkyIsles ist ab jetzt konzeptionell eine **Collector Platform mit
 Marketplace-Layer**, nicht mehr „ein Shop mit Sammlung". Daraus folgen genau zwei Identitäten,
@@ -17065,6 +17070,73 @@ Abbruch ist kostenlos**, weil nichts committet ist.
   ohne jede fachliche Anweisung, kein Platzhalter, zehn Abwesenheiten vorher
   und zehn Anwesenheiten nachher, und bei `admin_merge_draft` die Zahl **2**.
 
+
+---
+
+## ADR-0184 · Plattform SkyIsles, Shop skyisles.shop, rechtlicher Betreiber aus den Geschäftsdaten
+
+**Status:** ANGENOMMEN (2026-11-11, Produktentscheidung des Betreibers) · teilweise umgesetzt:
+AP1–AP3 (Dokumentation, Identitätsmodell `src/lib/identity/`, Seite „Identität & Dokumente“).
+AP4–AP7 offen. **Keine Migration**, keine Änderung an Rechtstexten, Rechnungen, Mails oder Stripe.
+**Ersetzt teilweise:** ADR-0064 (die Verkäufermarke). **Bleibt:** ADR-0064 Single-Seller-Betrieb,
+ADR-0021, ADR-0086 (Vertragsmodell, Rechnung, Snapshots).
+
+### Kontext
+
+ADR-0064 nannte zwei Identitäten: SkyIsles als Plattform, yulez.collectibles als Verkäufer.
+ADR-0086 präzisierte: eine Person, ein Einzelunternehmen, zwei Rollen. Seitdem hat der Betreiber
+den Shopnamen (`sellers.display_name`) auf Staging auf „skyisles.shop“ gesetzt. Die Bestandsaufnahme
+vom 2026-11-09 (M-08) hält den Widerspruch fest: Shop, Mails und neue Rechnungen nennen
+„skyisles.shop“, Impressum, AGB, Widerruf, Datenschutz, Footer und Serviceseiten fest
+„yulez.collectibles“ (`SELLER_IDENTITY` im Code).
+
+### Entscheidung
+
+| Identität | Name | Quelle |
+|---|---|---|
+| **Plattform** | SkyIsles | `PLATFORM_NAME` in `src/lib/identity/model.ts` (Produktname, keine Geschäftseinstellung); Support-Kontakt `platform_settings.support_email` |
+| **Shop** | skyisles.shop | `sellers.display_name` |
+| **Rechtlicher Betreiber** | die hinterlegte Person oder Firma | `sellers.legal_name`, `legal_form`, `street`, `postal_code`, `city`, `country_code`, `vat_id`, `register_court`, `register_number`, `small_business_19` |
+| **Kontakt** | — | `sellers.contact_email`, `transactional_reply_to`, `withdrawal_contact_email`, `complaints_contact_email` |
+
+1. **yulez.collectibles ist keine aktive Identität mehr.** Historische Rechnungen, Bestell- und
+   Rechtssnapshots, Seeds und Migrationen bleiben unverändert.
+2. **Plattform und Shop sind nie ein Feld.** SkyIsles und skyisles.shop werden getrennt geführt;
+   das Identitätsmodell meldet es, wenn beide denselben Namen tragen.
+3. **Eine Marke ersetzt nie den rechtlichen Verkäufer.** Wo der Vertragspartner genannt wird, steht
+   der rechtliche Name (`legal_name`).
+4. **`sellers.trading_name` ist abgelöst.** Kein Kundendokument liest es (weder `issue_invoice()`
+   noch der Bestellsnapshot, die Mails oder die Eigenbelege, gemessen in `0047` und `0122`). Die
+   Geschäftsbezeichnung ist der Shopname. Die Spalte bleibt (Sicherung, Export, alte Werte), die
+   Oberfläche nennt sie „Frühere Geschäftsbezeichnung“ und meldet einen abweichenden Wert als
+   Widerspruch. **Es werden keine Werte automatisch geändert**; der Betreiber leert das Feld selbst.
+5. **Steuerstatus unverändert.** `small_business_19` wird angezeigt, wie er gespeichert ist; das
+   Modell leitet daraus nichts ab.
+6. **Eine Verwaltungsseite.** `/business/profile` heißt „Identität & Dokumente“ und vereint das
+   frühere Händlerprofil und „Geschäftsdaten & Kontakt“; `/business/legal` leitet dorthin weiter.
+   Die Kontakt-E-Mail wird nur im Shopformular bearbeitet.
+
+### Bestand der aktiven yulez-Verwendungen (2026-11-11)
+
+| Stelle | Art | Wird geändert in |
+|---|---|---|
+| `src/lib/legal/seller-identity.ts` (`tradeName`, `contractingParty`) → Footer, Impressum, AGB, Widerruf, Datenschutz, Serviceseiten | fest im Code, kundensichtbar | AP5 |
+| `src/lib/legal/impressum.ts:44` (Überschrift „SkyIsles, yulez.collectibles und Julian Stocker“) | fest im Code, kundensichtbar | AP5 |
+| `sellers.trading_name` (Seed `0047`: „yulez.collectibles“) | Datenbank, nirgends angezeigt | Betreiber leert das Feld |
+| `sellers.display_name` auf Production (Seed `0047`; Staging: „skyisles.shop“) | Datenbank, kundensichtbar | Betreiber prüft und setzt den Wert |
+| Seeds in `0026` und `0047`, historische Rechnungen und Snapshots | Historie | **nie** |
+| Code-Kommentare in 11 Dateien unter `src/`, Dokumentation | keine Wirkung | bei Gelegenheit |
+
+### Konsequenzen
+
+- **Bis AP5 lesen die Rechtstexte weiter `SELLER_IDENTITY`.** Die Verwaltungsseite zeigt jeden
+  Unterschied zwischen diesen Werten und den Geschäftsdaten als Widerspruch an.
+- AP4 (öffentliche Lesefunktion `seller_legal_public()` und neue Versionen der Rechtstexte) ist
+  eine Migration mit eigener Freigabe; AP5 stellt die Rechtstexte darauf um.
+- Ob „skyisles.shop“ als Geschäftsbezeichnung eines Einzelunternehmens zulässig ist, ist rechtlich
+  nicht geprüft (`docs/LEGAL.md`, offene Punkte).
+- Mehrere Verkäufer bleiben möglich: alles liest vom aktiven Verkäufer, Dokumente kopieren dessen
+  Angaben; kein `seller_id` (ADR-0021).
 
 ---
 

@@ -1,48 +1,94 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 
 import { SellerSettings } from "@/components/admin/seller-settings";
-import { fetchSeller } from "@/lib/admin/seller";
+import { ShopProfilePanel } from "@/components/admin/shop-profile-panel";
+import { IdentityFindings, NameUsage, PlatformIdentity } from "@/components/business/identity-overview";
+import { canOperateSeller, capabilities } from "@/lib/auth/capabilities";
+import { identityFindings, nameUsage } from "@/lib/identity/model";
+import { fetchIdentity } from "@/lib/identity/server";
+import { SELLER_IDENTITY } from "@/lib/legal/seller-identity";
 import { de } from "@/lib/i18n/de";
 
-export const metadata: Metadata = { title: de.business.profileHeading };
+export const metadata: Metadata = { title: de.business.identity.title };
 
 /**
- * The shop's public face (ADR-0080).
+ * Identität & Dokumente (ADR-0184, AP3) — the former Händlerprofil and
+ * Geschäftsdaten & Kontakt on one page.
  *
- * What a collector sees when an offer belongs to this seller: the trade name,
- * and one day an icon beside it. **Not** the legal data — that is
- * Geschäftsdaten & Kontakt, a different audience and a different duty
- * (ADR-0075).
+ *   Hinweise                 what is missing or contradicts, before anything else
+ *   1 Plattform              SkyIsles and its support contact — read-only here
+ *   2 Shopidentität          shop name, customer contact, reply address
+ *                            (`SellerSettings` → `setSellerContact`)
+ *   3 Rechtlicher Betreiber  name, legal form, address, contacts, tax, register,
+ *                            withdrawal (`ShopProfilePanel` → `setSellerDetails`,
+ *                            `setShopPolicies`) — the contact e-mail is shown
+ *                            there, not edited a second time
+ *   4 Wo erscheint welcher Name?
  *
- * THE NAME IS THE SELLER'S, NOT THE ACCOUNT'S. It comes from
- * `sellers.display_name` through `seller_public()`, which is what the quick
- * view already renders. The login username is a personal handle and happens
- * to resemble the shop's name today; treating one as the other would break
- * the moment somebody else operates the shop.
+ * THE GATE FIRST. The layout's `notFound()` does not stop a page that renders
+ * in parallel from reading, so this page asks the same request-cached
+ * question before it reads the seller row (see `business-page-gate.test.ts`).
+ *
+ * WHAT THIS PAGE DOES NOT DO. It changes no stored value by itself, publishes
+ * nothing, and does not touch the legal texts, the invoices or Stripe. The
+ * published legal pages still read `SELLER_IDENTITY` until AP5; the findings
+ * say where that differs from the data.
  */
-export default async function BusinessProfilePage() {
-  const seller = await fetchSeller();
+export default async function BusinessIdentityPage() {
+  if (!(await canOperateSeller())) notFound();
+
+  const [load, { platformAdmin }] = await Promise.all([fetchIdentity(), capabilities()]);
+  const copy = de.business.identity;
+
+  if (!load.ok) {
+    return (
+      <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-10 md:pt-12">
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{copy.title}</h1>
+        <p role="alert" className="mt-4 text-sm text-danger">{copy.unavailable}</p>
+      </main>
+    );
+  }
+
+  const { identity, settings } = load;
+  const findings = identityFindings(identity, SELLER_IDENTITY);
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-10 md:pt-12">
-      <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
-        {de.business.profileHeading}
-      </h1>
-      <p className="mt-2 text-sm text-muted">{de.business.profileHint}</p>
-      <p className="mt-1 text-sm text-muted">{de.business.profileNameSource}</p>
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-8 pb-10 md:pt-12">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{copy.title}</h1>
+        <p className="mt-2 text-sm text-muted">{copy.hint}</p>
+      </div>
 
-      <SellerSettings
-        displayName={seller.displayName}
-        contactEmail={seller.contactEmail}
-        replyTo={seller.replyTo}
-      />
+      <IdentityFindings findings={findings} />
 
-      {/*
-       * Stated, not faked. There is no column for a seller image and no
-       * storage policy for one, so the honest thing is to say so rather than
-       * draw an empty frame that implies an upload exists (ADR-0080).
-       */}
-      <p className="mt-6 text-sm text-muted">{de.business.profileIconMissing}</p>
+      <PlatformIdentity identity={identity} canEdit={platformAdmin} />
+
+      <section id="shop" aria-labelledby="identity-shop" className="flex flex-col gap-2">
+        <div>
+          <h2 id="identity-shop" className="text-lg font-semibold">{copy.shop.heading}</h2>
+          <p className="mt-1 text-sm text-muted">{copy.shop.hint}</p>
+        </div>
+        <SellerSettings
+          displayName={identity.shop.displayName}
+          contactEmail={identity.shop.contactEmail}
+          replyTo={identity.shop.replyTo}
+        />
+        {/* Stated, not faked: there is no seller image yet (ADR-0080). */}
+        <p className="text-sm text-muted">{de.business.profileIconMissing}</p>
+      </section>
+
+      <div id="betreiber">
+        <ShopProfilePanel
+          settings={settings}
+          groups={["seller", "contact", "tax", "withdrawal"]}
+          heading={copy.legal.heading}
+          hint={copy.legal.hint}
+          contactEmailEditable={false}
+        />
+      </div>
+
+      <NameUsage rows={nameUsage(identity, SELLER_IDENTITY)} />
     </main>
   );
 }
