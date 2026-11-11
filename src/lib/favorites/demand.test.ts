@@ -503,7 +503,8 @@ describe("wo die Zahl erscheint — und wo nicht", () => {
     const k = code(CARD);
     expect(k).toContain("<FavoriteDemandIndicator count={position.favoriteDemand} />");
     const anzeige = k.indexOf("<FavoriteDemandIndicator");
-    const schalter = k.indexOf("aria-pressed={position.isListed}");
+    /* Der Schalter ist seit Lagerverwaltung V2 `ListingSwitch`. */
+    const schalter = k.indexOf("<ListingSwitch");
     expect(anzeige).toBeGreaterThan(-1);
     expect(anzeige, "sie steht hinter dem Schalter").toBeLessThan(schalter);
   });

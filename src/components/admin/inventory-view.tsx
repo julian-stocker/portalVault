@@ -9,20 +9,47 @@
  *
  * Filtering happens here, on data the page already loaded. The catalog does
  * the same (ADR-0026) and the amounts are far smaller.
+ *
+ * LAGERVERWALTUNG V2.
+ *
+ *   - THE FILTERS LIVE IN THE ADDRESS (`?q=`, `?serie=`, `?bestand=`,
+ *     `?shop=`, `?art=`, `?status=`), read and written by the pure functions
+ *     in `inventory-filter.ts`. A filtered list is a link; Back undoes the
+ *     last filter. Written with the browser's history API, which Next keeps
+ *     in sync with `useSearchParams` — no server round trip, the page does
+ *     not reload 600 catalog rows for a changed select.
+ *   - TABLE FROM `md:`, CARDS BELOW, CHOSEN BY CSS (corrected 2026-11-10).
+ *     The first version chose in JavaScript (`matchMedia` after hydration):
+ *     the server sent cards, and a wide screen only switched once the page
+ *     was hydrated — a visible jump at best, the cards for good if the
+ *     scripts never ran. Now both are in the markup and CSS shows one; the
+ *     server's HTML is already right at every width.
+ *
+ *     Still only one operable copy: the hidden one is `display: none`, which
+ *     can be neither clicked nor focused nor read out, and the table holds no
+ *     editor until a row is opened — which a hidden row cannot be.
+ *   - ONE STOCK DRAFT PER POSITION (`StockDraftProvider`). Table row, its
+ *     inline editor and the card read and write the same draft, so a
+ *     breakpoint change can never leave two unsaved differences for one
+ *     position, and whichever view saves, it saves once.
  */
 "use client";
 
 import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { InventoryCard } from "@/components/admin/inventory-card";
+import { InventoryTable } from "@/components/admin/inventory-table";
 import { StockDialog } from "@/components/admin/stock-dialog";
+import { StockDraftProvider } from "@/components/admin/stock-drafts";
 import { AdminThumb } from "@/components/admin/admin-thumb";
 import {
   OPERATIVE_CONDITION, type Condition, type InventoryPosition,
 } from "@/lib/admin/inventory-model";
 import {
-  kindsInStock, visiblePositions,
-  type InventoryFilters, type KindFilter, type ListingFilter, type StockFilter,
+  NO_FILTERS, STATUS_FILTERS, filtersFromParams, filtersToQuery, hasActiveFilters, kindsInStock,
+  visiblePositions,
+  type InventoryFilters, type KindFilter, type ListingFilter, type StatusFilter, type StockFilter,
 } from "@/lib/admin/inventory-filter";
 import { positionKey } from "@/lib/admin/position-key";
 import type { TradeTotals } from "@/lib/admin/stock-history";
@@ -33,6 +60,13 @@ import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 import { useRouter } from "next/navigation";
+
+/** The label of a status filter value: a group word or the kind's label. */
+function statusFilterLabel(value: Exclude<StatusFilter, "all">): string {
+  if (value === "action") return de.inventory.statusGroupAction;
+  if (value === "fix") return de.inventory.statusGroupFix;
+  return de.inventory.status[value].label;
+}
 
 export function InventoryView({
   positions,
@@ -75,14 +109,50 @@ export function InventoryView({
   percentage: number;
 }) {
   const router = useRouter();
-  const [query, setQuery] = useState("");
-  const [seriesCode, setSeriesCode] = useState("");
-  const [stock, setStock] = useState<StockFilter>("all");
-  const [listing, setListing] = useState<ListingFilter>("all");
-  const [kind, setKind] = useState<KindFilter>("all");
+  const params = useSearchParams();
   const [opening, setOpening] = useState<{ figure: CatalogFigure; condition: Condition } | null>(
     null,
   );
+
+  /*
+   * Die Arten nur anbieten, die wirklich im Lager liegen (ADR-0128) — und
+   * eine Art aus der Adresse, die es im Lager nicht gibt, gilt als „alle":
+   * sonst filterte ein Feld, das gar nicht angezeigt wird.
+   */
+  const kinds = useMemo(() => kindsInStock(positions), [positions]);
+
+  /* What the address says — unknown words already mean "all". */
+  const fromUrl = useMemo(() => filtersFromParams(params), [params]);
+  const seriesCode = series.some((option) => option.code === fromUrl.seriesCode)
+    ? fromUrl.seriesCode : "";
+  const stock: StockFilter = fromUrl.stock;
+  const listing: ListingFilter = fromUrl.listing;
+  const kind: KindFilter = fromUrl.kind !== "all" && kinds.includes(fromUrl.kind) ? fromUrl.kind : "all";
+  const status: StatusFilter = fromUrl.status;
+
+  /*
+   * THE SEARCH FIELD KEEPS ITS OWN TEXT while typing — the address stores it
+   * trimmed, and a field fed back from there would eat the space before the
+   * next word. When the address changes from outside (Back, a link, reset),
+   * the field follows.
+   */
+  const [query, setQuery] = useState(fromUrl.query);
+  const [seenQuery, setSeenQuery] = useState(fromUrl.query);
+  if (seenQuery !== fromUrl.query) {
+    setSeenQuery(fromUrl.query);
+    if (fromUrl.query !== query.trim()) setQuery(fromUrl.query);
+  }
+
+  /**
+   * Write filters to the address. `push` for a choice, so Back undoes it;
+   * `replace` while typing, so Back does not step through every letter.
+   */
+  function navigate(next: InventoryFilters, mode: "push" | "replace") {
+    const search = filtersToQuery(next);
+    const url = search === "" ? window.location.pathname : `?${search}`;
+    if (mode === "push") window.history.pushState(null, "", url);
+    else window.history.replaceState(null, "", url);
+  }
 
   const normalized = normalizeForSearch(query);
   const searching = query.trim() !== "";
@@ -97,17 +167,11 @@ export function InventoryView({
    * Browser und ohne Datenbank (`inventory-filter.test.ts`).
    */
   const filters: InventoryFilters = useMemo(
-    () => ({ query, seriesCode, stock, listing, kind }),
-    [query, seriesCode, stock, listing, kind],
+    () => ({ query, seriesCode, stock, listing, kind, status }),
+    [query, seriesCode, stock, listing, kind, status],
   );
   const visible = useMemo(() => visiblePositions(positions, filters), [positions, filters]);
-
-  /*
-   * Nur die Arten anbieten, die wirklich im Lager liegen (ADR-0128). Ein
-   * Auswahlfeld mit „Bundle", hinter dem keine einzige Zeile steht, ist eine
-   * Sackgasse — und solange es nur Figuren gibt, verschwindet das Feld ganz.
-   */
-  const kinds = useMemo(() => kindsInStock(positions), [positions]);
+  const choose = (over: Partial<InventoryFilters>) => navigate({ ...filters, ...over }, "push");
 
   /**
    * Figures the search found that have no position for a condition yet.
@@ -161,6 +225,7 @@ export function InventoryView({
   const overview = useMemo(() => inventoryOverview(positions), [positions]);
 
   return (
+    <StockDraftProvider>
     <div className="flex flex-col gap-5">
       <InventoryOverviewPanel overview={overview} />
 
@@ -173,7 +238,10 @@ export function InventoryView({
           type="search"
           inputMode="search"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            navigate({ ...filters, query: event.target.value }, "replace");
+          }}
           placeholder={de.inventory.searchLabel}
           className="min-h-12 w-full rounded-sky-md bg-surface/80 px-4 text-base ring-1 ring-border/70 focus:ring-border-strong"
         />
@@ -182,7 +250,7 @@ export function InventoryView({
           <select
             aria-label={de.inventory.seriesAll}
             value={seriesCode}
-            onChange={(event) => setSeriesCode(event.target.value)}
+            onChange={(event) => choose({ seriesCode: event.target.value })}
             className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
           >
             <option value="">{de.inventory.seriesAll}</option>
@@ -196,7 +264,7 @@ export function InventoryView({
           <select
             aria-label={de.inventory.stockFilter}
             value={stock}
-            onChange={(event) => setStock(event.target.value as StockFilter)}
+            onChange={(event) => choose({ stock: event.target.value as StockFilter })}
             className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
           >
             <option value="all">{de.inventory.stockAll}</option>
@@ -207,7 +275,7 @@ export function InventoryView({
           <select
             aria-label={de.inventory.listingFilter}
             value={listing}
-            onChange={(event) => setListing(event.target.value as ListingFilter)}
+            onChange={(event) => choose({ listing: event.target.value as ListingFilter })}
             className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
           >
             <option value="all">{de.inventory.listingAll}</option>
@@ -227,7 +295,7 @@ export function InventoryView({
             <select
               aria-label={de.inventory.kindFilter}
               value={kind}
-              onChange={(event) => setKind(event.target.value as KindFilter)}
+              onChange={(event) => choose({ kind: event.target.value as KindFilter })}
               className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
             >
               <option value="all">{de.inventory.kindAll}</option>
@@ -237,6 +305,36 @@ export function InventoryView({
                 </option>
               ))}
             </select>
+          ) : null}
+
+          {/*
+            DER SHOPSTATUS (Lagerverwaltung V2). Die zwei Sammelgruppen
+            zuerst — „Handlungsbedarf" ist die Frage, mit der man die Seite
+            öffnet —, dann jede Art aus `positionStatus()`.
+          */}
+          <select
+            aria-label={de.inventory.statusFilter}
+            value={status}
+            onChange={(event) => choose({ status: event.target.value as StatusFilter })}
+            className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
+          >
+            <option value="all">{de.inventory.statusAll}</option>
+            {STATUS_FILTERS.map((value) => (
+              <option key={value} value={value}>{statusFilterLabel(value)}</option>
+            ))}
+          </select>
+
+          {hasActiveFilters(filters) ? (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                navigate(NO_FILTERS, "push");
+              }}
+              className="min-h-10 rounded-sky-md px-3 text-sm text-muted underline underline-offset-2 hover:text-foreground"
+            >
+              {de.inventory.filterReset}
+            </button>
           ) : null}
         </div>
 
@@ -262,7 +360,17 @@ export function InventoryView({
         </div>
       ) : null}
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      {visible.length > 0 ? (
+        <div className="hidden md:block">
+          <InventoryTable
+            positions={visible}
+            legacyTotals={legacyTotals}
+            tradeTotals={tradeTotals}
+            percentage={percentage}
+          />
+        </div>
+      ) : null}
+      <div className="grid gap-3 md:hidden">
         {visible.map((position) => (
           <InventoryCard
             key={position.inventoryId}
@@ -329,5 +437,6 @@ export function InventoryView({
         </section>
       ) : null}
     </div>
+    </StockDraftProvider>
   );
 }

@@ -837,8 +837,11 @@ export const de = {
         hint: "Verkaufsmodus und automatische Preisbildung.",
       },
       inventory: {
-        title: "Lagerbestand",
-        hint: "Menge, Preis und Freigabe je Figur — und das Bestandsjournal.",
+        title: "Lagerverwaltung",
+        /* Ohne „CSV" im Satz: den Verkaufsabgleich gibt es nur, wo er
+           freigeschaltet ist (Staging), und eine Kachel verspricht nichts,
+           was dahinter fehlen kann. */
+        hint: "Bestand, Preise und Freigaben — mit Bestandsjournal und Bestandsabgleich.",
       },
       orders: {
         title: "Bestellungen",
@@ -876,10 +879,6 @@ export const de = {
       security: {
         title: "Konto & Sicherheit",
         hint: "Passwort und Benutzername des Logins, für alle Bereiche.",
-      },
-      imports: {
-        title: "Bestand abgleichen",
-        hint: "Lagerbestand aus deiner Excel-Tabelle übernehmen.",
       },
       backup: {
         title: "Datensicherung",
@@ -5633,6 +5632,8 @@ export const de = {
     salePrice: "Shop-Preis",
     priceAutomatic: (n: string) => `Automatisch · ${n} %`,
     priceManual: "Manuell",
+    /** Kurzform in der Tabellenzeile; den Prozentsatz zeigt der Editor. */
+    priceAuto: "Automatisch",
     priceNoBasis: "Kein Shop-Preis",
     priceModeAuto: (price: string) => `Automatisch (${price})`,
     priceModeManual: "Manueller Preis",
@@ -5690,6 +5691,11 @@ export const de = {
     draftPending: (delta: number) =>
       `${delta > 0 ? "+" : "−"}${Math.abs(delta)} noch nicht gespeichert`,
     draftReserved: (n: number) => `${n} reserviert`,
+    draftSaving: "Wird gespeichert …",
+    draftSaved: "Gespeichert",
+    /* Die Bestandsspalte der Tabelle: jeder Klick ist eine Buchung um 1. */
+    increaseBooked: (name: string) => `Bestand von ${name} um 1 erhöhen`,
+    decreaseBooked: (name: string) => `Bestand von ${name} um 1 verringern`,
 
     /* Die Historientabelle. */
     historyCount: (n: number) => (n === 1 ? "1 Eintrag" : `${n} Einträge`),
@@ -5741,10 +5747,103 @@ export const de = {
     deltaRequired: "Die Veränderung muss eine Zahl ungleich null sein.",
     costPositive: "Stückkosten müssen größer als 0 sein.",
     pricePositive: "Der Preis muss größer als 0 sein.",
-    /** „Im Shop" heißt freigegeben, nicht „gerade lieferbar" (ADR-0048). */
-    soldOutHint: "Aktuell ausverkauft",
-    noPriceHint: "Kein Shop-Preis — erscheint nicht im Shop.",
+    /* „Im Shop" heißt freigegeben, nicht „gerade lieferbar" (ADR-0048). Die
+       zwei früheren Hinweise „ausverkauft" und „kein Shop-Preis" sagt jetzt
+       `status` unten, für Karte und Tabelle gleich. */
     wouldGoNegative: "Der Bestand würde unter das Reservierte fallen.",
+
+    /*
+     * DER SHOPSTATUS EINER POSITION (Lagerverwaltung V2, `position-status.ts`).
+     *
+     * Ein kurzes Etikett für die Marke und ein Satz, der sagt, warum — und
+     * wo etwas zu tun ist, was. „Freigabe offen" benennt eine Entscheidung,
+     * die beim Betreiber liegt; es ist keine Aufforderung, alles freizugeben.
+     */
+    status: {
+      offered: {
+        label: "Im Shop",
+        hint: "Freigegeben, mit Preis und freiem Bestand — kaufbar.",
+      },
+      listed_no_price: {
+        label: "Ohne Preis",
+        hint: "Freigegeben, aber ohne Shop-Preis — erscheint nicht im Shop. "
+          + "Preis setzen oder Freigabe zurücknehmen.",
+      },
+      listed_hidden: {
+        label: "Nicht sichtbar",
+        hint: "Freigegeben, aber der Artikel ist im Katalog nicht aktiv oder nicht sichtbar — "
+          + "erscheint nicht im Shop.",
+      },
+      listed_sold_out: {
+        label: "Ausverkauft",
+        hint: "Freigegeben, aber kein freier Bestand — im Shop als ausverkauft sichtbar.",
+      },
+      release_open: {
+        label: "Freigabe offen",
+        hint: "Auf Lager, aber nicht freigegeben — erscheint erst nach deiner Freigabe im Shop.",
+      },
+      unlisted: {
+        label: "Nicht im Shop",
+        hint: "Nicht freigegeben und kein freier Bestand.",
+      },
+      accessory: {
+        label: "Zubehör",
+        hint: "Zubehör ohne Verkaufsfreigabe — erscheint nicht im Shop.",
+      },
+      historical: {
+        label: "Historisch",
+        hint: "Historische OVP-Position — nur noch als Beleg sichtbar.",
+      },
+      releaseOpenNoPrice:
+        "Auf Lager, aber nicht freigegeben und ohne Shop-Preis. Für eine Freigabe zuerst "
+        + "einen Preis setzen.",
+      /* Die zwei Arten Handlungsbedarf, als Wort an der Marke. */
+      attentionFix: "Korrektur nötig",
+      attentionDecision: "Entscheidung offen",
+    },
+
+    /* Der Statusfilter: die Arten oben plus die zwei Sammelgruppen. */
+    statusFilter: "Status",
+    statusAll: "Alle Status",
+    statusGroupFix: "Korrektur nötig",
+    statusGroupAction: "Handlungsbedarf (alle)",
+    filterReset: "Filter zurücksetzen",
+
+    /*
+     * DIE BEWUSSTE FREIGABE (AP4).
+     *
+     * Freigeben stellt einen Artikel öffentlich zum Verkauf und braucht
+     * deshalb einen zweiten, ausdrücklichen Schritt. Zurücknehmen nimmt
+     * nichts weg, was nicht wiederherstellbar wäre, und geht sofort.
+     */
+    confirmListing: "Wirklich in den Shop?",
+    confirmListingYes: "Freigeben",
+    confirmListingNo: "Abbrechen",
+    confirmListingHint: (name: string) =>
+      `„${name}" wird sofort im Shop angeboten, sofern Preis und Bestand vorhanden sind.`,
+
+    /* Die Desktop-Tabelle. */
+    table: {
+      caption: "Lagerpositionen",
+      article: "Artikel",
+      stock: "Bestand",
+      reserved: "Reserviert",
+      marketPrice: "Marktpreis",
+      salePrice: "Verkaufspreis",
+      status: "Shopstatus",
+      details: "Details",
+      showDetails: (name: string) => `Details zu ${name} anzeigen`,
+      hideDetails: (name: string) => `Details zu ${name} ausblenden`,
+    },
+
+    /* Die zwei Abgleiche, als Einstiege über der Liste (AP5). */
+    reconcile: {
+      heading: "Abgleiche",
+      excel: "Excel-Bestandsabgleich",
+      excelHint: "Bestand aus der skylanders.xlsx übernehmen — mit Vorschau vor jeder Buchung.",
+      csv: "CSV-Verkaufsabgleich",
+      csvHint: "eBay-Verkaufsberichte mit dem Orderbuch abgleichen. Ändert keinen Bestand.",
+    },
   },
 
   /**

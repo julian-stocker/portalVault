@@ -65,7 +65,7 @@ describe("a tap is a movement", () => {
    */
   it("moves a draft by one, and the shelf by nothing", () => {
     expect(stepper).toContain("function bump(step: 1 | -1)");
-    expect(stepper).toContain("setDraft((current) => current + step)");
+    expect(stepper).toContain("setDraft(draft + step)");
     expect(stepper).toContain("bump(1)");
     expect(stepper).toContain("bump(-1)");
     // A tap is not a write: the only call that books sits in save().
@@ -80,8 +80,12 @@ describe("a tap is a movement", () => {
   it("writes nothing when the draft is back where it started", () => {
     // Not a zero-delta row the database would refuse anyway — no row at all,
     // because nothing happened.
-    expect(stepper).toContain("const dirty = delta !== 0;");
-    expect(stepper).toContain("if (!dirty) return;");
+    /* Since 2026-11-10 a booked draft awaiting its refresh is not dirty
+       either (`locked`) — that is the double-save guard, below. */
+    expect(stepper).toContain("const dirty = delta !== 0 && !locked;");
+    expect(stepper).toContain("if (!dirty || saving.current) return;");
+    /* Tapping back to the start drops the draft entirely. */
+    expect(stepper).toContain("setEntry(next === quantity ? null :");
   });
 
   it("offers the save only once there is something to save", () => {
@@ -137,11 +141,14 @@ describe("rapid taps", () => {
   });
 
   it("lands the draft on the server value once the save has gone through", () => {
-    // Adjusted while rendering, the way React documents it — an effect
-    // would render the stale number once and cascade a second pass.
-    expect(stepper).toContain("if (seen !== quantity) {");
-    expect(stepper).toContain("setDraft(quantity);");
+    // Derived while rendering — an effect would render the stale number
+    // once and cascade a second pass. A draft entry counts only while it
+    // was counted from the quantity the server last sent.
+    const drafts = code("src/components/admin/stock-drafts.tsx");
+    expect(drafts).toContain("entry.base === quantity ? entry : null");
+    expect(stepper).toContain("const draft = entry?.draft ?? quantity;");
     expect(stepper).not.toContain("useEffect");
+    expect(drafts).not.toContain("useEffect");
     expect(stepper).toContain("startTransition(async () => {");
     expect(stepper).toContain("router.refresh();");
   });
@@ -159,7 +166,8 @@ describe("the floor", () => {
     // reserved is never below 0, so this covers negative stock as well.
     expect(stepper).toContain("const floor = draftFloor(reserved);");
     expect(stepper).toContain("if (step === -1 && draft <= floor)");
-    expect(stepper).toContain("disabled={pending || draft <= floor}");
+    expect(stepper).toContain("disabled={busy || draft <= floor}");
+    expect(stepper).toContain("const busy = pending || locked;");
   });
 
   it("does not replace the database's guard", () => {

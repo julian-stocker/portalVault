@@ -82,6 +82,28 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Lagerverwaltung V2 (2026-11-10) — **gebaut, nicht committet, keine Migration**
+
+Die Lagerseite `/business/inventory` ist die **Lagerverwaltung**. Reine Oberfläche: Es gibt keine
+neue Buchungs-, Preis-, Freigabe- oder Importlogik. Jede Schreibaktion ist dieselbe wie vorher
+(`bookMovement`, `setListing`, `setSaleRelease`, `setDeliveryScope`, `setUskRating`), und das
+Bestandsjournal wird nur gelesen.
+
+| Was | Wo |
+|---|---|
+| **Shopstatus je Position** aus den vorhandenen Regeln (`isOffered`, `isShopGoods`, `isOperativeCondition`): Im Shop · Ohne Preis · Nicht sichtbar · Ausverkauft · Freigabe offen · Nicht im Shop · Zubehör · Historisch. Handlungsbedarf ist gekennzeichnet: „Korrektur nötig" (freigegeben, aber nicht im Shop) und „Entscheidung offen" (Bestand, nicht freigegeben) | `src/lib/admin/position-status.ts` |
+| **Statusfilter**, dazu die Sammelgruppen „Handlungsbedarf" und „Korrektur nötig". **Alle Filter stehen in der Adresse** (`?q=`, `?serie=`, `?bestand=`, `?shop=`, `?art=`, `?status=`, deutsche Wörter, Unbekanntes heißt „alle"). Zurück macht eine Auswahl rückgängig, Tippen erzeugt keine Verlaufseinträge, „Filter zurücksetzen" | `src/lib/admin/inventory-filter.ts`, `inventory-view.tsx` |
+| **Desktop-Tabelle** ab `md:` (768 px) mit einheitlich hohen Zeilen und den Spalten Artikel · Bestand · Reserviert · Marktpreis · Verkaufspreis · Shopstatus. **Die Zeile ist nur zum Lesen da.** Mengenregler, Preiseditor, Shop-Schalter, Zähler, Zubehörblock und Historie erscheinen erst in der aufgeklappten Zeile. Unter `md:` bleiben die Karten. **CSS wählt die Ansicht**, sodass das Server-HTML schon richtig ist und nichts umspringt. Die verborgene Ansicht steht auf `display: none` und ist damit nicht bedienbar | `inventory-table.tsx`, `inventory-view.tsx` |
+| **Bestand direkt in der Tabelle**: Die Bestandsspalte zeigt dauerhaft `[−] n [+]` (`InstantStockControl`). Jeder Klick bucht genau ±1 über `bookMovement` (`correction`), immer nur eine Buchung zur Zeit, und nie unter die Reservierung. Eine Ablehnung lässt die Zahl stehen und zeigt den Grund in der Zeile. **Das ist die einzige Mengensteuerung der Tabelle**; die aufgeklappten Details haben keine. Die mobilen Karten behalten den Entwurf mit „Bestand speichern". Eine Buchung in der Spalte verwirft einen offenen Kartenentwurf derselben Position (`StockDraftProvider`). Während die Karte speichert, wartet die Spalte, und vor dem neuen Bestand gibt es keinen zweiten Speichern-Knopf | `instant-stock-control.tsx`, `stock-drafts.tsx`, `stock-stepper.tsx` |
+| **Gemeinsame Bausteine** von Karte und Tabelle | `position-title.tsx`, `position-status.tsx`, `listing-switch.tsx`, `release-toggle.tsx`, `accessory-sale-controls.tsx`, `position-history.tsx` |
+| **Freigabe nur nach Bestätigung**: Shopfreigabe und Verkaufsfreigabe für Zubehör brauchen einen zweiten Klick. Zurücknehmen geht sofort | `release-toggle.tsx` |
+| **Abgleiche als Einstiege in der Lagerverwaltung**: „Excel-Bestandsabgleich" führt zur unveränderten Importseite `/business/inventory/import`. „CSV-Verkaufsabgleich" führt zu `/business/orderbuch/abgleich`, aber nur, wenn `reconciliationEnvironment()` und `canOperateSeller()` zustimmen, also nur auf Staging | `business/inventory/page.tsx` |
+| **Händlerübersicht**: Die Kachel „Lagerbestand" heißt „Lagerverwaltung". Die eigene Kachel „Bestand abgleichen" (Excel) entfällt, weil ihr Ziel jetzt ein Einstieg in der Lagerverwaltung ist | `business/page.tsx` |
+
+**Bewusst nicht geändert:** Die Importseite, die Importhistorie und `legacy_stock_events` sind
+unberührt. **Keine Position wird automatisch freigegeben**; die offenen Freigaben stehen nur im
+Filter „Freigabe offen".
+
 ## Verkaufsabgleich — Phase 3 (2026-11-03) — **auf Staging angewendet, Production nicht**
 
 Datenbank und Serverschicht des Abgleichs (ADR-0174). **`0169`–`0174` laufen auf Staging seit dem

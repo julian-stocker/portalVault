@@ -31,6 +31,11 @@ function sql(path: string): string {
 }
 
 const CARD = code("src/components/admin/inventory-card.tsx");
+/* Since Lagerverwaltung V2 the history and the title are shared components,
+   used by the card and by the desktop table alike. */
+const HISTORY_PART = code("src/components/admin/position-history.tsx");
+const TITLE = code("src/components/admin/position-title.tsx");
+const TABLE = code("src/components/admin/inventory-table.tsx");
 const LEDGER = code("src/components/admin/stock-ledger.tsx");
 const HISTORY = code("src/lib/admin/stock-history.ts");
 const PAGE = code("src/app/(business)/business/inventory/page.tsx");
@@ -76,12 +81,20 @@ describe("the three numbers at the top of a card", () => {
      * the list it later fetches is capped and must stay out of the
      * arithmetic. A card that adds up rows is a card that undercounts.
      */
-    expect(CARD).not.toMatch(/tradeCounters\([^)]*(movements|entries|history)/);
+    for (const view of [CARD, TABLE]) {
+      expect(view).not.toMatch(/tradeCounters\([^)]*(movements|entries|history)/);
+      expect(view).toContain("tradeCounters(legacyTotals, tradeTotals)");
+      // Neither view fetches a history itself; the shared part does.
+      expect(view).not.toContain("loadCardHistory(");
+      expect(view).toContain("<PositionHistory position={position} />");
+    }
     // The fetch happens in the toggle and nowhere else — the counters are
     // already on screen before a single timeline row exists.
-    expect((CARD.match(/loadCardHistory\(/g) ?? []).length).toBe(1);
-    const toggle = CARD.slice(CARD.indexOf("function toggleHistory"));
+    expect((HISTORY_PART.match(/loadCardHistory\(/g) ?? []).length).toBe(1);
+    const toggle = HISTORY_PART.slice(HISTORY_PART.indexOf("function toggleHistory"));
     expect(toggle).toContain("loadCardHistory(");
+    // And the history knows nothing of the counters.
+    expect(HISTORY_PART).not.toContain("tradeCounters");
   });
 
   it("takes stock from the position, never from the history", () => {
@@ -117,9 +130,9 @@ describe("the detailed booking is off the card", () => {
 
 describe("the history is one list from two sources", () => {
   it("merges them rather than rendering two blocks", () => {
-    expect(CARD).toContain("mergeHistory(");
-    expect(CARD).toContain("history?.legacy ?? []");
-    expect(CARD).toContain("history?.movements ?? []");
+    expect(HISTORY_PART).toContain("mergeHistory(");
+    expect(HISTORY_PART).toContain("history?.legacy ?? []");
+    expect(HISTORY_PART).toContain("history?.movements ?? []");
     expect(LEDGER).toContain("entries.map((entry)");
   });
 
@@ -131,7 +144,7 @@ describe("the history is one list from two sources", () => {
   });
 
   it("fetches BOTH sources only when a card is opened, in one round trip", () => {
-    expect(CARD).toContain(
+    expect(HISTORY_PART).toContain(
       "loadCardHistory(position.skyId, position.condition, position.inventoryId)",
     );
     expect(PAGE).not.toContain("fetchLegacyEvents");
@@ -159,10 +172,12 @@ describe("the history is one list from two sources", () => {
     expect(PAGE).not.toContain("fetchMovements");
     expect(PAGE).not.toMatch(/positions\s*\.\s*map/);
     expect(PAGE).not.toMatch(/Promise\.all\(\s*positions/);
-    // Two awaits on the whole page: the one batch, and the position read.
+    // Three awaits on the whole page: the one batch, the position read, and
+    // since Lagerverwaltung V2 the one operator check that decides whether
+    // the CSV entry is shown. None of them per position.
     expect((PAGE.match(/await Promise\.all\(/g) ?? []).length).toBe(1);
     const awaited = [...PAGE.matchAll(/await\s+([A-Za-z]+)\(/g)].map((m) => m[1]);
-    expect(awaited).toEqual(["fetchInventory"]);
+    expect(awaited).toEqual(["fetchInventory", "canOperateSeller"]);
   });
 
   it("keeps the timeline limit small and purely visual", () => {
@@ -397,6 +412,8 @@ describe("the rebuilt grid, at both widths", () => {
   });
 
   it("gives the header one flexible part, and it is the name", () => {
-    expect(CARD).toContain('<p className="min-w-0 flex-1 truncate text-xs leading-tight">');
+    expect(TITLE).toContain('<span className="min-w-0 flex-1 truncate text-xs leading-tight">');
+    expect(CARD).toContain("<PositionTitle position={position} />");
+    expect(TABLE).toContain("<PositionTitle position={position} />");
   });
 });

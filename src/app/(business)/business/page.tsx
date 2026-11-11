@@ -53,6 +53,14 @@ const AREAS: readonly {
 }[] = [
   { href: "/business/profile", copy: de.business.areas.profile },
   { href: "/business/offers", copy: de.business.areas.offers },
+  /*
+   * LAGERVERWALTUNG (Lagerverwaltung V2). Bis 2026-11-10 gab es daneben eine
+   * eigene Kachel „Bestand abgleichen" für den Excel-Import. Die Abgleiche
+   * sind jetzt Einstiege IN der Lagerverwaltung — der Excel-Bestandsabgleich
+   * und, wo er existiert, der CSV-Verkaufsabgleich —, also führt eine Kachel
+   * dorthin, statt zwei Kacheln zu verschiedenen Hälften derselben Arbeit.
+   * Die Importseite selbst bleibt unverändert unter `/business/inventory/import`.
+   */
   { href: "/business/inventory", copy: de.business.areas.inventory },
   { href: "/business/orders", copy: de.business.areas.orders, channel: "orders" },
   { href: "/business/nachrichten", copy: de.business.areas.messages, channel: "messages" },
@@ -61,7 +69,6 @@ const AREAS: readonly {
   { href: "/business/legal", copy: de.business.areas.legal },
   { href: "/business/reports", copy: de.business.areas.reports },
   { href: "/business/widerrufe", copy: de.business.areas.withdrawals },
-  { href: "/business/inventory/import", copy: de.business.areas.imports },
   { href: "/business/datensicherung", copy: de.business.areas.backup },
   /*
    * DIE GEMEINSAMEN KONTOEINSTELLUNGEN, AUCH VON HIER AUS (0099).

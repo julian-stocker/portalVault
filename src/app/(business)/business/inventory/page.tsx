@@ -1,19 +1,23 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { InventoryView } from "@/components/admin/inventory-view";
 import { fetchInventory, fetchShopSettings, fetchTradeTotals } from "@/lib/admin/inventory";
 import { fetchLegacyTotals } from "@/lib/admin/legacy-stock";
+import { canOperateSeller } from "@/lib/auth/capabilities";
 import { fetchAccessoryCatalog, fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { de } from "@/lib/i18n/de";
+import { RECONCILIATION_PATH } from "@/lib/reconciliation/routes";
+import { reconciliationEnvironment } from "@/lib/reconciliation/server/queries";
 
 export const metadata: Metadata = { title: `${de.inventory.title} · ${de.admin.title}` };
 
 /**
- * The operator's stock.
+ * The operator's stock — the Lagerverwaltung.
  *
- * Protected by `(admin)/layout.tsx` like every other page here — and by the
- * database underneath it, where all four shop functions ask
- * `is_shop_admin()` themselves (ADR-0037, migration 0005).
+ * Protected by `(business)/layout.tsx` like every page of the seller's area
+ * (`capabilities().sellerOperator`, ADR-0077) — and by the database
+ * underneath it, where every shop write asks for the seller operator itself.
  *
  * The catalog is loaded with hidden figures included, the same call the admin
  * catalog uses: a figure taken out of the public catalog can still sit in a
@@ -75,10 +79,45 @@ export default async function InventoryPage() {
    */
   const { positions, outsideScope } = await fetchInventory([...catalog, ...accessories]);
 
+  /*
+   * DIE ZWEI ABGLEICHE, ALS EINSTIEGE (Lagerverwaltung V2, AP5).
+   *
+   * Excel: der Bestandsabgleich aus `skylanders.xlsx` (ADR-0087), unverändert
+   * unter `/business/inventory/import` — er ist der einzige, der Bestand
+   * bucht, und das erst nach seiner eigenen Vorschau.
+   *
+   * CSV: der Verkaufsabgleich des Orderbuchs (ADR-0174/0178). Er ändert
+   * keinen Bestand. Gezeigt nur unter GENAU den Bedingungen, unter denen
+   * seine Route antwortet — dieselbe Umgebungsprüfung und dieselbe
+   * Betreiberprüfung, die `queries.ts` vor jedem Lesen stellt. Auf
+   * Production fehlt der Einstieg also, wie auf der Verkaufsliste.
+   */
+  const csvReconciliation = reconciliationEnvironment() && (await canOperateSeller());
+  const links = de.inventory.reconcile;
+
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pt-8 pb-10 md:pt-12">
       <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{de.inventory.title}</h1>
-      <p className="mt-1 mb-6 text-sm text-muted">{de.inventory.subline}</p>
+      <p className="mt-1 text-sm text-muted">{de.inventory.subline}</p>
+
+      <nav aria-label={links.heading} className="mt-3 mb-6 grid gap-2 sm:grid-cols-2">
+        <Link
+          href="/business/inventory/import"
+          className="focus-ring flex min-h-11 flex-col justify-center rounded-sky-md bg-surface/80 px-3 py-2 text-sm ring-1 ring-border/70 hover:ring-border-strong"
+        >
+          <span className="font-medium">{links.excel}</span>
+          <span className="block text-[11px] leading-tight text-muted">{links.excelHint}</span>
+        </Link>
+        {csvReconciliation ? (
+          <Link
+            href={RECONCILIATION_PATH}
+            className="focus-ring flex min-h-11 flex-col justify-center rounded-sky-md bg-surface/80 px-3 py-2 text-sm ring-1 ring-border/70 hover:ring-border-strong"
+          >
+            <span className="font-medium">{links.csv}</span>
+            <span className="block text-[11px] leading-tight text-muted">{links.csvHint}</span>
+          </Link>
+        ) : null}
+      </nav>
 
       <InventoryView
         positions={positions}

@@ -41,6 +41,12 @@ const MODEL = "src/lib/admin/inventory-model.ts";
 
 const view = codeOf(VIEW);
 const card = codeOf(CARD);
+/* Seit Lagerverwaltung V2 geteilt von Karte und Desktop-Tabelle. */
+const title = codeOf("src/components/admin/position-title.tsx");
+const listing = codeOf("src/components/admin/listing-switch.tsx");
+const toggle = codeOf("src/components/admin/release-toggle.tsx");
+const history = codeOf("src/components/admin/position-history.tsx");
+const table = codeOf("src/components/admin/inventory-table.tsx");
 const model = codeOf(MODEL);
 
 // ---------------------------------------------------------------------------
@@ -148,20 +154,28 @@ describe("die Karte einer historischen OVP-Position", () => {
 
   it("zeigt das Etikett weiterhin — auch OVP", () => {
     // Die Vergangenheit wird benannt, nicht umgeschrieben.
-    expect(card).toContain("position.condition === \"loose\" ? copy.conditionLoose : copy.conditionBoxed");
-    expect(card).toContain("{` · ${conditionLabel}`}");
+    expect(title).toContain("position.condition === \"loose\" ? copy.conditionLoose : copy.conditionBoxed");
+    expect(title).toContain("{` · ${conditionLabel}`}");
+    /* Karte und Tabelle benennen eine Position mit derselben Komponente. */
+    expect(card).toContain("<PositionTitle position={position} />");
+    expect(table).toContain("<PositionTitle position={position} />");
   });
 
   it("bietet den Listungsknopf nur operativ an", () => {
     /* Über `sellable`, das `operative` enthält — siehe oben. */
     const at = card.indexOf("{sellable ? (");
     expect(at).toBeGreaterThan(-1);
-    // Der Knopf hängt an `save({ isListed: … })`, und das führt zu
-    // set_shop_listing — seit 0108 für OVP abgelehnt.
-    expect(card).toContain("save({ isListed: !position.isListed })");
+    // Der Schalter ist `ListingSwitch`, und der führt zu set_shop_listing
+    // — seit 0108 für OVP abgelehnt. Er hängt an `sellable`, in der Karte
+    // wie in der Tabelle.
     const listingBlock = card.slice(at, card.indexOf("</div>", at));
-    expect(listingBlock).toContain("onClick={() => save({ isListed: !position.isListed })}");
-    expect(listingBlock).toContain("</button>");
+    expect(listingBlock).toContain("<ListingSwitch position={position} onFailed={setFailed} />");
+    expect(table).toMatch(/\{sellable \? \(\s*<div[^>]*>\s*<span[^>]*>\{copy\.listingFilter\}<\/span>\s*<ListingSwitch position=\{position\} onFailed=\{setFailed\} \/>/);
+    expect(listing).toContain("setListing({");
+    expect(listing).toContain("isListed: next,");
+    /* Preis und Notiz bleiben, wie sie sind — nur die Freigabe ändert sich. */
+    expect(listing).toContain("salePrice: position.salePrice,");
+    expect(toggle).toContain("aria-pressed={on}");
     // Im historischen Fall bleibt derselbe Zustand als Text stehen.
     expect(listingBlock).toContain("{position.isListed ? copy.listed : copy.notListed}");
     /* Bei ZUBEHÖR steht stattdessen die Art da (ADR-0128): „Nicht im Shop"
@@ -196,9 +210,13 @@ describe("die Karte einer historischen OVP-Position", () => {
      * liest, und 0108 schließt nur Schreibwege. Eine Zeile ohne ihre
      * Geschichte wäre eine Zahl ohne Herkunft.
      */
-    const history = card.slice(card.indexOf("loadCardHistory"));
-    expect(history.slice(0, 200)).not.toContain("operative");
-    expect(card).toContain("<StockLedger");
+    const laden = history.slice(history.indexOf("loadCardHistory"));
+    expect(laden.slice(0, 200)).not.toContain("operative");
+    expect(history).not.toContain("operative");
+    expect(history).toContain("<StockLedger");
+    /* Und beide Ansichten zeigen sie ohne Bedingung. */
+    expect(card).toContain("<PositionHistory position={position} />");
+    expect(table).toContain("<PositionHistory position={position} />");
   });
 });
 

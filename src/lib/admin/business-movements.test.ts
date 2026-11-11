@@ -177,8 +177,10 @@ describe("history and the counters read the same thing", () => {
 
   it("filters nothing in the browser, where the two could drift apart", () => {
     const card = code("src/components/admin/inventory-card.tsx");
+    const table = code("src/components/admin/inventory-table.tsx");
+    const part = code("src/components/admin/position-history.tsx");
     const history = code("src/lib/admin/stock-history.ts");
-    for (const source of [card, history]) {
+    for (const source of [card, table, part, history]) {
       expect(source).not.toContain("is_test");
       expect(source).not.toContain("commerce_mode");
       expect(source).not.toContain("initial_import");
@@ -190,7 +192,8 @@ describe("history and the counters read the same thing", () => {
      * timeline happens to hold.
      */
     expect(card).toContain("tradeCounters(legacyTotals, tradeTotals)");
-    expect(card).toContain("mergeHistory(");
+    expect(table).toContain("tradeCounters(legacyTotals, tradeTotals)");
+    expect(part).toContain("mergeHistory(");
     const totals = readFileSync("supabase/migrations/0086_business_trade_totals.sql", "utf8");
     expect(totals).toContain("create or replace view public.business_movements");
     for (const fn of ["seller_business_movements", "seller_business_trade_totals"]) {

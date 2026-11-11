@@ -14,7 +14,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  kindsInStock, matchesFilters, visiblePositions, NO_FILTERS,
+  filtersFromParams, filtersToQuery, hasActiveFilters, kindsInStock, matchesFilters,
+  visiblePositions, NO_FILTERS, STATUS_FILTERS,
   type InventoryFilters,
 } from "./inventory-filter.ts";
 import type { InventoryPosition } from "@/lib/admin/inventory-model";
@@ -229,5 +230,87 @@ describe("welche Arten der Filter anbietet", () => {
 
   it("ein leeres Lager bietet keine an", () => {
     expect(kindsInStock([])).toEqual([]);
+  });
+});
+
+/* ===================================================================== */
+describe("Filter nach Shopstatus (Lagerverwaltung V2)", () => {
+  /*
+   * Im Lager oben: BASH im Shop · JETVAC nicht freigegeben, leer ·
+   * SPIEL Zubehör ohne Verkaufsfreigabe · PORTAL ebenso · FREMD freigegeben,
+   * aber ohne Katalogzeile.
+   */
+  it("eine einzelne Art", () => {
+    expect(ids(visiblePositions(LAGER, mit({ status: "offered" })))).toEqual(["SKY-0001"]);
+    expect(ids(visiblePositions(LAGER, mit({ status: "unlisted" })))).toEqual(["SKY-0200"]);
+    expect(ids(visiblePositions(LAGER, mit({ status: "accessory" })))).toEqual(["SKY-0307", "SKY-0632"]);
+    expect(ids(visiblePositions(LAGER, mit({ status: "listed_hidden" })))).toEqual(["SKY-9998"]);
+  });
+
+  it("„Korrektur nötig“ zeigt, was freigegeben ist und trotzdem nicht im Shop steht", () => {
+    expect(ids(visiblePositions(LAGER, mit({ status: "fix" })))).toEqual(["SKY-9998"]);
+  });
+
+  it("„Handlungsbedarf“ nimmt die offenen Freigaben dazu", () => {
+    const offen = position({ inventoryId: 6, skyId: "SKY-0300", quantity: 2, isListed: false });
+    expect(ids(visiblePositions([...LAGER, offen], mit({ status: "action" }))))
+      .toEqual(["SKY-9998", "SKY-0300"]);
+  });
+
+  it("wirkt zusammen mit den anderen Filtern", () => {
+    expect(ids(visiblePositions(LAGER, mit({ status: "accessory", kind: "portal" })))).toEqual(["SKY-0632"]);
+    expect(ids(visiblePositions(LAGER, mit({ status: "offered", query: "jet" })))).toEqual([]);
+  });
+
+  it("bietet beide Gruppen und jede Art genau einmal an", () => {
+    expect(STATUS_FILTERS.slice(0, 2)).toEqual(["action", "fix"]);
+    expect(new Set(STATUS_FILTERS).size).toBe(STATUS_FILTERS.length);
+  });
+});
+
+/* ===================================================================== */
+describe("die Filter in der Adresse", () => {
+  const params = (q: string) => new URLSearchParams(q);
+
+  it("die ungefilterte Liste ist die nackte Adresse", () => {
+    expect(filtersToQuery(NO_FILTERS)).toBe("");
+    expect(hasActiveFilters(NO_FILTERS)).toBe(false);
+    expect(filtersFromParams(params(""))).toEqual(NO_FILTERS);
+  });
+
+  it("hin und zurück ergibt dieselben Filter — für jeden Wert", () => {
+    const alle: InventoryFilters[] = [
+      mit({ query: "Pop Fizz", seriesCode: "SF" }),
+      mit({ stock: "in", listing: "unlisted" }),
+      mit({ stock: "out", listing: "listed", kind: "portal" }),
+      ...STATUS_FILTERS.map((status) => mit({ status })),
+      ...(["figure", "game", "portal", "bundle", "other"] as const).map((kind) => mit({ kind })),
+    ];
+    for (const f of alle) {
+      expect(filtersFromParams(params(filtersToQuery(f))), filtersToQuery(f)).toEqual(f);
+      expect(hasActiveFilters(f)).toBe(true);
+    }
+  });
+
+  it("schreibt deutsche Wörter, keine internen Werte", () => {
+    expect(filtersToQuery(mit({ status: "release_open", stock: "in", kind: "game" })))
+      .toBe("bestand=auf-lager&art=spiele&status=freigabe-offen");
+  });
+
+  it("Unbekanntes heißt „alle“ — nie ein Fehler, nie übernommen", () => {
+    expect(filtersFromParams(params("status=loeschen&art=<script>&bestand=1&shop=yes")))
+      .toEqual(NO_FILTERS);
+    /* Interne Werte sind keine Adresswörter. */
+    expect(filtersFromParams(params("status=release_open&art=game")).status).toBe("all");
+  });
+
+  it("nimmt nur einen plausiblen Seriencode und eine begrenzte Suche", () => {
+    expect(filtersFromParams(params("serie=SF")).seriesCode).toBe("SF");
+    expect(filtersFromParams(params("serie=../x")).seriesCode).toBe("");
+    expect(filtersFromParams(params(`q=${"a".repeat(500)}`)).query).toHaveLength(100);
+  });
+
+  it("lässt eine leere Suche weg", () => {
+    expect(filtersToQuery(mit({ query: "   " }))).toBe("");
   });
 });

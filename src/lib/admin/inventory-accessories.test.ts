@@ -37,6 +37,10 @@ const VIEW = "src/components/admin/inventory-view.tsx";
 const CARD = "src/components/admin/inventory-card.tsx";
 const PANEL = "src/components/admin/inventory-overview.tsx";
 const PAGE = "src/app/(business)/business/inventory/page.tsx";
+/* Der Verkaufsblock ist seit Lagerverwaltung V2 eine eigene Komponente,
+   die Karte und Desktop-Tabelle gemeinsam nutzen. */
+const SALE = "src/components/admin/accessory-sale-controls.tsx";
+const TABLE = "src/components/admin/inventory-table.tsx";
 
 function figure(over: Partial<CatalogFigure> = {}): CatalogFigure {
   return {
@@ -158,16 +162,21 @@ describe("Zubehör ist Shopware — Stück für Stück (ADR-0129/0130)", () => {
   });
 
   it("der Verkaufsblock bietet die drei Angaben — und nur bei Zubehör", () => {
-    const card = code(CARD);
-    expect(card).toContain("const saleState = hasSaleControls(position)");
-    expect(card).toContain("{saleState !== null ? (");
+    /* Beide Ansichten zeigen den Block nur mit Verkaufszustand, also nur
+       bei Zubehör. */
+    for (const ansicht of [code(CARD), code(TABLE)]) {
+      expect(ansicht).toContain("const saleState = hasSaleControls(position)");
+      expect(ansicht).toContain("{saleState !== null ? (");
+      expect(ansicht).toContain("<AccessorySaleControls position={position} saleState={saleState}");
+    }
+    const block = code(SALE);
     /* Drei Aufrufe, nicht einer: wer Preis und Freigabe zusammenlegt, gibt
        irgendwann beim Preispflegen versehentlich frei. */
     for (const aufruf of ["saveRelease", "saveScope", "saveUsk"]) {
-      expect(card, aufruf).toContain(aufruf);
+      expect(block, aufruf).toContain(aufruf);
     }
     /* Die USK nur bei Spielen — ein Portal trägt keine. */
-    expect(card).toContain('saleState.itemType === "game"');
+    expect(block).toContain('saleState.itemType === "game"');
   });
 
   it("der GRUND kommt aus der Datenbank, nicht aus dem Browser", () => {
@@ -176,12 +185,15 @@ describe("Zubehör ist Shopware — Stück für Stück (ADR-0129/0130)", () => {
      * genau einmal. Hier wird sie übersetzt, nicht nachgerechnet — sonst
      * gäbe es zwei Wahrheiten, und sie liefen auseinander.
      */
-    const card = code(CARD);
-    expect(card).toContain("copy.saleReasons[saleState.reason]");
-    /* Kein Nachbau der Bedingungen im Browser. */
-    for (const regel of ["usk_rating", "catalog_visible", "item_type ===",
-      "deliveryScope === null &&"]) {
-      expect(card, regel).not.toContain(regel);
+    const block = code(SALE);
+    expect(block).toContain("copy.saleReasons[saleState.reason]");
+    /* Kein Nachbau der Bedingungen im Browser — weder im Block noch in
+       den Ansichten, die ihn zeigen. */
+    for (const quelle of [block, code(CARD), code(TABLE)]) {
+      for (const regel of ["usk_rating", "catalog_visible", "item_type ===",
+        "deliveryScope === null &&"]) {
+        expect(quelle, regel).not.toContain(regel);
+      }
     }
     /* Jeder Grund der Leiter hat einen deutschen Satz. */
     const mig = readFileSync("supabase/migrations/0139_accessory_sale_release.sql", "utf8");

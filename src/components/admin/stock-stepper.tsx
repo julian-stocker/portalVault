@@ -29,15 +29,24 @@
  * `select … for update`. The consequence is visible and correct: if the
  * stock moved underneath you, your saved difference still applies to the new
  * value rather than resetting it to the number on your screen.
+ *
+ * ONE DRAFT PER POSITION, AND ONE SAVE PER DRAFT (2026-11-10). The draft lives
+ * in `useStockDraft()`: inside the stock list it is shared by the table's
+ * details and the card, so two views can never hold two unsaved
+ * differences for the same position. While a save is on its way, and after it
+ * succeeded until the refresh brings the new quantity, the entry is marked
+ * and the save button is gone — a second click cannot book a second movement.
  */
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 
+import { useStockDraft } from "@/components/admin/stock-drafts";
 import { ACTION_PRIMARY } from "@/components/ui/action";
 import { bookMovement } from "@/lib/admin/actions";
 import type { Condition } from "@/lib/admin/inventory-model";
+import { positionKey } from "@/lib/admin/position-key";
 import { draftDelta, draftFloor } from "@/lib/admin/stock-history";
 import { formatNumber } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -51,7 +60,7 @@ import { de } from "@/lib/i18n/de";
  * the size a thumb needs and the size the visible button does not have to
  * be. `touch-manipulation` drops the 300 ms double-tap wait.
  */
-const STEP =
+export const STEP =
   "relative flex h-7 w-7 shrink-0 touch-manipulation items-center justify-center rounded-full " +
   "text-base leading-none font-medium ring-1 transition-colors disabled:opacity-40 " +
   "after:absolute after:-inset-2 after:content-['']";
@@ -73,33 +82,36 @@ export function StockStepper({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [draft, setDraft] = useState(quantity);
+  const [entry, setEntry] = useStockDraft(positionKey(skyId, condition), quantity);
   const [atFloor, setAtFloor] = useState(false);
+  /* Two clicks inside one tick would both find `pending` still false. */
+  const saving = useRef(false);
 
   /*
-   * Follow the server when it moves — adjusted during render, not in an
+   * Follow the server when it moves — derived while rendering, not in an
    * effect.
    *
-   * After a save `router.refresh()` brings a new `quantity` down and the
-   * draft has to land on it, rather than keep showing the number that has
-   * just been written. React's documented way to do that is to compare the
-   * prop with a remembered copy while rendering; an effect would render
-   * once with the stale number first and cascade a second pass.
+   * A draft entry belongs to the quantity it was counted from
+   * (`useStockDraft` returns it only while `entry.base === quantity`). After
+   * a save `router.refresh()` brings a new `quantity` down and the draft
+   * lands on it, rather than keep showing the number that has just been
+   * written; an effect would render once with the stale number first.
    *
    * It also means a stock change from elsewhere resets an unsaved draft.
    * That is the honest outcome: the baseline the taps were counted from is
    * gone, and re-tapping against the real number beats saving a difference
    * measured from one that no longer exists.
    */
-  const [seen, setSeen] = useState(quantity);
-  if (seen !== quantity) {
-    setSeen(quantity);
-    setDraft(quantity);
-  }
+  const draft = entry?.draft ?? quantity;
+  const locked = entry !== null && entry.state !== "draft";
+  const setDraft = (next: number) =>
+    setEntry(next === quantity ? null : { base: quantity, draft: next, state: "draft" });
 
   const floor = draftFloor(reserved);
   const delta = draftDelta(draft, quantity);
-  const dirty = delta !== 0;
+  /* Booked or on its way is not dirty: nothing is left to save. */
+  const dirty = delta !== 0 && !locked;
+  const busy = pending || locked;
 
   function bump(step: 1 | -1) {
     onFailed(null);
@@ -108,28 +120,45 @@ export function StockStepper({
       return;
     }
     setAtFloor(false);
-    setDraft((current) => current + step);
+    setDraft(draft + step);
+  }
+
+  function discard() {
+    setEntry(null);
+    setAtFloor(false);
+    onFailed(null);
   }
 
   function save() {
     // Nothing happened, so nothing is recorded. Not a no-op movement, not a
     // zero-delta row the database would refuse anyway.
-    if (!dirty) return;
+    if (!dirty || saving.current) return;
+    saving.current = true;
     onFailed(null);
+    const counted = { base: quantity, draft };
+    setEntry({ ...counted, state: "saving" });
     startTransition(async () => {
-      const result = await bookMovement({
-        skyId,
-        condition,
-        delta,
-        // A recount, either direction. Not a new reason invented for a
-        // button — see the header.
-        reason: "correction",
-      });
-      if (!result.ok) {
-        onFailed(result.message);
-        return;
+      try {
+        const result = await bookMovement({
+          skyId,
+          condition,
+          delta,
+          // A recount, either direction. Not a new reason invented for a
+          // button — see the header.
+          reason: "correction",
+        });
+        if (!result.ok) {
+          /* Refused: the draft stays, unsaved, beside the reason. */
+          setEntry({ ...counted, state: "draft" });
+          onFailed(result.message);
+          return;
+        }
+        /* Booked. The entry stays "saved" until the new quantity arrives. */
+        setEntry({ ...counted, state: "saved" });
+        router.refresh();
+      } finally {
+        saving.current = false;
       }
-      router.refresh();
     });
   }
 
@@ -140,7 +169,7 @@ export function StockStepper({
           type="button"
           onClick={() => bump(-1)}
           aria-label={de.inventory.decrease}
-          disabled={pending || draft <= floor}
+          disabled={busy || draft <= floor}
           className={`${STEP} bg-danger/15 text-danger ring-danger/40 hover:bg-danger/25`}
         >
           <span aria-hidden="true">−</span>
@@ -165,7 +194,7 @@ export function StockStepper({
           type="button"
           onClick={() => bump(1)}
           aria-label={de.inventory.increase}
-          disabled={pending}
+          disabled={busy}
           className={`${STEP} bg-success/15 text-success ring-success/40 hover:bg-success/25`}
         >
           <span aria-hidden="true">+</span>
@@ -187,7 +216,7 @@ export function StockStepper({
           </button>
           <button
             type="button"
-            onClick={() => { setDraft(quantity); setAtFloor(false); onFailed(null); }}
+            onClick={discard}
             disabled={pending}
             className="min-h-8 px-1.5 text-[11px] text-muted underline underline-offset-2 disabled:opacity-50"
           >
@@ -197,6 +226,14 @@ export function StockStepper({
             {de.inventory.draftPending(delta)}
           </span>
         </div>
+      ) : null}
+
+      {/* While the movement is on its way, and once it is booked until the
+          new number arrives: said in words, and no button to press twice. */}
+      {locked ? (
+        <span role="status" className="text-center text-[10px] leading-tight text-muted">
+          {entry?.state === "saving" ? de.inventory.draftSaving : de.inventory.draftSaved}
+        </span>
       ) : null}
 
       {atFloor ? (
