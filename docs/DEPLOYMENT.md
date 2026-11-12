@@ -45,12 +45,33 @@ bewusst: eine dritte Umgebung kostet ein weiteres Supabase-Projekt, einen
 weiteren Satz Auth-Redirects, eine weitere Migrationskette im Rückstand — und
 sie beantwortet keine Frage, die der lokale Server nicht auch beantwortet.
 
-**Vercel-Preview-Deployments sind kein Staging.** Die Preview-Environment
-trägt dieselben `NEXT_PUBLIC_SUPABASE_*`-Werte wie Production (geprüft am
-2026-10-26, siehe „Auf Vercel"), ein Preview redet also mit der
-**Production-Datenbank**. Solange das so ist, ist ein Preview-Deployment zum
-Ausprobieren kein harmloser Vorgang, und die Prüfung einer neuen Oberfläche
-gehört auf den lokalen Server.
+**Vercel-Preview: Staging, und nur für einen Branch (ADR-0185, 2026-11-12).** Der Betreiber hat
+entschieden, dass `development/skyisles-v2` als **isolierte Staging-Preview** auf Vercel gebaut werden
+darf. Production wird dadurch weder verändert noch angesprochen. Dafür gelten drei Bedingungen:
+
+1. Die Variablen `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY` stehen in Vercel unter
+   „Preview“, **nur für diesen Branch**, mit den Werten von Staging (`qqxcpesbwfxzgytkdsac`).
+2. Deployment Protection (Vercel Authentication) ist für Previews aktiv.
+3. Jedes Preview, das noch mit Production-Werten gebaut wurde, ist gelöscht.
+
+**Stand:** Vercel-Konfiguration vom Betreiber am 2026-11-10 als eingerichtet bestätigt; technisch nicht unabhängig nachgeprüft. Gemeldet wurde: Production nutzt
+Production-Supabase, Preview nutzt Staging (für alle Previews, nicht branch-spezifisch), Vercel
+Authentication ist aktiv, alte Previews sind gelöscht, keine Supabase-Integrationen. Am 2026-10-26
+trug „Preview“ noch die Production-Werte. Ein erster Push nach der Umstellung erfolgte am
+2026-11-10; eine Vorschau wurde danach nicht im Browser geprüft. Die Werte werden beim Build fest in das
+Bundle eingesetzt. Ein Preview, das vor der Umstellung gebaut wurde, spricht deshalb weiter mit
+Production. Vor jedem Browsertest wird das tatsächliche Ziel im Netzwerkpanel geprüft. Andere
+Branches bleiben ohne Staging-Werte und sind keine Testadresse.
+
+**Sperre im Code (ADR-0185).** Eine Vercel-**Vorschau** (`VERCEL_ENV = preview`, jeder Branch), deren
+`NEXT_PUBLIC_SUPABASE_URL` nicht genau auf Staging zeigt, **baut nicht** (`next.config.ts`). Läuft
+doch eine, antwortet sie auf jede Seite, jeden Route-Handler und jede Server Action mit **503**
+(`src/proxy.ts`). Jeder serverseitige Supabase-Client wirft (`supabasePublicConfig()`). Production
+und lokale Entwicklung blockiert die Sperre nie. **Grenzen:** Ohne Vercel-Systemvariablen
+(`VERCEL_ENV`, `VERCEL_GIT_COMMIT_REF`) ist der Kontext nicht zu erkennen und wird nicht gesperrt.
+Production wird nicht geprüft; die Staging-Vorschau deshalb nie zu Production befördern. Direkte
+Aufrufe an Supabase gehen an der Sperre vorbei, dort schützt RLS. Sie ersetzt also nicht die
+Bestätigung im Dashboard, sondern fängt einen Fehler darin ab.
 
 ### Die beiden Befehle
 
@@ -160,11 +181,24 @@ unter `tools/` ihn brauchen (`npm run catalog:import`, `characters:import`,
 Nur die beiden `NEXT_PUBLIC_*`-Variablen, für **Production, Preview und
 Development**.
 
-**Und zwar mit denselben Werten** — Preview und Development zeigen auf das
-**Production**-Projekt (geprüft am 2026-10-26). Ein Preview-Deployment ist
-damit keine isolierte Umgebung, sondern Production-Daten unter einer anderen
-Adresse. Darum wird nicht auf Preview getestet, sondern lokal gegen Staging
-(siehe „Zwei Umgebungen").
+**Stand 2026-10-26: überall dieselben Werte.** Preview und Development zeigten auf das
+**Production**-Projekt. Ein solches Preview ist keine isolierte Umgebung, sondern Production-Daten
+unter einer anderen Adresse.
+
+**Soll (ADR-0185):**
+
+| Vercel-Umgebung | Branch | `NEXT_PUBLIC_SUPABASE_URL` / `…_ANON_KEY` |
+|---|---|---|
+| Production | `main` | Production (`zmiwxswrpkmizvqsgype`), unverändert |
+| Preview, branch-spezifisch | `development/skyisles-v2` | **Staging** (`qqxcpesbwfxzgytkdsac`) |
+| Preview, allgemein (alle anderen Branches) | – | keine Production-Werte. Leer lassen oder ebenfalls Staging. Ohne URL baut ein Preview, kann aber nichts laden |
+| Development | – | Staging oder leer, nie Production |
+
+Ein branch-spezifischer Wert geht dem allgemeinen Preview-Wert vor. Er gilt nur für Builds **nach**
+dem Speichern. Vercel-Konfiguration vom Betreiber am 2026-11-10 als eingerichtet bestätigt; technisch nicht unabhängig nachgeprüft. Eine Supabase-Integration aus dem Vercel-Marketplace darf diese Werte
+nicht verwalten, denn sie setzt sie für alle Umgebungen; laut Betreiber gibt es keine.
+
+**Offen, nicht geklärt:** Laut Betreiber (2026-11-10) liegt `SUPABASE_SERVICE_ROLE_KEY` in Vercel nur für Production. Diese Datei und `docs/CREDENTIALS_MAP.md` sagen, auf Vercel liege kein Service-Role-Key. Welche Aussage stimmt, ist nicht festgestellt. Fest steht nur: Der ausgelieferte Code liest keinen (`deployment-target.test.ts`, `production-write-guard.test.ts`).
 
 **`SUPABASE_SERVICE_ROLE_KEY` gehört nicht nach Vercel.** Kein Pfad im
 ausgelieferten Code liest ihn; er umgeht RLS vollständig. Erst wenn die
@@ -252,7 +286,8 @@ Deployments, nicht auf Production. Deshalb muss es aus der App kommen.
 
 ## Deployment-Prozess
 
-**Production von `main`, keine Previews als Testadresse.** Vercel gibt einem
+**Production von `main`. Als Testadresse nur die Staging-Preview von `development/skyisles-v2`
+(ADR-0185), und das erst nach bestätigter Konfiguration.** Vercel gibt einem
 Production-Deployment eine stabile Adresse — hier `https://skyisles.app` —
 die bei jedem Push auf `main`
 automatisch neu gebaut wird. Preview-URLs enthalten den

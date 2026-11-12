@@ -18,13 +18,23 @@
  * second place to update and the one that would be forgotten.
  */
 import type { LegalDocument } from "@/lib/legal/documents";
-import { SELLER_IDENTITY as S } from "@/lib/legal/seller-identity";
+import type { LegalSeller } from "@/lib/legal/seller-text";
 import { WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
 
-export const VERSAND: LegalDocument = {
+/*
+ * FROM THE SELLER ROW (ADR-0184, AP5). Versand and Kontakt name the seller, so
+ * they are built from `seller_legal_public()` like the legal texts; Zahlung
+ * names nobody and stays a constant. Complaints go to
+ * `complaints_contact_email` and withdrawals to `withdrawal_contact_email`,
+ * each falling back to the contact e-mail.
+ */
+/** Title and lead, for page metadata — they name no seller. */
+export const VERSAND_HEAD = { title: "Versand", lead: "Wohin wir liefern, wie lange es dauert und was es kostet." } as const;
+
+export const buildVersand = (S: LegalSeller): LegalDocument => ({
   slug: "versand",
-  title: "Versand",
-  lead: "Wohin wir liefern, wie lange es dauert und was es kostet.",
+  title: VERSAND_HEAD.title,
+  lead: VERSAND_HEAD.lead,
   sections: [
     {
       heading: "Liefergebiet",
@@ -82,7 +92,7 @@ export const VERSAND: LegalDocument = {
         {
           kind: "pairs",
           pairs: [
-            ["Rücksendeadresse", `${S.legalName}, ${S.tradeName}`],
+            ["Rücksendeadresse", `${S.legalName}, ${S.displayName}`],
             ["", `${S.street}, ${S.postalCode} ${S.city}, ${S.country}`],
           ],
         },
@@ -97,7 +107,7 @@ export const VERSAND: LegalDocument = {
       ],
     },
   ],
-};
+});
 
 export const ZAHLUNG: LegalDocument = {
   slug: "zahlung",
@@ -169,10 +179,13 @@ export const ZAHLUNG: LegalDocument = {
   ],
 };
 
-export const KONTAKT: LegalDocument = {
+/** Title and lead, for page metadata — they name no seller. */
+export const KONTAKT_HEAD = { title: "Kontakt", lead: "Wer antwortet, und wofür du welchen Weg nimmst." } as const;
+
+export const buildKontakt = (S: LegalSeller): LegalDocument => ({
   slug: "kontakt",
-  title: "Kontakt",
-  lead: "Wer antwortet, und wofür du welchen Weg nimmst.",
+  title: KONTAKT_HEAD.title,
+  lead: KONTAKT_HEAD.lead,
   sections: [
     {
       heading: "Wen du erreichst",
@@ -180,16 +193,20 @@ export const KONTAKT: LegalDocument = {
         {
           kind: "text",
           paragraphs: [
-            `Hinter ${S.platformName} und ${S.tradeName} steht eine Person: ` +
+            `Hinter ${S.platformName} und ${S.displayName} steht eine Person: ` +
               `**${S.legalName}**, ${S.city}. Anfragen beantwortet er selbst.`,
-            "Es gibt keine Telefonnummer und keine Hotline. Der Weg ist die E-Mail — und sie " +
-              "wird gelesen.",
+            // Only while no further channel is stored — with one it could be false.
+            ...(S.directContact ? [] : [
+              "Es gibt keine Telefonnummer und keine Hotline. Der Weg ist die E-Mail — und sie " +
+                "wird gelesen.",
+            ]),
           ],
         },
         {
           kind: "pairs",
           pairs: [
             ["E-Mail", S.email],
+            ...(S.directContact ? [["Weiterer Kontakt", S.directContact] as const] : []),
             ["Anschrift", `${S.street}, ${S.postalCode} ${S.city}, ${S.country}`],
           ],
         },
@@ -206,7 +223,7 @@ export const KONTAKT: LegalDocument = {
             `**Widerruf** — am schnellsten online unter ${WITHDRAWAL_PATH}. Du bekommst sofort ` +
               "eine Eingangsbestätigung mit Datum und Uhrzeit. Per E-Mail oder Brief geht es " +
               "genauso; der Online-Weg ist ein Angebot, keine Bedingung.",
-            `**Reklamation oder etwas stimmt nicht mit der Ware** — E-Mail an ${S.email}. ` +
+            `**Reklamation oder etwas stimmt nicht mit der Ware** — E-Mail an ${S.complaintsEmail}. ` +
               "Ein Foto hilft meistens.",
             `**Datenschutz** — E-Mail an ${S.email}. Auskunft, Berichtigung und Löschung ` +
               "brauchen kein Formular.",
@@ -229,4 +246,4 @@ export const KONTAKT: LegalDocument = {
       ],
     },
   ],
-};
+});

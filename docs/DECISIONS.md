@@ -15353,6 +15353,10 @@ Supabase-Konfiguration beider Projekte, die Domains, `npm run dev` und
 `npm run build`, der Produktions-Guard und die Service-Role-Sperre vom
 2026-10-25. Für Production ändert sich **nichts**.
 
+**Geändert durch ADR-0185 (2026-11-12):** `development/skyisles-v2` darf als Staging-Preview gebaut
+werden (Vercel-Konfiguration vom Betreiber am 2026-11-10 bestätigt, technisch nicht unabhängig
+nachgeprüft; eine Vorschau ohne Staging baut nicht). Für alle anderen Branches gilt D-1 weiter.
+
 **Offen, bewusst:** Preview-Deployments bleiben auf Production-Daten
 konfiguriert. Solange nicht auf Preview getestet wird, ist das kein Problem
 — aber es ist eine Falle, und sie steht jetzt in `docs/DEPLOYMENT.md`
@@ -17073,6 +17077,134 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0185 · Staging-Preview für `development/skyisles-v2` — Production bleibt unberührt
+
+**Datum:** 2026-11-12
+**Status:** ANGENOMMEN (Entscheidung des Betreibers). **Vercel-Konfiguration vom Betreiber am 2026-11-10 als eingerichtet bestätigt; technisch nicht unabhängig nachgeprüft.**
+Gemeldet: Preview nutzt Staging (für alle Previews), Production nutzt Production, Vercel Authentication
+aktiv, alte Previews gelöscht, keine Supabase-Integrationen. Daraufhin wurde der Push freigegeben
+(2026-11-12). Den ersten technischen Nachweis liefert die Zielkontrolle vor dem ersten Browsertest (P-5).
+**Offen, nicht geklärt:** Laut Betreiber (2026-11-10) liegt `SUPABASE_SERVICE_ROLE_KEY` in Vercel nur für Production. Diese Datei und `docs/CREDENTIALS_MAP.md` sagen, auf Vercel liege kein Service-Role-Key. Welche Aussage stimmt, ist nicht festgestellt. Fest steht nur: Der ausgelieferte Code liest keinen (`deployment-target.test.ts`, `production-write-guard.test.ts`).
+**Betrifft:** ADR-0149 **D-1** (geändert für genau diesen Branch), `docs/DEPLOYMENT.md`,
+`docs/stability/2026-11-09-m04e-deployment-push-safety.md`, AP5 (ADR-0184, Browserprüfung)
+**Unberührt:** ADR-0017 (anon key ist öffentlich), ADR-0051 (kein Service-Role-Key in der
+Webanwendung), Production-Konfiguration, Migrationsablauf (`db:migrate:staging`, Production mit
+eigener Freigabe)
+
+### Die Frage
+
+AP5 braucht eine Browserprüfung im echten Vercel-Build gegen Staging: Rechtsseiten, versionierte
+Adressen, Checkout und PostgREST. ADR-0149 D-1 schloss eine Preview-Pipeline aus. Damals trug
+„Preview“ die Production-Werte, ein Preview war also Production unter fremder Adresse.
+
+### Die Entscheidung
+
+`development/skyisles-v2` darf als **isolierte Staging-Preview** gebaut werden. D-1 gilt für alle
+anderen Branches weiter, und es entstehen weder ein zweites Vercel-Projekt noch eine eigene Domain.
+
+| # | Festlegung |
+|---|---|
+| **P-1** | Nur zwei Werte trennen die Umgebungen: `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Sie stehen in „Preview“ **branch-spezifisch** für `development/skyisles-v2` mit den Werten von Staging. Kein Service-Role-Key auf Vercel |
+| **P-2** | Deployment Protection (Vercel Authentication) für Previews aktiv. Staging enthält echte Geschäftsdaten (Orderbuch-Historie) |
+| **P-3** | Previews, die mit Production-Werten gebaut wurden, werden gelöscht. Die Werte stehen fest im Build |
+| **P-4** | **Harte Freigabebedingung vor dem Push:** Der Betreiber hat P-1 bis P-3 im Dashboard abgelesen und bestätigt. Ohne Bestätigung kein Push |
+| **P-5** | **Harte Bedingung vor jedem Browsertest:** Im Netzwerkpanel gehen alle Supabase-Anfragen an `qqxcpesbwfxzgytkdsac.supabase.co`. Erscheint `zmiwxswrpkmizvqsgype`, wird sofort abgebrochen, der Tab geschlossen und das Deployment gelöscht |
+| **P-6** | Keine automatischen Migrationen. Keine Supabase-GitHub-Integration und kein Branching. Ein Push führt keine Migration aus |
+| **P-7** | Auth-Weiterleitungen und `ALLOWED_ORIGINS` der Staging-Edge-Functions werden nur bei Bedarf ergänzt, eng (die Branch-Alias-Domain, kein Wildcard) und mit eigener Freigabe. Die AP5-Prüfung braucht beides nicht |
+
+### Was ein Push auf diesen Branch auslöst (Befund aus dem Repository)
+
+- **Keine** GitHub Actions, keine Git-Hooks, keine `vercel.json`, kein `.vercel/`.
+- Kein `prebuild`/`postbuild`. Der Build ist `next build`; `next.config.ts` liest nur
+  `SKYISLES_DEV_ORIGINS` und setzt einen Cache-Header.
+- **Keine Migration**: Im Repository gibt es keinen Mechanismus dafür. `supabase/config.toml`
+  beschreibt nur Edge Functions. Ob im Supabase-Dashboard eine GitHub-Integration aktiv ist, lässt
+  sich lokal nicht prüfen (P-6).
+- **Vercel baut den Push vermutlich als Preview.** Das ist die Vorgabe von Vercel; abgeschaltet ist
+  es nirgends im Repository. Ob die Git-Integration dem Projekt folgt, zeigt nur das Dashboard.
+- **Datenbankzugriffe** entstehen erst, wenn jemand die Seite öffnet. Ihr Ziel ist das Projekt aus
+  `NEXT_PUBLIC_SUPABASE_URL`. Der Build selbst liest nichts: Alle Rechts- und Checkout-Routen sind
+  dynamisch.
+- **Externe Dienste** (Stripe, Mail) erreicht die App nur über die Edge Functions **desselben**
+  Supabase-Projekts (`supabase.functions.invoke`). Ein Staging-Preview kann Production-Stripe also
+  nicht ansprechen.
+
+### Folgen
+
+Die Vorschau ist eine dritte Adresse, aber keine dritte Datenbank. Fällt P-1 weg (etwa durch eine
+Integration, die Variablen überschreibt), ist der Branch wieder Production unter fremder Adresse.
+P-5 fängt das vor jedem Test ab, auch wenn es nicht bemerkt wurde.
+
+### Die Laufzeitsperre im Code (umgesetzt 2026-11-12, lokal, nicht committet)
+
+`src/lib/ops/deployment-target.ts` entscheidet. Die Regel:
+
+| Kontext (Vercel-Systemvariablen) | `NEXT_PUBLIC_SUPABASE_URL` | Ergebnis |
+|---|---|---|
+| nicht auf Vercel (`VERCEL` fehlt): `next dev`, lokaler Build, Tests | beliebig | erlaubt |
+| `VERCEL_ENV = production` | beliebig | erlaubt. Production wird von dieser Sperre **nie** blockiert |
+| `VERCEL_ENV = development` (`vercel dev`) | beliebig | erlaubt |
+| `VERCEL_ENV = preview`, **jeder** Branch | https, Host genau `qqxcpesbwfxzgytkdsac.supabase.co`, ohne Port | erlaubt |
+| `VERCEL_ENV = preview` | fehlt, ungültig oder ein anderer Host | **gesperrt** |
+| `VERCEL_ENV` fehlt oder unbekannt, `VERCEL_GIT_COMMIT_REF = development/skyisles-v2` | nicht Staging | **gesperrt** |
+| `VERCEL_ENV` fehlt oder unbekannt, anderer Ref | beliebig | „unbestimmt“, erlaubt (siehe Grenzen) |
+
+Die Sperre gilt für **jede** Vorschau, nicht nur für den Staging-Branch. Eine Vorschau mit
+Production-Werten ist für jeden Branch dieselbe Falle (D-1).
+
+**Durchgesetzt an drei Stellen, jede ohne die anderen:**
+
+1. **Build** (`next.config.ts`): Eine gesperrte Vorschau baut nicht. Weil der Build die
+   `NEXT_PUBLIC_*`-Werte fest ins Bundle schreibt, sieht er genau die Werte, die das Deployment
+   benutzen würde. Das ist die **primäre** Sperre. Geprüft mit `next build` unter `VERCEL=1
+   VERCEL_ENV=preview` und einer erfundenen `.invalid`-Adresse: Der Build bricht beim Laden der
+   Konfiguration ab, und die Meldung nennt keinen Wert. Mit den Staging-Werten baut er.
+2. **Proxy** (`src/proxy.ts`): Zuerst wird die Regel geprüft. Bei Sperre antwortet jede passende
+   Anfrage mit 503, `no-store`, `noindex` und dem Text aus `de.deployment.previewBlocked`, noch
+   bevor eine Sitzung gelesen wird. Geprüft mit `next start` (Bundle mit erfundener Adresse,
+   gestartet als Vorschau): Seiten, Route-Handler (`/auth/callback`, `/rechnung/…/pdf`) und ein
+   Server-Action-POST antworten 503. Statische Dateien außerhalb des Matchers antworten 200; dahinter
+   steht keine Datenbank. Im Log steht der Grund, kein Wert.
+3. **Jeder serverseitige Supabase-Client** wird über `supabasePublicConfig()` gebaut und wirft bei
+   Sperre: `supabase/server.ts` (Server Components, Server Actions, Route-Handler),
+   `supabase/middleware.ts` und `identity/public.ts` (anonyme Lesefunktionen; die Aufrufer melden
+   „nicht verfügbar“). Das deckt Pfade ab, die der Matcher nicht erfasst. Server Functions hängen am
+   Matcher ihrer Route, und Next nennt den Proxy ausdrücklich keine alleinige Sicherheitsgrenze. Ein
+   Test hält fest, dass es keinen weiteren Client-Bau gibt.
+
+`next start` lädt `next.config.ts` auch beim Start und startet mit gesperrter Konfiguration gar
+nicht. Ob Vercel die Konfiguration zur Laufzeit lädt, ist nicht belegt; darauf stützt sich nichts.
+
+### Grenzen (ausdrücklich)
+
+- **Erkennung über Vercel-Systemvariablen.** Ist „Automatically expose System Environment
+  Variables“ aus und fehlen `VERCEL_ENV` und `VERCEL_GIT_COMMIT_REF`, gilt der Kontext als
+  „unbestimmt“ und wird **nicht** gesperrt. Ohne diese Variablen ist Production von einer Vorschau
+  nicht zu unterscheiden, und Production darf nicht versehentlich blockiert werden. Deshalb bleibt P-1
+  im Dashboard nötig. P-4 (vor dem Push) und P-5 (vor jedem Test) gelten unverändert.
+- **Production wird nicht geprüft.** Eine Production mit falscher URL fängt diese Sperre nicht. Wird
+  eine Staging-Vorschau zu Production **befördert** („Promote“), läuft sie dort mit dem
+  Staging-Bundle. Deshalb diese Vorschau nie befördern.
+- **Der Browser-Client** (`supabase/client.ts`) kennt `VERCEL_ENV` nicht und prüft nicht selbst. Er
+  ist über die Build-Sperre abgedeckt: Eine gesperrte Vorschau hat kein Bundle, und eine Seite, die
+  503 bekommt, lädt keinen Client. Ein Tab, der schon offen war, bevor die Konfiguration falsch wurde,
+  läuft mit seinem alten Bundle weiter.
+- **Direkte Aufrufe an Supabase** (PostgREST, Edge Functions) mit dem öffentlichen Anon-Key gehen an
+  dieser Sperre vorbei. Sie gilt für die Anwendung, nicht für die Datenbank. Dort schützen RLS und
+  `security definer`, unverändert.
+- **Werkzeuge unter `tools/`** haben ihre eigenen Sperren (`tools/lib/staging-guard.mts`) und nutzen
+  dieses Modul nicht.
+- **Die Laufzeitsperre (Proxy, Clients) vergleicht die beim Build eingesetzte URL mit dem
+  Laufzeit-`VERCEL_ENV`.** Sie greift dort, wo der Build den Kontext nicht erkannt hat. Den Normalfall
+  hält schon die Build-Sperre auf.
+
+Tests: `src/lib/ops/deployment-target.test.ts` (34). Abgedeckt sind die Regel mit richtiger, falscher,
+fehlender und ähnlich aussehender URL, Production, lokal und `vercel dev`; Meldung und 503-Antwort
+ohne Werte; Proxy, Server-Client und Anon-Client; Build-Sperre über `next.config.ts`; keine weiteren
+Client-Bauten.
+
+---
+
 ## ADR-0184 · Plattform SkyIsles, Shop skyisles.shop, rechtlicher Betreiber aus den Geschäftsdaten
 
 **Status:** ANGENOMMEN (2026-11-11, Produktentscheidung des Betreibers) · teilweise umgesetzt:
@@ -17129,8 +17261,8 @@ vom 2026-11-09 (M-08) hält den Widerspruch fest: Shop, Mails und neue Rechnunge
 
 ### Konsequenzen
 
-- **Bis AP5 lesen die Rechtstexte weiter `SELLER_IDENTITY`.** Die Verwaltungsseite zeigt jeden
-  Unterschied zwischen diesen Werten und den Geschäftsdaten als Widerspruch an.
+- **Seit AP5 (lokal, nicht ausgeliefert) lesen die Rechtstexte `seller_legal_public()`.**
+  `SELLER_IDENTITY` ist entfernt; die Verwaltungsseite und die Rechtsseiten lesen dieselbe Zeile.
 - AP4 (öffentliche Lesefunktion `seller_legal_public()` und neue Versionen der Rechtstexte) ist
   eine Migration mit eigener Freigabe; AP5 stellt die Rechtstexte darauf um.
 - Ob „skyisles.shop“ als Geschäftsbezeichnung eines Einzelunternehmens zulässig ist, ist rechtlich
@@ -17176,6 +17308,209 @@ ohne den zugehörigen Text hieße, dass neue Bestellungen eine Version tragen, d
    Serviceseiten lesen daraus; `SELLER_IDENTITY` und `SELLER_ADDRESS_LINES` entfallen; fehlt eine
    Pflichtangabe oder der aktive Verkäufer, zeigt die Seite einen Fehlerzustand statt erfundener
    Angaben; ein Wächtertest verbietet „yulez“ in ausgelieferten Texten.
+
+### AP5 — die Rechtstexte lesen die zentrale Identität (2026-11-11, lokal, nicht ausgeliefert)
+
+**Datenquelle.** `fetchSellerLegal()` (`src/lib/identity/public.ts`) ruft `seller_legal_public()`
+mit dem Anon-Schlüssel und ohne Sitzungscookies auf (kein Dienstschlüssel; `service_role` hat kein
+EXECUTE). Die neunzehn Spalten werden typisiert; ein Wert falschen Typs ist „malformed“, kein
+umgedeuteter Wert. Die Pflichtfelder prüft dieselbe Liste wie „Identität & Dokumente“
+(`REQUIRED_IDENTITY_FIELDS` in `model.ts`). `SELLER_IDENTITY` und `SELLER_ADDRESS_LINES` sind
+entfernt; der Abgleich „Rechtstexte gegen Geschäftsdaten“ entfällt, weil beide dieselbe Zeile lesen.
+
+**Texte.** Impressum, AGB, Widerruf (samt Muster-Formular), Datenschutz, Versand und Kontakt sind
+Funktionen `build…(seller)`; Zahlung nennt niemanden und bleibt eine Konstante. Ersetzt sind nur
+die Namen: Shopmarke = `display_name`, Betreiber = `legal_name`, Vertragspartner vorläufig
+„{legal_name}, handelnd unter {display_name}“ (`contractingParty()`), das Land aus dem ISO-Code.
+Widerruf nutzt `withdrawal_contact_email`, Reklamation (AGB § 8, Kontakt) `complaints_contact_email`,
+beide mit Rückfall auf die Kontakt-E-Mail wie in der Datenbank. USt-IdNr., W-IdNr. und Register
+erscheinen im Impressum nur, wenn die Zeile sie trägt.
+
+**Die Texte behaupten Tatsachen — und werden nur mit passenden Daten gezeigt.** Einzelunternehmen,
+§ 19 UStG, keine Streitbeilegung, Rücksendekosten beim Kunden. Weicht eine davon in den Daten ab
+(`textPremiseGaps()`), wird die Seite **nicht** gezeigt: ein geänderter Sachverhalt braucht einen
+geprüften neuen Text und eine neue Fassung, keinen still falschen Satz.
+
+**Ein weiterer Kontaktweg ist keine solche Tatsache.** Ist `direct_contact` gefüllt, nennen
+Impressum und Kontaktseite ihn wörtlich unter „Weiterer Kontakt“ und lassen die Sätze „keine
+(veröffentlichte) Telefonnummer“ weg, die dann falsch sein könnten. Der Code ordnet den Wert keiner
+Art zu und sagt nicht, ob er genügt. Fehlt er, meldet „Identität & Dokumente“ das als Hinweis, ohne
+rechtliche Wertung; fehlende Pflichtangaben bleiben ein Validierungsfehler. In die
+Widerrufsbelehrung wird er nicht eingesetzt, weil das Muster dort ausdrücklich eine Telefonnummer
+meint und der Code nicht weiß, ob der Wert eine ist.
+
+**Fehlerverhalten.** Fehlende Funktion (`PGRST202`), anderer RPC-Fehler, Netzfehler, kein aktiver
+Verkäufer, fehlende Pflichtangabe oder abweichende Tatsache: Die Rechtsseite zeigt „Anbieterangaben
+vorübergehend nicht verfügbar“ (`role="alert"`) und nennt **niemanden** — keinen letzten bekannten
+Wert, keine frühere Identität. Der Footer lässt die Verkäuferzeile weg, die Links bleiben. Die
+Widerrufsseite behält den Weg zur Online-Funktion. Das Server-Log nennt nur Codes, nie Werte aus der
+Zeile. Der Checkout ist unverändert; eine automatische Sperre gibt es nicht.
+
+**Cache-Strategie: keine anfrageübergreifende.** `connection()` macht jeden Aufruf
+anfragegebunden, React `cache()` lässt Seite und Footer derselben Anfrage eine Antwort teilen.
+Verworfen: `unstable_cache` (in Next 16 durch `use cache` ersetzt, das Projekt nutzt keine Cache
+Components, und ein Cache über Deployments hinweg würde bei einem Ausfall beliebig alte Angaben
+weiter ausliefern) und ISR (verlangt die Datenbank beim Build und liefert bei Fehlern die letzte
+Fassung unbegrenzt weiter). Die Layouts sind ohnehin dynamisch (Sitzung); Mehrkosten: ein
+Einzeilen-Aufruf je Seitenaufruf, im Footer gestreamt (`Suspense`). Der Text selbst ist Code und
+ändert sich nur mit einem Deployment — veraltete Rechtsfassungen kann kein Cache ausliefern.
+
+**Archiv.** Die bisher ausgelieferten Fassungen (`2026-09-17`) wurden **vor** dem Umbau aus dem
+Code von `9977fdd` gerendert und unverändert eingefroren (`src/lib/legal/archive/2026-09-17.ts`,
+mit „Julian Stocker, handelnd unter yulez.collectibles“). Abrufbar unter
+`/rechtstexte/<slug>/2026-09-17` (`noindex`), verlinkt unter „Frühere Fassungen“ jeder Rechtsseite.
+`archive.test.ts` hält Inhalts- und Datei-Prüfsumme fest. Kein Veröffentlichungs- oder
+Geltungszeitraum wird behauptet. **Das Archiv ist ein belegter Repository-Stand, nicht zwingend die
+einzige je ausgelieferte Fassung dieser Kennung.** Untersucht: `713527c` war am 2026-09-18 von 13:17
+bis 13:46 (+0200) der Stand von `main` (erster Elternpfad), bevor `dc86497` die Kontakt-E-Mail
+änderte. Der Unterschied liegt nur dort: alle neun Fundstellen (je zwei in Impressum, AGB, Widerruf
+und Datenschutz, eine im Muster-Formular) lauteten `info@skyisles.app`; sonst zeichengleich (der
+Diff berührt nur `seller-identity.ts`). Ob `713527c` ausgeliefert wurde, belegt das Repository nicht;
+die Vercel-Deployment-Historie könnte es. Ohne diesen Beleg wird keine zweite Archivfassung angelegt.
+
+**Versionierung.** Alle vier Dokumente ändern sich (alle nennen den Verkäufer) und tragen
+`2026-11-11` (`LEGAL_VERSIONS`; das Datum der Fassung, keine Aussage über den Start). **Grenze:**
+`legal_document_versions` hat eine Zeile je Dokument; „nicht überschreiben“ im strengen Sinn bräuchte
+eine Versionshistorie in der Datenbank — eine Schemaänderung mit eigener Entscheidung. Die alte
+Kennung bleibt in jedem Snapshot, im Archiv und in `0047` erhalten.
+
+**Kopplung von angezeigter Fassung und Bestellung (freigegeben 2026-11-11, lokal umgesetzt).**
+Vorher übernahm `create_order()` keine Kennung; der Trigger aus `0047` las sie beim Anlegen aus der
+Datenbank. Angezeigt (Code) und gespeichert (Datenbank) waren nicht verbunden.
+
+**Die Datenbank entscheidet, welche Fassung gilt (Betreiberentscheidung 2026-11-12, nach dem
+Rollout-Audit).** Die erste Umsetzung wählte die Fassung fest im Code (`SHOWN_TERMS`). Dann hing die
+Umschaltung am Zeitpunkt des Deployments: zwischen Deployment und `0192` wurden alle neuen Checkouts
+mit `LV002` abgelehnt, ein Neuladen half nicht, und ein alter Tab konnte über `/agb` schon den neuen
+Text lesen, aber mit der alten Kennung bestellen. Diese Reihenfolge wurde für Staging **nicht**
+freigegeben. Jetzt gilt:
+
+- **Lesefunktion:** `legal_versions_public()` (`0191`) liefert genau eine Zeile mit genau vier
+  Kennungen (`agb`, `widerruf`, `datenschutz`, `impressum`), sonst nichts: kein `effective_from`, kein
+  `updated_at`, keine weitere Zeile. Sie ist `stable`, SECURITY DEFINER mit leerem `search_path`,
+  EXECUTE nur für `anon` und `authenticated` (PUBLIC und `service_role` entzogen). Die Tabelle bleibt für
+  beide gesperrt. Fehlt eine Kennung oder ist sie leer: SQLSTATE `LV003`.
+- **Code:** enthält beide Fassungen, die archivierte `2026-09-17` (`archive/`) und die gebaute
+  `2026-11-11` (`LEGAL_VERSIONS` = was dieser Code baut, nicht was gilt). `fetchLegalVersions()`
+  (`src/lib/legal/versions.ts`) liest die geltende Fassung je Anfrage (`connection()`), geteilt über
+  `cache()`: Seite, Metadaten, Footer und Checkout einer Anfrage sehen dieselbe Antwort. Nennt die
+  Datenbank eine Fassung, die der Code nicht hat, oder antwortet sie nicht, ist das `unavailable`.
+  Es gibt keine Rückfallfassung.
+- **Seiten:** `/impressum`, `/agb`, `/widerruf` und `/datenschutz` rendern die Fassung, die die
+  Datenbank nennt (`activeLegalText()`), mit Titel und Lead dieser Fassung in den Metadaten. Die
+  archivierte braucht keine Verkäuferzeile. Ohne Antwort zeigt die Seite „Rechtstext vorübergehend
+  nicht verfügbar“ und keinen Text. „Frühere Fassungen“ listet nur archivierte Fassungen außer der
+  geltenden.
+- **Versionierte Adressen** `/rechtstexte/<slug>/<kennung>` liefern genau die angefragte Fassung,
+  andernfalls 404. Die geltende Fassung trägt kein Banner, eine archivierte „nicht mehr aktuell“,
+  eine gebaute, noch nicht geschaltete „derzeit nicht die aktuelle“. Ohne Antwort der Datenbank
+  wird nichts angezeigt, damit kein Banner geraten wird.
+- **Footer:** Die Verkäuferzeile aus der Verkäuferzeile der Datenbank erscheint nur, solange das
+  geltende Impressum das gebaute ist. Neben dem archivierten Impressum würde sie ihm widersprechen.
+- **Checkout:** zeigt „AGB (Fassung …)“ und „Widerrufsbelehrung (Fassung …)“ mit den Kennungen aus
+  `fetchLegalVersions()`, verlinkt genau diese und sendet sie mit `placeOrder()`. Ohne Antwort:
+  keine Links, Hinweis, Bestellknopf gesperrt, `submit()` bricht vor dem Senden ab
+  (`errorTermsUnavailable`). Eine geratene Kennung wird nie gesendet.
+- **Datenbank:** `create_order(…, p_agb_version, p_widerruf_version)` (`0191`) vergleicht sie vor
+  jedem Schreiben mit `legal_document_versions`, gelesen `for share`. Fehlt eine: `LV001`; weicht sie
+  ab: `LV002`; in beiden Fällen keine Bestellung, keine Position, keine Reservierung, kein Ereignis.
+  Ein Versionswechsel (UPDATE dieser Zeilen) wartet, bis eine laufende Bestellung committet; eine
+  Bestellung danach liest die neue Zeile und wird abgelehnt. Der Trigger schreibt genau die geprüfte
+  Kennung. Eine Wiederholung derselben Anfrage-ID gibt die bestehende Bestellung zurück, mit ihrem
+  Snapshot.
+- **Action und Oberfläche:** `LV002` wird zu `terms_changed` („wurden gerade aktualisiert … nichts
+  bestellt, Warenkorb unverändert … neu laden“). Die Meldung stimmt jetzt: Die neu geladene Seite
+  liest die neue Fassung aus der Datenbank und bestellt, es gibt keine Schleife. `LV001` ist ein
+  defekter Client (`failed`). Der Warenkorb wird nur nach einer angelegten Bestellung geleert.
+- **Rumpf:** der aus `0139`, zeichengleich, plus genau zwei Einfügungen (Variablen, Abgleich); die
+  Lagerlogik (`reserve_for_order()` an derselben Stelle) ist unverändert. Ein PGlite-Test vergleicht
+  den Rumpf ohne die Einfügungen mit `0139`.
+
+**Warum zwei Überladungen und keine Standardwerte.** Ein `p_agb_version text default null` neben der
+bestehenden Sechser-Signatur macht jeden Aufruf mit sechs Argumenten mehrdeutig (PostgreSQL:
+„function … is not unique“, PostgREST: PGRST203). Die Sechser dafür zu ersetzen hieße DROP + CREATE
+der laufenden Bestellfunktion samt Rechten, und ein Standardwert lässt sich mit `create or replace`
+später nicht mehr entfernen (der Endzustand bräuchte erneut DROP + CREATE). Ohne Standardwerte
+unterscheidet PostgREST die beiden über die Parameternamen: sechs Namen → Sechser, acht → Achter,
+sieben → keine (geprüft in PGlite mit benannten Argumenten, wie PostgREST sie sendet; gegen echtes
+PostgREST erst in der Vorschau). Nach jeder DDL lädt PostgREST sein Schema neu
+(Supabase-Event-Trigger; beide Migrationen senden zusätzlich `notify pgrst, 'reload schema'`).
+
+**Migrationen und Reihenfolge (Staging).**
+
+| Schritt | Was | Seiten und Checkout | Alte Tabs (Code vor AP5) |
+|---|---|---|---|
+| 1. `0191` (**Staging: angewendet 2026-11-12**, Postflight 9998 = 0, 9999 = 0) | gekoppelte `create_order` NEBEN der Sechser, mit deren Rechten; `legal_versions_public()` | unverändert (alter Code) | unverändert |
+| 2. Vorschau-Deployment | AP5-Code, liest die Fassung aus der Datenbank | zeigen und senden `2026-09-17`, Bestellung über die Achter; Footer ohne Verkäuferzeile; Kontakt/Versand aus der Verkäuferzeile | Sechser, `2026-09-17`; `/agb` zeigt `2026-09-17`, stimmig |
+| 3. Browser- und PostgREST-Prüfung | `/agb` u. a., `/rechtstexte/agb/2026-11-11` (Banner), Checkout-Links, eine Testbestellung (eigene Freigabe) | – | – |
+| 4. `0192` | Kennungen `2026-11-11` UND Sechser entfernt, eine Transaktion | mit dem Commit: alle vier Seiten `2026-11-11`, Footer mit Verkäuferzeile; vorher gerenderte Checkouts → `LV002` → neu laden → bestellt | Sechser fort → `failed`; neu laden → neuer Code |
+| 5. Erneute Prüfung | Seiten, Archivbanner, Checkout mit `2026-11-11` | – | – |
+
+Es gibt kein Ablehnungsfenster mehr, das am Deployment hängt: Zwischen 2 und 4 bestellen neue Seiten
+normal, und `0192` lässt sich unabhängig vom Deployment terminieren. Abgelehnt werden nur Checkouts,
+die vor dem Commit von `0192` gerendert und danach abgeschickt wurden. Eine Bestellung mit einer
+Kennung, deren Text der Kunde nicht gesehen hat, ist in keinem Schritt möglich.
+
+**Umsetzbarkeit.** Die Vorschau muss gegen Staging laufen. Vercel-Konfiguration vom Betreiber am 2026-11-10 als eingerichtet bestätigt; technisch nicht unabhängig nachgeprüft. (ADR-0185). Eine Vorschau,
+die nicht auf Staging zeigt, baut nicht (Preview-Sperre). Vor jedem Browsertest im Netzwerkpanel
+`qqxcpesbwfxzgytkdsac` bestätigen (ADR-0185, P-5). Dann bleibt Production
+dabei unberührt. Auf Staging gibt es außer Testern keine alten Clients. **Production** in derselben
+Reihenfolge, je mit eigener Freigabe: `0190` → `0191` → Deployment → Prüfung → `0192`. **Der AP5-Code
+darf nie vor `0190` und `0191` auf eine Datenbank treffen:** Ohne `legal_versions_public()` zeigen alle
+vier Rechtsseiten „nicht verfügbar“ und der Checkout nimmt nichts an (`function_missing`). Ohne
+`seller_legal_public()` fehlen die gebauten Texte, Kontakt und Versand.
+
+**Runbook.**
+
+- **Deployment schlägt fehl oder hängt (nach `0191`):** nichts zu tun. Der alte Code ruft die Sechser,
+  `0191` liegt ungenutzt bereit. Neu deployen. `0192` erst, wenn das neue Deployment live ist und
+  Schritt 3 bestanden hat.
+- **`0192` verzögert:** unkritisch. Seiten und Checkout zeigen und senden bis dahin stimmig
+  `2026-09-17`. Grenze: Kontakt und Versand nennen schon die Daten der Verkäuferzeile, die
+  Footer-Zeile fehlt.
+- **`0192` bricht an einer Vorbedingung ab:** nichts ist angewendet (eine Transaktion). Ursache klären
+  (Preflight-Zeilen 101–109). Der Shop läuft weiter mit `2026-09-17`.
+- **Rücknahme vor `0192`:** Deployment zurückrollen. Der alte Code nutzt die Sechser. Danach bei Bedarf
+  `R0191`, **nie vorher**: Ohne `legal_versions_public()` und die Achter zeigt der AP5-Code nichts und
+  nimmt nichts an.
+- **Rücknahme nach `0192`, nur der Texte:** `R0192`. Die Kennungen gehen auf `2026-09-17`, die Sechser
+  kommt zeichengleich aus `0139` mit den Rechten der Achter zurück. Der AP5-Code zeigt mit dem Commit
+  wieder `2026-09-17`, ohne Deployment. Bestellungen, die dazwischen `2026-11-11` erhielten, behalten
+  sie; der Text dazu steht weiter unter `/rechtstexte/<slug>/2026-11-11`.
+- **Rücknahme nach `0192`, auch des Codes:** **erst `R0192`, dann das Deployment zurückrollen.** In
+  umgekehrter Folge ruft der alte Code die entfernte Sechser, und der Checkout fällt aus. Danach bei
+  Bedarf `R0191`.
+- **Versionskonflikt (`LV002`):** Erwartet nur für Checkouts, die vor einer Umschaltung gerendert
+  wurden. Der Kunde lädt neu und bestellt. Tritt `LV002` bei frisch geladenen Seiten auf, stimmen
+  `legal_versions_public()` und `create_order()` nicht überein (beide lesen dieselbe Tabelle; ein
+  Cache vor der Seite wäre die Ursache). Prüfen: Postflight `0191` Zeilen 201–215.
+- **Alte offene Tabs:** Vor `0192` stimmig über die Sechser. Nach `0192` schlägt die Bestellung mit der
+  allgemeinen Meldung fehl (der alte Code kennt `LV002` nicht), und Neuladen lädt den neuen Code.
+  Nichts wird mit einer falschen Fassung gespeichert.
+- **E2E-Werkzeuge:** `tools/verify-sandbox-e2e.mts` liest die geltenden Kennungen über
+  `legal_versions_public()` und bestellt damit, also vor und nach `0192` gleich. Es braucht `0191`
+  (ohne die Funktion bricht es ab, bevor es bestellt) und schreibt, also nur mit eigener Freigabe.
+
+**Verbleibende Grenzen (ausdrücklich).**
+
+- Kontakt und Versand sind keine versionierten Dokumente (keine Zeile in `legal_document_versions`,
+  kein Snapshot). Sie folgen der Verkäuferzeile ab dem Deployment, auch solange das archivierte
+  Impressum gilt.
+- Die Bestellmails verlinken `/agb` und `/widerruf` ohne Kennung. Nach `0192` öffnet ein früherer
+  Käufer dort `2026-11-11`. Die Mail nennt ihre Fassung, und die frühere steht unter „Frühere
+  Fassungen“.
+- Ein direkter RPC-Aufruf kann die geltenden Kennungen lesen und mitsenden; dahinter steht keine
+  angezeigte Seite. Er kann aber keine Bestellung unter einer anderen als der geltenden Fassung
+  anlegen.
+- Das Archiv `2026-09-17` ist der Stand von `9977fdd`. Dass Production genau diesen Text ausliefert,
+  belegt das Repository nicht (siehe Archiv).
+- Gleichzeitigkeit ist in einer PGlite-Sitzung belegt (Zeilensperre, Wechsel zwischen Rendern und
+  Absenden), nicht mit zwei Verbindungen. Skew Protection ist im Repository nicht konfiguriert und
+  nicht vorausgesetzt.
+
+**Offen (Entscheidung oder fachliche Prüfung):** Vertragspartner-Formulierung; „skyisles.shop“ als
+Geschäftsbezeichnung; zweiter Kontaktweg und Textfassung dafür; Telefon; Rechtsstatus und
+§ 19 UStG; Versionshistorie in der Datenbank; anwaltliche Prüfung der Texte vor der Auslieferung.
 
 ---
 

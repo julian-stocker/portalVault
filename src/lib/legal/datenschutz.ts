@@ -25,12 +25,20 @@
  */
 import type { LegalDocument } from "@/lib/legal/documents";
 import { LEGAL_VERSIONS } from "@/lib/legal/documents";
-import { SELLER_IDENTITY as S } from "@/lib/legal/seller-identity";
+import type { LegalSeller } from "@/lib/legal/seller-text";
 
-export const DATENSCHUTZ: LegalDocument = {
+/**
+ * FROM THE SELLER ROW (ADR-0184, AP5): the controller block names the legal
+ * operator, the shop brand, the address and the contact e-mail from
+ * `seller_legal_public()`. Nothing else in this text changed.
+ */
+/** Title and lead, for page metadata — they name no seller. */
+export const DATENSCHUTZ_HEAD = { title: "Datenschutzerklärung", lead: "Welche Daten SkyIsles verarbeitet, wofür und wer sie erhält." } as const;
+
+export const buildDatenschutz = (S: LegalSeller): LegalDocument => ({
   slug: "datenschutz",
-  title: "Datenschutzerklärung",
-  lead: "Welche Daten SkyIsles verarbeitet, wofür und wer sie erhält.",
+  title: DATENSCHUTZ_HEAD.title,
+  lead: DATENSCHUTZ_HEAD.lead,
   version: LEGAL_VERSIONS.datenschutz,
   sections: [
     {
@@ -40,7 +48,7 @@ export const DATENSCHUTZ: LegalDocument = {
           kind: "pairs",
           pairs: [
             ["Name", S.legalName],
-            ["Geschäftsbezeichnung", S.tradeName],
+            ["Geschäftsbezeichnung", S.displayName],
             ["Anschrift", `${S.street}, ${S.postalCode} ${S.city}, ${S.country}`],
             ["E-Mail", S.email],
           ],
@@ -337,4 +345,4 @@ export const DATENSCHUTZ: LegalDocument = {
       ],
     },
   ],
-};
+});

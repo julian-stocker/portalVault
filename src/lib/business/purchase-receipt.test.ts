@@ -441,10 +441,12 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * `0188` (M-05C): the lock order of seller_delete_sale — one body, no receipt table.
      * `0189` (M-05C): the lock order of seller_cancel_external_sale — one body, no receipt table.
      * `0190` (ADR-0184, AP4): seller_legal_public(), a read-only public function — no receipt table.
+     * `0191` (ADR-0184, AP5): create_order coupled to the shown terms — one function, no receipt table.
+     * `0192` (ADR-0184, AP5): the legal document versions 2026-11-11 and the old create_order removed — no receipt table.
      */
-    expect(files[files.length - 1]).toBe("0190_seller_legal_public.sql");
-    expect(files[files.length - 2]).toBe("0189_external_cancel_lock_order.sql");
-    expect(files[files.length - 3]).toBe("0188_sale_delete_lock_order.sql");
+    expect(files[files.length - 1]).toBe("0192_legal_versions_2026_11_11.sql");
+    expect(files[files.length - 2]).toBe("0191_create_order_terms_versions.sql");
+    expect(files[files.length - 3]).toBe("0190_seller_legal_public.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });

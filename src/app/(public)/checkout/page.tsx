@@ -5,6 +5,8 @@ import { fetchSavedContact } from "@/lib/account/contacts";
 import { checkoutAccess } from "@/lib/commerce/access";
 import { fetchSellerPublic } from "@/lib/shop/seller";
 import { de } from "@/lib/i18n/de";
+import type { ShownTerms } from "@/lib/legal/documents";
+import { fetchLegalVersions } from "@/lib/legal/versions";
 import { offerRecord } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
 import { createClient } from "@/lib/supabase/server";
@@ -55,6 +57,12 @@ export default async function CheckoutPage({
   // What this account has saved, if anything. RLS returns their row and no
   // other; a guest gets null and is asked for everything, as before.
   const contact = await fetchSavedContact();
+  // The AGB and Widerruf in force, as the database names them (0191): shown,
+  // linked by version and sent with the order. Unknown → null, and the
+  // checkout places nothing — no guessed version (ADR-0184, AP5).
+  const versions = await fetchLegalVersions();
+  const terms: ShownTerms | null =
+    versions.status === "ok" ? { agb: versions.versions.agb, widerruf: versions.versions.widerruf } : null;
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-6 md:pt-12 md:pb-10">
@@ -82,6 +90,7 @@ export default async function CheckoutPage({
             contact={contact}
             saveDefaultAllowed={Boolean(data.user)}
             sellerName={seller?.displayName ?? null}
+            terms={terms}
             resumeOrderNumber={typeof order === "string" ? order.trim() : undefined}
           />
         ) : (

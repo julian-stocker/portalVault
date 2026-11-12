@@ -96,8 +96,8 @@ ist keine aktive Identität mehr.
 | **AP7: Stripe-Übersicht.** Was übermittelt wird und was bewusst nicht (geprüft gegen `buildSessionForm()`), was nur im Dashboard einstellbar ist (dort als „unbekannt“) und was Stripe oder die Bank bestimmen. Kein Stripe-Aufruf | `stripe-facts.ts` |
 | `sellers.trading_name` heißt jetzt „Frühere Geschäftsbezeichnung“: Das Feld wird nirgends angezeigt, und ein abweichender Wert erscheint als Widerspruch. Gespeicherte Werte werden nicht automatisch geändert | `shop-profile-panel.tsx`, `de.ts` |
 
-**Unverändert:** Rechtstexte (lesen bis AP5 weiter `SELLER_IDENTITY` und nennen yulez.collectibles),
-Rechnungen, Mails, Stripe, Verkäuferdaten, Migrationen.
+**Unverändert (AP1–AP3, AP6/AP7):** Rechnungen, Mails, Stripe, Verkäuferdaten. Die Rechtstexte
+stellt AP5 um (unten).
 
 **Offen:**
 - **Visuelle Prüfung auf Desktop und Mobil im Browser steht aus.** Es gab keine Browseranbindung;
@@ -110,7 +110,27 @@ Rechnungen, Mails, Stripe, Verkäuferdaten, Migrationen.
   - keine Konsolenfehler.
 - Der Betreiber leert `trading_name` auf Staging; dort steht laut Seed noch „yulez.collectibles“.
 - AP4: Migration `0190_seller_legal_public.sql` **auf Staging angewendet und nachgeprüft (2026-11-11)**: Runner-Nachkontrolle 9999 = 0, berechtigter Postflight 9998 = 0 und 9999 = 0, Baselines unverändert (Nachweis und Grenzen der Belegkette in `supabase/migrations/APPLIED.md`). **Production: nicht angewendet**, eigene Freigabe. Maskierte Prüfung der Verkäuferangaben vor dem Lauf und `db:privileges:staging` (Abdruck `13f9f823…` unverändert) bestanden. Vor AP5 offen auf Staging: `trading_name` nennt noch yulez, `direct_contact` ist leer. Die neuen Versionen der Rechtstexte kommen erst mit AP5 (ADR-0184, „Was AP5 voraussetzt“).
-- AP5: Rechtstexte auf das Identitätsmodell umstellen.
+- **AP5 lokal implementiert (2026-11-11), nicht committet, nicht ausgeliefert.** Impressum, AGB,
+  Widerruf, Datenschutz, Versand, Kontakt und Footer lesen `seller_legal_public()`
+  (`src/lib/identity/public.ts`, `src/lib/legal/seller-text.ts`); `SELLER_IDENTITY` ist entfernt.
+  Fehlerzustand statt Ersatzangaben; keine anfrageübergreifende Zwischenspeicherung. Die Fassung
+  `2026-09-17` ist unverändert archiviert (`/rechtstexte/<slug>/2026-09-17`). Neue Kennung
+  `2026-11-11`. **Welche Fassung gilt, entscheidet die Datenbank** (`legal_versions_public()`,
+  `0191`; Betreiberentscheidung 2026-11-12): Rechtsseiten und Checkout rendern die genannte
+  Fassung, archiviert oder gebaut. **Der Checkout ist an die angezeigte Fassung gekoppelt:** er
+  verlinkt und sendet die Kennungen, `create_order()` prüft sie in der Bestelltransaktion
+  (`0191`), `0192` schaltet Kennungen und Endzustand atomar um. **`0191` auf Staging angewendet
+  und nachgeprüft (2026-11-12)**: Runner-Nachkontrolle 9999 = 0, berechtigter Postflight 9998 = 0
+  und 9999 = 0, Bestellungen, Snapshots, Rechnungen und Baselines unverändert (`APPLIED.md`).
+  `0192` nirgends angewendet, Production keine von beiden. Reihenfolge auf Staging: `0191` → Vorschau-Deployment →
+  Browser- und PostgREST-Prüfung → `0192` → erneute Prüfung; `0192` hängt nicht mehr am Zeitpunkt
+  des Deployments (ADR-0184, „Runbook“). **Vor dem Ausliefern:** Staging-Läufe, Browserprüfung,
+  rechtliche Prüfung; Production erst `0190`, dann `0191`, Deployment, Prüfung, `0192`.
+- **Staging-Preview für `development/skyisles-v2` (ADR-0185, 2026-11-12).** Vercel-Konfiguration vom
+  Betreiber am 2026-11-10 als eingerichtet bestätigt; technisch nicht unabhängig nachgeprüft.
+  Preview-Sperre im Code (`src/lib/ops/deployment-target.ts`): Eine Vorschau ohne Staging-URL baut nicht,
+  der Proxy antwortet 503, und serverseitige Supabase-Clients werfen. Production und lokale Entwicklung
+  sperrt sie nie. Offen: ob auf Vercel ein Service-Role-Key liegt (Betreiberangabe gegen Doku).
 - AP6/AP7 gebaut (2026-11-11), nicht committet; Browserprüfung steht aus.
 - Zu entscheiden:
   - die Vertragspartner-Zeile;

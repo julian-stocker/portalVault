@@ -16,10 +16,14 @@
  * breaks carry meaning, and a screen reader should announce it as the
  * quotation it is rather than as a form to fill in.
  */
-import { WIDERRUFSFORMULAR } from "@/lib/legal/widerruf";
+import type { WithdrawalFormText } from "@/lib/legal/archive/types";
 import { de } from "@/lib/i18n/de";
 
-export function WithdrawalForm() {
+/**
+ * `form` is the current form built from the seller row, or an archived one —
+ * the component renders whichever it is given and fills nothing in itself.
+ */
+export function WithdrawalForm({ form: WIDERRUFSFORMULAR }: { form: WithdrawalFormText }) {
   const copy = de.legal.form;
 
   const body = [

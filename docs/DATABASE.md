@@ -968,10 +968,11 @@ Beide tragen keine Kontoreferenz und können deshalb keine Löschung blockieren.
 |---|---|---|
 | `reservation_ttl()` | niemand | 20 Minuten. Eine Definition, serverseitig. Entzogen für `public`, `anon` **und** `authenticated`. |
 | `next_order_number()` | niemand | Spalten-Default, race-frei über eine Sequenz. `volatile` — ein Aufrufer könnte Nummern verbrauchen, deshalb ebenfalls für alle drei Rollen entzogen. |
-| `create_order(request_id, email, items, address, shipping_method, payment_token)` | `anon`, `authenticated` | Der **einzige** Weg, eine Bestellung anzulegen. Liest Preise über `shop_price()`, Eignung über `is_shop_eligible()`, reserviert im selben Aufruf. Lehnt seit `0028` jede Position ab, deren Kondition nicht `v1_sale_condition()` ist — in Pass 1, bevor irgendetwas geschrieben wird. Idempotent über `request_id`. |
+| `create_order(request_id, email, items, address, shipping_method, payment_token)` | `anon`, `authenticated` | Der **einzige** Weg, eine Bestellung anzulegen. **Mit `0191` (auf Staging seit 2026-11-12) / `0192` (nirgends angewendet):** zusätzlich `agb_version, widerruf_version`, geprüft gegen `legal_document_versions` (`LV001`/`LV002`); `0192` entfernt diese Sechser. Liest Preise über `shop_price()`, Eignung über `is_shop_eligible()`, reserviert im selben Aufruf. Lehnt seit `0028` jede Position ab, deren Kondition nicht `v1_sale_condition()` ist — in Pass 1, bevor irgendetwas geschrieben wird. Idempotent über `request_id`. |
 | `reserve_for_order(order_id)` | niemand | Alles oder nichts. Sperrt in aufsteigender `id`-Reihenfolge, räumt abgelaufenen Halt unter der Sperre, prüft Verfügbarkeit in der `WHERE`-Klausel. |
 | `active_seller()` | niemand | Der eine aktive Verkäufer, **ganze Zeile** (`select s.*`) — deshalb für alle drei Rollen entzogen (ADR-0064). |
-| `seller_legal_public()` | `anon`, `authenticated` | **Öffentliche Anbieterkennzeichnung (`0190`, ADR-0184, auf Staging angewendet am 2026-11-11, Production nicht).** Die aktive Verkäuferzeile als Allow-List für Impressum, AGB, Widerruf und Footer: Shopname, rechtlicher Name und Rechtsform, Anschrift, Kontakt und zweiter Kontaktweg, USt-IdNr. und W-IdNr., Register, § 19-Kennzeichen, Streitbeilegung, aufgelöste Widerrufs- und Beschwerdeadresse, Rücksendekosten. Leere Werte NULL, ohne aktiven Verkäufer keine Zeile. **Nicht** enthalten: Reply-To, Telefon, `trading_name`, Versandaussage, Versandgrenze, `id`, Verwaltungsspalten. `service_role` und PUBLIC ohne EXECUTE. |
+| `legal_versions_public()` | `anon`, `authenticated` | **Die geltenden Fassungen (`0191`, ADR-0184, auf Staging angewendet am 2026-11-12, Production nicht).** Genau eine Zeile mit genau vier Kennungen (`agb`, `widerruf`, `datenschutz`, `impressum`) aus `legal_document_versions`; kein Datum, kein Zeitstempel, keine weitere Zeile. `stable`, SECURITY DEFINER, leerer `search_path`. Fehlt eine oder ist sie leer: `LV003`. Gelesen von `fetchLegalVersions()`: Rechtsseiten und Checkout rendern die Fassung, die sie nennt. Die Tabelle bleibt für `anon`/`authenticated` gesperrt; `service_role` und PUBLIC ohne EXECUTE. |
+| `seller_legal_public()` | `anon`, `authenticated` | **Öffentliche Anbieterkennzeichnung (`0190`, ADR-0184, auf Staging angewendet am 2026-11-11, Production nicht).** Gelesen von `fetchSellerLegal()` (AP5) mit dem Anon-Schlüssel ohne Sitzung. Die aktive Verkäuferzeile als Allow-List für Impressum, AGB, Widerruf und Footer: Shopname, rechtlicher Name und Rechtsform, Anschrift, Kontakt und zweiter Kontaktweg, USt-IdNr. und W-IdNr., Register, § 19-Kennzeichen, Streitbeilegung, aufgelöste Widerrufs- und Beschwerdeadresse, Rücksendekosten. Leere Werte NULL, ohne aktiven Verkäufer keine Zeile. **Nicht** enthalten: Reply-To, Telefon, `trading_name`, Versandaussage, Versandgrenze, `id`, Verwaltungsspalten. `service_role` und PUBLIC ohne EXECUTE. |
 | `seller_public()` | `anon`, `authenticated` | **Identität, keine Relation.** Gibt `id` und `display_name` des aktiven Verkäufers zurück, sonst nichts — Allow-List, wörtlich benannt. Kontaktadresse, Reply-To, `updated_by` und Zeitstempel bleiben drin (`0027`). Aus der sichtbaren `id` folgt **nicht**, dass SkyIsles Multi-Seller kann: keine Tabelle trägt ein `seller_id`. |
 | `release_expired_reservations(ids?)` | niemand | Gibt abgelaufenen Halt frei. Idempotent. `NULL` = alles (Zeitgeber), Array = die Positionen eines Checkouts. |
 | `release_order_reservations(order_id)` | niemand | Gibt den Halt einer Bestellung frei. Idempotent. |
@@ -1565,6 +1566,20 @@ späteren Text zeigt. **Ein Snapshot ist ab dem Schreiben unveränderlich:**
 `order_legal_snapshots_protect_trg` weist jede Änderung und jede Löschung zurück — dieselbe
 Sicherung wie bei `invoices`, aus demselben Grund: eine Aufzeichnung darüber, wem gegenüber welche
 Bedingungen galten, ist wertlos, wenn sie später bearbeitet werden kann.
+
+**Kopplung an die angezeigte Fassung (ADR-0184, AP5; `0191` auf Staging angewendet am 2026-11-12, `0192` nirgends, Production keine von beiden).**
+`0191` legt `create_order(…, p_agb_version, p_widerruf_version)` neben die bisherige Sechser: sie
+vergleicht die vom Checkout angezeigten Kennungen vor jedem Schreiben mit dieser Tabelle, gelesen
+`for share` (fehlend `LV001`, abweichend `LV002`; dann keine Bestellung und keine Reservierung), sonst
+der Rumpf aus `0139`. Dazu `legal_versions_public()`: Welche Fassung gilt, entscheidet diese Tabelle;
+Seiten und Checkout lesen sie darüber und rendern die genannte Fassung (archiviert oder gebaut).
+**`0192`** setzt in einer Transaktion die vier Kennungen von `2026-09-17` auf
+`2026-11-11` (nur Zeilen mit `2026-09-17`, jede andere bricht ab), entfernt die Sechser und ergänzt
+den Tabellenkommentar um die Standmarke `[aktuell: 2026-11-11]`, die der lesende Prüfzugang liest. Die
+Tabelle hält je Dokument nur die **aktuelle** Kennung; frühere bleiben in den Snapshots und im
+Code-Archiv (`src/lib/legal/archive/`). Keine Bestellung, kein Snapshot, keine Rechnung ändert sich.
+Mit dem Commit von `0192` zeigen alle vier Rechtsseiten und der Checkout `2026-11-11`; Reihenfolge und
+Runbook in ADR-0184.
 
 `withdrawal_requests` hält je Widerruf nach § 356a BGB Name, Kontaktadresse,
 **Inhalt der Erklärung** und den **gesetzlich maßgeblichen Eingangszeitpunkt**; `order_refunds` hält

@@ -161,7 +161,21 @@ describe("die Freigrenze hat genau eine Quelle", () => {
         return !trimmed.startsWith("*") && !trimmed.startsWith("//") && !trimmed.startsWith("/*");
       })
       .join("\n");
-    const shopCopy = copy.slice(copy.indexOf("shop: {"), copy.indexOf("quickView: {"));
+    /*
+     * THE TOP-LEVEL `shop` SECTION, anchored by its indentation. Since
+     * `1f9c1b3` there is a second, nested `shop: {` (business.identity.shop),
+     * earlier in the file; a bare `indexOf("shop: {")` started the slice there
+     * and swept in thousands of unrelated lines. The rule is unchanged — it
+     * reads the same section it always meant.
+     */
+    const top = (key: string) => {
+      const at = copy.indexOf(`\n  ${key}: {`);
+      expect(at, key).toBeGreaterThan(-1);
+      expect(copy.indexOf(`\n  ${key}: {`, at + 1), `${key} once`).toBe(-1);
+      return at;
+    };
+    const shopCopy = copy.slice(top("shop"), top("quickView"));
+    expect(shopCopy.length).toBeGreaterThan(0);
     expect(shopCopy).not.toMatch(/\d+\s*€|€\s*\d/);
     expect(shopCopy).not.toContain("versandkostenfrei\"");
     for (const path of [PANEL, QUICK, NOTE, SHOP_PAGE]) {

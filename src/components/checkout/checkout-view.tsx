@@ -38,6 +38,7 @@ import {
 } from "@/lib/commerce/field-errors";
 import { cartTotal, keyOf, resolveCart } from "@/lib/cart/cart";
 import { placeOrder, shippingOptions, type PlacedOrder } from "@/lib/commerce/actions";
+import { legalTextPath, type ShownTerms } from "@/lib/legal/documents";
 import {
   forgetOpenOrder,
   forgetPaymentToken,
@@ -180,6 +181,7 @@ export function CheckoutView({
   saveDefaultAllowed,
   resumeOrderNumber,
   sellerName,
+  terms,
 }: {
   offers: Readonly<Record<string, readonly Offer[]>>;
   email: string;
@@ -207,6 +209,14 @@ export function CheckoutView({
   /** Whether "save as my default" may be offered. False for a guest. */
   saveDefaultAllowed?: boolean;
   resumeOrderNumber?: string;
+  /**
+   * The AGB and Widerruf versions this checkout shows — read from the
+   * database when the page was rendered, linked by version and sent with the
+   * order, so `create_order()` can refuse it if they are no longer in force
+   * (ADR-0184, AP5). Null: the versions could not be read, and nothing is
+   * placed.
+   */
+  terms: ShownTerms | null;
 }) {
   const { cart, ready, clear } = useCart();
   /*
@@ -430,6 +440,11 @@ export function CheckoutView({
 
   async function submit() {
     if (busy.current) return;
+    // Without the versions in force there is nothing true to send.
+    if (!terms) {
+      setError(de.checkout.errorTermsUnavailable);
+      return;
+    }
     busy.current = true;
     setPending(true);
     setError(null);
@@ -449,6 +464,7 @@ export function CheckoutView({
           })),
         },
         credentials.current!,
+        terms,
       );
 
       if (result.ok) {
@@ -494,7 +510,9 @@ export function CheckoutView({
             ? de.checkout.errorUnavailable
             : result.reason === "too_many_checkouts"
               ? de.checkout.errorThrottled
-              : de.checkout.errorFailed,
+              : result.reason === "terms_changed"
+                ? de.checkout.errorTermsChanged
+                : de.checkout.errorFailed,
       );
     } finally {
       busy.current = false;
@@ -856,6 +874,7 @@ export function CheckoutView({
       <TrustBlock
         sellerName={sellerName ?? null}
         method={options.find((option) => option.code === method) ?? null}
+        terms={terms}
       />
 
       {/* ------------------------------------------------------------- submit */}
@@ -900,6 +919,7 @@ export function CheckoutView({
         <PendingButton
           type="submit"
           pending={pending}
+          disabled={!terms}
           pendingLabel={de.checkout.submitting}
           className={`${ACTION_COMMERCE_BLOCK} gap-2 disabled:opacity-70`}
           style={COMMERCE_SURFACE}
@@ -955,8 +975,11 @@ function LegalLink({ href, label }: { href: string; label: string }) {
 function TrustBlock({
   method,
   sellerName,
+  terms,
 }: {
   method: ShippingOption | null;
+  /** The versions shown here are the versions the order sends (ADR-0184). Null: unknown. */
+  terms: ShownTerms | null;
   /** From `seller_public()`. Null renders the neutral sentence. */
   sellerName: string | null;
 }) {
@@ -1013,11 +1036,26 @@ function TrustBlock({
           <dd className="mt-0.5 leading-relaxed">
             {copy.legalIntro}
             <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              <LegalLink href="/agb" label={copy.legalAgb} />
-              <LegalLink href="/widerruf" label={copy.legalWithdrawal} />
+              {/* By version, not `/agb`: the text opened from here is exactly
+                  the one this order sends, even if a release lands meanwhile. */}
+              {terms ? (
+                <>
+                  <LegalLink
+                    href={legalTextPath("agb", terms.agb)}
+                    label={`${copy.legalAgb} (${copy.legalVersion(terms.agb)})`}
+                  />
+                  <LegalLink
+                    href={legalTextPath("widerruf", terms.widerruf)}
+                    label={`${copy.legalWithdrawal} (${copy.legalVersion(terms.widerruf)})`}
+                  />
+                </>
+              ) : null}
               <LegalLink href="/versand" label={copy.legalShipping} />
               <LegalLink href="/datenschutz" label={copy.legalPrivacy} />
             </span>
+            {terms ? null : (
+              <span role="alert" className="mt-1.5 block text-xs text-danger">{copy.legalUnavailable}</span>
+            )}
             <span className="mt-1 block text-xs text-on-deep-muted">
               {copy.legalPrivacyNote}
             </span>

@@ -806,6 +806,42 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0191": {
+      "zweck": "Die Bestellung an die angezeigten Rechtsfassungen koppeln (ADR-0184, AP5): zweite Ueberladung create_order(..., p_agb_version, p_widerruf_version) ohne Standardwerte, Rumpf aus 0139 plus Abgleich unter for share, Rechte der bisherigen; dazu legal_versions_public(), die die vier aktuellen Kennungen fuer Seiten und Checkout liefert; die Sechser bleibt bis 0192 unveraendert",
+      "preflight": "0191_preflight.sql",
+      "lauf": "staging-0191.sql",
+      "postflight": "0191_postflight.sql",
+      "angewendet": {
+        "beschreibung": "public.create_order mit acht Parametern und public.legal_versions_public() stehen mit den Ruempfen aus 0191. Preflight-Zeile 102 meldet einen zweiten Lauf.",
+        "sql": "select coalesce((select md5(p.prosrc) = '75fbeaea7b193035717eeb37c0995127' from pg_proc p where p.oid = to_regprocedure('public.create_order(text, text, jsonb, jsonb, text, text, text, text)')), false) and coalesce((select md5(p.prosrc) = '5e9daa01284d9b06b1b7d8fb053cff36' from pg_proc p where p.oid = to_regprocedure('public.legal_versions_public()')), false) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0192": {
+      "zweck": "Die Fassung 2026-11-11 der Rechtstexte zur aktuellen machen (ADR-0184, AP5): vier Zeilen in legal_document_versions von 2026-09-17 auf 2026-11-11 und die Sechser-Ueberladung von create_order entfernt, in einer Transaktion, dazu die Standmarke im Tabellenkommentar; Seiten und Checkout schalten ueber legal_versions_public() mit dem Commit um; keine Bestellung, kein Snapshot, keine Rechnung, kein anderes Recht",
+      "preflight": "0192_preflight.sql",
+      "lauf": "staging-0192.sql",
+      "postflight": "0192_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Der Tabellenkommentar von public.legal_document_versions traegt die Standmarke [aktuell: 2026-11-11]. Preflight-Zeile 103 meldet einen zweiten Lauf.",
+        "sql": "select coalesce(obj_description(to_regclass('public.legal_document_versions'), 'pg_class') like '%[aktuell: 2026-11-11]%', false) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

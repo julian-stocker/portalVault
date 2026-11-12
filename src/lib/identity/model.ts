@@ -15,8 +15,9 @@
  *
  * PURE. This file reads nothing and writes nothing. `server.ts` loads the
  * values through the existing seller-gated `admin_shop_profile()`; the
- * published legal pages still read `SELLER_IDENTITY` until AP5, and the
- * comparison below says where the two disagree instead of hiding it.
+ * published legal pages read the same seller row through
+ * `seller_legal_public()` (`public.ts`, AP5), so there is no second source
+ * left to disagree with.
  *
  * NOTHING IS INVENTED OR ASSUMED. A missing field is reported missing; no
  * register entry, telephone number or tax status is inferred. The tax flag is
@@ -67,6 +68,8 @@ export type LegalIdentity = {
   wId: string | null;
   registerCourt: string | null;
   registerNumber: string | null;
+  /** `sellers.direct_contact` — a further contact channel, as stored. */
+  directContact: string | null;
   /** As stored; never changed or inferred here. */
   smallBusiness19: boolean;
   /**
@@ -76,6 +79,45 @@ export type LegalIdentity = {
    */
   legacyTradingName: string | null;
 };
+
+/**
+ * How the contracting party is named wherever one line has to carry it
+ * (ADR-0184). PROVISIONAL wording, set by the operator for AP5 and pending
+ * legal review — change it here, nowhere else.
+ */
+export function contractingParty(legalName: string, displayName: string): string {
+  return `${legalName}, handelnd unter ${displayName}`;
+}
+
+/**
+ * The fields an invoice (§ 14/§ 34a UStDV: name and address) and an Impressum
+ * (§ 5 DDG: name, address, e-mail) cannot do without. Tax and register details
+ * are NOT required: whether they exist is not something to assume.
+ *
+ * ONE LIST for the operator's overview and for the public pages, so the
+ * workbench and the Impressum can never disagree about what is missing.
+ */
+export const REQUIRED_IDENTITY_FIELDS = [
+  { code: "shop.displayName", label: "Der Shopname" },
+  { code: "legal.legalName", label: "Der rechtliche Name des Betreibers" },
+  { code: "legal.street", label: "Die Straße der Geschäftsanschrift" },
+  { code: "legal.postalCode", label: "Die Postleitzahl der Geschäftsanschrift" },
+  { code: "legal.city", label: "Der Ort der Geschäftsanschrift" },
+  { code: "legal.countryCode", label: "Das Land der Geschäftsanschrift" },
+  { code: "shop.contactEmail", label: "Die Kontakt-E-Mail für Kundinnen und Kunden" },
+] as const;
+
+export type RequiredIdentityCode = (typeof REQUIRED_IDENTITY_FIELDS)[number]["code"];
+
+/** The values the required fields are read from, wherever they come from. */
+export type RequiredIdentityValues = Record<RequiredIdentityCode, string | null>;
+
+const blank = (value: string | null | undefined) => value === null || value === undefined || value.trim() === "";
+
+/** The required fields that are missing, in the order of the list. */
+export function missingRequiredFields(values: RequiredIdentityValues): RequiredIdentityCode[] {
+  return REQUIRED_IDENTITY_FIELDS.filter((field) => blank(values[field.code])).map((field) => field.code);
+}
 
 export type Identity = {
   platform: PlatformIdentity;
@@ -113,28 +155,13 @@ export function buildIdentity(
       wId: s.wId,
       registerCourt: s.registerCourt,
       registerNumber: s.registerNumber,
+      directContact: s.directContact,
       smallBusiness19: p.smallBusiness19,
       legacyTradingName: s.tradingName,
     },
     contacts: { withdrawal: withdrawalContact(c), complaints: complaintsContact(c) },
   };
 }
-
-/**
- * What the published legal pages say today — `SELLER_IDENTITY` in
- * `src/lib/legal/seller-identity.ts`, until AP5 moves them onto this model.
- * Passed in rather than imported, so the model stays free of the legal texts.
- */
-export type PublishedIdentity = {
-  legalName: string;
-  tradeName: string;
-  contractingParty: string;
-  street: string;
-  postalCode: string;
-  city: string;
-  email: string;
-  vatId: string;
-};
 
 export type FindingLevel = "missing" | "conflict" | "notice";
 export type Finding = { level: FindingLevel; code: string; message: string };
@@ -148,22 +175,25 @@ const isRetired = (value: string | null) =>
  * missing for an invoice and an Impressum, where two sources disagree, and
  * where a retired identity is still active.
  */
-export function identityFindings(identity: Identity, published: PublishedIdentity): Finding[] {
+export function identityFindings(identity: Identity): Finding[] {
   const { shop, legal } = identity;
   const findings: Finding[] = [];
-  const missing = (code: string, label: string) =>
-    findings.push({ level: "missing", code, message: `${label} fehlt.` });
 
-  /* Required for an invoice (§ 14/§ 34a UStDV: name and address) and an
-     Impressum (§ 5 DDG: name, address, e-mail). Tax and register details are
-     NOT required here: whether they exist is not something to assume. */
-  if (shop.displayName === null) missing("shop.displayName", "Der Shopname");
-  if (legal.legalName === null) missing("legal.legalName", "Der rechtliche Name des Betreibers");
-  if (legal.street === null) missing("legal.street", "Die Straße der Geschäftsanschrift");
-  if (legal.postalCode === null) missing("legal.postalCode", "Die Postleitzahl der Geschäftsanschrift");
-  if (legal.city === null) missing("legal.city", "Der Ort der Geschäftsanschrift");
-  if (legal.countryCode === null) missing("legal.countryCode", "Das Land der Geschäftsanschrift");
-  if (shop.contactEmail === null) missing("shop.contactEmail", "Die Kontakt-E-Mail für Kundinnen und Kunden");
+  /* The required fields — the same list the public legal pages check. */
+  const gaps = missingRequiredFields({
+    "shop.displayName": shop.displayName,
+    "legal.legalName": legal.legalName,
+    "legal.street": legal.street,
+    "legal.postalCode": legal.postalCode,
+    "legal.city": legal.city,
+    "legal.countryCode": legal.countryCode,
+    "shop.contactEmail": shop.contactEmail,
+  });
+  for (const field of REQUIRED_IDENTITY_FIELDS) {
+    if (gaps.includes(field.code)) {
+      findings.push({ level: "missing", code: field.code, message: `${field.label} fehlt.` });
+    }
+  }
 
   /* Platform and shop are two identities and must not collapse into one name. */
   if (shop.displayName !== null && norm(shop.displayName) === norm(identity.platform.name)) {
@@ -197,34 +227,11 @@ export function identityFindings(identity: Identity, published: PublishedIdentit
     });
   }
 
-  /* The published legal pages read constants until AP5. Say where they
-     disagree with the data — field by field, never silently. */
-  const differs = (a: string | null, b: string) => a !== null && norm(a) !== norm(b);
-  const pages = "Impressum, AGB, Widerruf, Datenschutz und Footer";
-  if (shop.displayName !== null && norm(shop.displayName) !== norm(published.tradeName)) {
-    findings.push({
-      level: "conflict", code: "published.tradeName",
-      message: `${pages} nennen noch „${published.contractingParty}“; der Shopname ist „${shop.displayName}“. `
-        + "Die Rechtstexte lesen bis zur Umstellung (AP5) feste Werte.",
-    });
-  }
-  if (differs(legal.legalName, published.legalName)) {
-    findings.push({ level: "conflict", code: "published.legalName",
-      message: `${pages} nennen als Betreiber „${published.legalName}“, die Geschäftsdaten „${legal.legalName}“.` });
-  }
-  if (differs(legal.street, published.street) || differs(legal.postalCode, published.postalCode)
-    || differs(legal.city, published.city)) {
-    findings.push({ level: "conflict", code: "published.address",
-      message: `${pages} nennen die Anschrift „${published.street}, ${published.postalCode} ${published.city}“, `
-        + "die Geschäftsdaten eine andere." });
-  }
-  if (differs(shop.contactEmail, published.email)) {
-    findings.push({ level: "conflict", code: "published.email",
-      message: `${pages} nennen die E-Mail „${published.email}“, die Kontakt-E-Mail ist „${shop.contactEmail}“.` });
-  }
-  if (differs(legal.vatId, published.vatId)) {
-    findings.push({ level: "conflict", code: "published.vatId",
-      message: `${pages} nennen die USt-IdNr. „${published.vatId}“, die Geschäftsdaten „${legal.vatId}“.` });
+  /* A further contact channel: said when there is none, never judged. Whether
+     e-mail alone is enough is a legal question this model does not answer. */
+  if (legal.directContact === null && shop.contactEmail !== null) {
+    findings.push({ level: "notice", code: "legal.directContact",
+      message: "Kein weiterer Kontaktweg hinterlegt: Impressum und Kontaktseite nennen nur die E-Mail." });
   }
 
   if (shop.replyTo === null && shop.contactEmail !== null) {
@@ -247,9 +254,9 @@ export type UsageRow = {
 /**
  * Every customer-facing place a name or contact appears, with the value it
  * would show for a NEW order today and where that value comes from. Measured
- * against the code (`0047`, `0122`, `templates.ts`, `seller-identity.ts`).
+ * against the code (`0047`, `0122`, `templates.ts`, `src/lib/legal/`).
  */
-export function nameUsage(identity: Identity, published: PublishedIdentity): UsageRow[] {
+export function nameUsage(identity: Identity): UsageRow[] {
   const { shop, legal } = identity;
   const address = [legal.street, [legal.postalCode, legal.city].filter(Boolean).join(" ")]
     .filter((part) => part && part.trim() !== "").join(", ") || null;
@@ -272,8 +279,9 @@ export function nameUsage(identity: Identity, published: PublishedIdentity): Usa
     { area: "Eigenbelege beim Einkauf", shows: seller,
       source: "kopiert legal_name und display_name", kind: "database" },
     { area: "Impressum, AGB, Widerruf, Datenschutz, Footer, Serviceseiten",
-      shows: published.contractingParty,
-      source: "SELLER_IDENTITY im Code (bis zur Umstellung in AP5)", kind: "code" },
+      shows: legal.legalName !== null && shop.displayName !== null
+        ? contractingParty(legal.legalName, shop.displayName) : null,
+      source: "seller_legal_public() — die aktive Verkäuferzeile, bei jedem Aufruf gelesen", kind: "database" },
     { area: "Frühere Geschäftsbezeichnung", shows: legal.legacyTradingName,
       source: "sellers.trading_name — wird nirgends angezeigt, nur gesichert", kind: "unused" },
   ];

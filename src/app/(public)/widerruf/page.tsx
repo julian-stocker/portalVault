@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { LegalDocumentView } from "@/components/legal/legal-document-view";
-import { WithdrawalForm } from "@/components/legal/withdrawal-form";
+import { ActiveLegalPage, activeLegalMetadata } from "@/components/legal/active-legal-page";
 import { de } from "@/lib/i18n/de";
-import { WIDERRUF, WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
+import { WIDERRUF_HEAD, WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
 
-export const metadata: Metadata = { title: WIDERRUF.title, description: WIDERRUF.lead };
+export function generateMetadata(): Promise<Metadata> {
+  return activeLegalMetadata("widerruf", WIDERRUF_HEAD.title);
+}
 
 /**
  * Widerrufsbelehrung und Muster-Widerrufsformular (ADR-0086).
@@ -18,6 +19,12 @@ export const metadata: Metadata = { title: WIDERRUF.title, description: WIDERRUF
  * The link to the function is near the top as well as in the footer, because
  * "gut sichtbar und leicht zugänglich" is a requirement of the statute and not
  * a layout preference.
+ *
+ * The version is the one `legal_versions_public()` names as current, with
+ * the model form of the same version (ADR-0184, AP5). Without that answer,
+ * or without usable seller data for the built text, the Belehrung is not
+ * shown — but the way into the online function stays, because the right to
+ * withdraw does not depend on this page rendering.
  */
 export default function WiderrufPage() {
   return (
@@ -31,8 +38,7 @@ export default function WiderrufPage() {
           <span className="mt-1 block text-sm text-muted">{de.withdrawal.entryHint}</span>
         </Link>
       </div>
-      <LegalDocumentView document={WIDERRUF} />
-      <WithdrawalForm />
+      <ActiveLegalPage slug="widerruf" title={WIDERRUF_HEAD.title} />
     </>
   );
 }

@@ -41,6 +41,9 @@ function code(path: string): string {
 
 const FILES = sourceFiles("src");
 
+/** A site domain — anywhere except as the domain part of an e-mail address. */
+const BARE_DOMAIN = /(?<!@(?:[\w-]+\.)*)\b(?:skyisles\.(?:app|de|com)|portal-vault-lovat|vercel\.app)/;
+
 describe("no host is hard-coded into the application", () => {
   it("finds source files to check", () => {
     // A guard on the guard: an empty list would pass everything below.
@@ -65,11 +68,26 @@ describe("no host is hard-coded into the application", () => {
       expect(code(path), `${path} names a site URL`).not.toMatch(
         /(?:https?:)?\/\/[\w.-]*(?:skyisles\.(?:app|de|com)|portal-vault-lovat|vercel\.app)/,
       );
-      // And the bare domain stays forbidden everywhere except after an `@`.
-      expect(code(path), `${path} names a site domain`).not.toMatch(
-        /(?<!@)\b(?:skyisles\.(?:app|de|com)|portal-vault-lovat|vercel\.app)/,
-      );
+      // And the bare domain stays forbidden everywhere except as the domain
+      // part of an e-mail address.
+      expect(code(path), `${path} names a site domain`).not.toMatch(BARE_DOMAIN);
     }
+  });
+
+  it("an e-mail address at a subdomain is still an address, and still not a URL", () => {
+    /*
+     * `orders@mail.skyisles.app` (the mail sender's fallback, shown in the
+     * preview on /business/profile) is an address like `info@skyisles.de`;
+     * the old look-behind only allowed the domain directly after the `@`. The
+     * exception is exactly "after `@` and its labels" — every URL form of the
+     * same host is still caught, here and by the URL rule above.
+     */
+    expect("SkyIsles <orders@mail.skyisles.app>").not.toMatch(BARE_DOMAIN);
+    expect("info@skyisles.de").not.toMatch(BARE_DOMAIN);
+    for (const bad of ["mail.skyisles.app", "skyisles.app", "see skyisles.de", "x.vercel.app"]) {
+      expect(bad, bad).toMatch(BARE_DOMAIN);
+    }
+    expect("//mail.skyisles.app").toMatch(BARE_DOMAIN);
   });
 
   /**
@@ -80,21 +98,29 @@ describe("no host is hard-coded into the application", () => {
    * whole describe block exists to prevent is a redirect or a canonical that
    * points at the wrong SkyIsles host, and a carrier URL cannot cause it.
    *
-   * Listed here by name so a second such file has to be a decision.
+   * Listed here by name so a second such file has to be a decision — and each
+   * with the only hosts it may name.
+   *
+   * `stripe-facts.ts` (ADR-0184, AP7) links the operator to the Stripe
+   * dashboard from /business/profile: an external destination as well, and
+   * pinned to that one host.
    */
-  const EXTERNAL_DESTINATIONS = ["src/lib/commerce/tracking.ts"];
+  const EXTERNAL_DESTINATIONS: Record<string, RegExp> = {
+    "src/lib/commerce/tracking.ts": /^(www\.)?(myhermes\.de|dhl\.de)$/,
+    "src/lib/identity/stripe-facts.ts": /^dashboard\.stripe\.com$/,
+  };
 
   it("contains no absolute http(s) URL at all", () => {
     // The Supabase URL arrives as an environment variable, never as a literal.
     for (const path of FILES) {
-      if (EXTERNAL_DESTINATIONS.includes(path)) continue;
+      if (path in EXTERNAL_DESTINATIONS) continue;
       const absolute = code(path).match(/https?:\/\/[^\s"'`)]+/g) ?? [];
       expect(absolute, `${path} contains ${absolute.join(", ")}`).toEqual([]);
     }
   });
 
-  it("and the one exception names only carriers, over https", () => {
-    for (const path of EXTERNAL_DESTINATIONS) {
+  it("and the named exceptions name only their own hosts, over https", () => {
+    for (const [path, hosts] of Object.entries(EXTERNAL_DESTINATIONS)) {
       const absolute = code(path).match(/https?:\/\/[^\s"'`$)]+/g) ?? [];
       expect(absolute.length, path).toBeGreaterThan(0);
       for (const url of absolute) {
@@ -102,7 +128,7 @@ describe("no host is hard-coded into the application", () => {
         // test in this block already forbids the names, this forbids the
         // shape of the mistake as well.
         expect(url, url).toMatch(/^https:\/\//);
-        expect(new URL(url).hostname, url).toMatch(/^(www\.)?(myhermes\.de|dhl\.de)$/);
+        expect(new URL(url).hostname, url).toMatch(hosts);
       }
     }
   });

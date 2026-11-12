@@ -111,10 +111,15 @@ sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
    gegattert. Geprüft von `npm run verify:seller:staging` und von
    `src/lib/shop/seller-schema.test.ts`.
 7. **Die Anbieterkennzeichnung wird öffentlich lesbar — sobald `0190` angewendet ist (ADR-0184;
-   auf Staging seit 2026-11-11, Production nicht).** `seller_legal_public()` (anon, authenticated; nicht PUBLIC, nicht
+   auf Staging seit 2026-11-11, Production nicht).** `legal_versions_public()` (`0191`, auf Staging seit 2026-11-12, Production nicht)
+   gibt nur die vier geltenden Kennungen heraus; `legal_document_versions` bleibt für anon und authenticated
+   gesperrt, kein EXECUTE für PUBLIC oder `service_role`. `seller_legal_public()` (anon, authenticated; nicht PUBLIC, nicht
    service_role) liefert nur, was im Impressum ohnehin steht oder stehen muss, als ausdrückliche
    Spaltenliste. Reply-To, Telefon, `trading_name` und die Verwaltungsspalten bleiben gesperrt;
-   `sellers` selbst bleibt für anon unlesbar.
+   `sellers` selbst bleibt für anon unlesbar. Die Rechtsseiten rufen sie seit AP5 (lokal, nicht
+   ausgeliefert) mit dem Anon-Schlüssel **ohne Sitzungscookies** auf, nie mit dem Dienstschlüssel
+   (`src/lib/identity/public.ts`); Fehler werden nur als Code protokolliert, nie mit Werten aus der
+   Zeile, und es gibt keinen Rückfall auf eine im Code hinterlegte Identität.
 
 **Stand.** Umgesetzt sind Shop-Tabellen und Rolle (`0003`), die Lager-Lesefunktionen (`0005`),
 das öffentliche Angebot (`0006`) und der Legacy-Bestandsimport als Werkzeug. Bestellungen,
@@ -603,6 +608,14 @@ einer Datei abhängt, verschwindet mit der Datei.
 diesem Verzeichnis erreichen könnte — vorhandene Dateien, ihre Rechte,
 Skripte, die auf sie zeigen, und Variablen, deren Wert eine Projektkennung
 enthält. Es liest **keinen** Wert und öffnet **keine** Zugangsdatendatei.
+
+**Eine Vercel-Vorschau spricht nur mit Staging (ADR-0185).** `src/lib/ops/deployment-target.ts`
+sperrt jede Vorschau (`VERCEL_ENV = preview`), deren `NEXT_PUBLIC_SUPABASE_URL` nicht genau
+`qqxcpesbwfxzgytkdsac.supabase.co` über https ist. Sie baut nicht, ihr Proxy antwortet 503, und jeder
+serverseitige Supabase-Client wirft. Meldungen nennen den Grund, nie einen Wert. Production und
+lokale Entwicklung blockiert die Sperre nie. Grenzen: Ohne Vercel-Systemvariablen keine Erkennung;
+Production wird nicht geprüft; direkte Aufrufe an Supabase schützt weiter RLS. Einzelheiten in
+ADR-0185.
 
 ### 4b. Der lesende Staging-Prüfzugang `skyisles_agent`
 

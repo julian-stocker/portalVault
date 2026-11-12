@@ -9,7 +9,6 @@ import { IdentityFindings, NameUsage, PlatformIdentity } from "@/components/busi
 import { canOperateSeller, capabilities } from "@/lib/auth/capabilities";
 import { identityFindings, nameUsage } from "@/lib/identity/model";
 import { fetchIdentity } from "@/lib/identity/server";
-import { SELLER_IDENTITY } from "@/lib/legal/seller-identity";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = { title: de.business.identity.title };
@@ -38,8 +37,8 @@ export const metadata: Metadata = { title: de.business.identity.title };
  *
  * WHAT THIS PAGE DOES NOT DO. It changes no stored value by itself, publishes
  * nothing, and does not touch the legal texts, the invoices or Stripe. The
- * published legal pages still read `SELLER_IDENTITY` until AP5; the findings
- * say where that differs from the data.
+ * published legal pages read this same seller row through
+ * `seller_legal_public()` (AP5), so what is saved here is what they show.
  */
 export default async function BusinessIdentityPage() {
   if (!(await canOperateSeller())) notFound();
@@ -57,7 +56,7 @@ export default async function BusinessIdentityPage() {
   }
 
   const { identity, settings } = load;
-  const findings = identityFindings(identity, SELLER_IDENTITY);
+  const findings = identityFindings(identity);
   /* The sample mails link to this environment; a real mail uses SITE_URL. */
   const requestHeaders = await headers();
   const host = requestHeaders.get("host") ?? "localhost";
@@ -99,7 +98,7 @@ export default async function BusinessIdentityPage() {
         />
       </div>
 
-      <NameUsage rows={nameUsage(identity, SELLER_IDENTITY)} />
+      <NameUsage rows={nameUsage(identity)} />
 
       <InvoicePreview identity={identity} now={now} />
       <MailPreviews identity={identity} now={now} origin={origin} />

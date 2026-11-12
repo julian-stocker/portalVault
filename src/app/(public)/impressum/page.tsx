@@ -1,10 +1,17 @@
 import type { Metadata } from "next";
 
-import { LegalDocumentView } from "@/components/legal/legal-document-view";
-import { IMPRESSUM } from "@/lib/legal/impressum";
+import { ActiveLegalPage, activeLegalMetadata } from "@/components/legal/active-legal-page";
+import { IMPRESSUM_HEAD } from "@/lib/legal/impressum";
 
-export const metadata: Metadata = { title: IMPRESSUM.title, description: IMPRESSUM.lead };
+export function generateMetadata(): Promise<Metadata> {
+  return activeLegalMetadata("impressum", IMPRESSUM_HEAD.title);
+}
 
+/**
+ * The version `legal_versions_public()` names as current (ADR-0184, AP5):
+ * archived and frozen, or built per request from `seller_legal_public()`.
+ * Without either answer the page says so and names nobody.
+ */
 export default function Page() {
-  return <LegalDocumentView document={IMPRESSUM} />;
+  return <ActiveLegalPage slug="impressum" title={IMPRESSUM_HEAD.title} />;
 }

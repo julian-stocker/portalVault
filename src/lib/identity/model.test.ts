@@ -6,10 +6,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { NO_SHOP_SETTINGS, type ShopSettings } from "@/lib/admin/shop-profile-model";
-import { SELLER_IDENTITY } from "@/lib/legal/seller-identity";
 import {
-  PLATFORM_NAME, RETIRED_TRADE_NAMES, buildIdentity, identityFindings, nameUsage,
-  type PublishedIdentity,
+  PLATFORM_NAME, REQUIRED_IDENTITY_FIELDS, RETIRED_TRADE_NAMES, buildIdentity, contractingParty,
+  identityFindings, missingRequiredFields, nameUsage,
 } from "./model";
 
 /** A complete seller row as `admin_shop_profile()` would describe it. */
@@ -23,21 +22,11 @@ function settings(over: {
       ...NO_SHOP_SETTINGS.identity,
       displayName: "skyisles.shop", legalName: "Julian Stocker", legalForm: "Einzelunternehmen",
       street: "Lechhalde 1 1/2", postalCode: "87629", city: "Füssen", countryCode: "DE",
-      vatId: "DE321022065", tradingName: null, ...over.identity,
+      vatId: "DE321022065", tradingName: null, directContact: "Kontaktformular", ...over.identity,
     },
     contacts: { ...NO_SHOP_SETTINGS.contacts, contactEmail: "info@skyisles.de", replyTo: "info@skyisles.de", ...over.contacts },
   };
 }
-
-/** The legal pages as they will read once they follow the data. */
-const ALIGNED: PublishedIdentity = {
-  legalName: "Julian Stocker", tradeName: "skyisles.shop",
-  contractingParty: "Julian Stocker, handelnd unter skyisles.shop",
-  street: "Lechhalde 1 1/2", postalCode: "87629", city: "Füssen",
-  email: "info@skyisles.de", vatId: "DE321022065",
-};
-/** The legal pages as they read today. */
-const TODAY: PublishedIdentity = { ...SELLER_IDENTITY };
 
 const codes = (list: { code: string }[]) => list.map((f) => f.code);
 
@@ -52,8 +41,20 @@ describe("three identities, never one field", () => {
     expect(id.platform.name).not.toBe(id.shop.displayName);
   });
 
-  it("the platform name is the one the legal pages use today", () => {
-    expect(PLATFORM_NAME).toBe(SELLER_IDENTITY.platformName);
+  it("the platform name is SkyIsles, and the contracting party is legal name under shop brand", () => {
+    expect(PLATFORM_NAME).toBe("SkyIsles");
+    expect(contractingParty("Julian Stocker", "skyisles.shop")).toBe("Julian Stocker, handelnd unter skyisles.shop");
+  });
+
+  it("one required-field list for the workbench and the public pages", () => {
+    const complete = {
+      "shop.displayName": "skyisles.shop", "legal.legalName": "Julian Stocker", "legal.street": "Lechhalde 1 1/2",
+      "legal.postalCode": "87629", "legal.city": "Füssen", "legal.countryCode": "DE", "shop.contactEmail": "info@skyisles.de",
+    } as const;
+    expect(missingRequiredFields(complete)).toEqual([]);
+    expect(missingRequiredFields({ ...complete, "legal.street": "  ", "shop.contactEmail": null }))
+      .toEqual(["legal.street", "shop.contactEmail"]);
+    expect(REQUIRED_IDENTITY_FIELDS.map((f) => f.code)).toEqual(Object.keys(complete));
   });
 
   it("a viewer who may not read platform settings sees that, not an empty address", () => {
@@ -77,29 +78,29 @@ describe("three identities, never one field", () => {
 
 describe("findings", () => {
   it("a complete, aligned identity has nothing to report", () => {
-    expect(identityFindings(buildIdentity(settings(), null), ALIGNED)).toEqual([]);
+    expect(identityFindings(buildIdentity(settings(), null))).toEqual([]);
   });
 
   it("reports every required field that is missing — and only those", () => {
     const empty = buildIdentity(NO_SHOP_SETTINGS, null);
-    expect(codes(identityFindings(empty, ALIGNED).filter((f) => f.level === "missing"))).toEqual([
+    expect(codes(identityFindings(empty).filter((f) => f.level === "missing"))).toEqual([
       "shop.displayName", "legal.legalName", "legal.street", "legal.postalCode",
       "legal.city", "legal.countryCode", "shop.contactEmail",
     ]);
     /* Tax and register details are never demanded: whether they exist is not assumed. */
     const noTax = buildIdentity(settings({ identity: { vatId: null, registerCourt: null } }), null);
-    expect(identityFindings(noTax, { ...ALIGNED, vatId: "" }).filter((f) => f.level === "missing")).toEqual([]);
+    expect(identityFindings(noTax).filter((f) => f.level === "missing")).toEqual([]);
   });
 
   it("flags a retired identity still in use as the shop name", () => {
     const old = buildIdentity(settings({ identity: { displayName: "yulez.collectibles" } }), null);
-    expect(codes(identityFindings(old, { ...ALIGNED, tradeName: "yulez.collectibles" }))).toContain("shop.retired");
+    expect(codes(identityFindings(old))).toContain("shop.retired");
     expect(RETIRED_TRADE_NAMES).toContain("yulez.collectibles");
   });
 
   it("a different trading_name is a conflict: two business designations", () => {
     const two = buildIdentity(settings({ identity: { tradingName: "yulez.collectibles" } }), null);
-    const finding = identityFindings(two, ALIGNED).find((f) => f.code === "legal.legacyTradingName")!;
+    const finding = identityFindings(two).find((f) => f.code === "legal.legacyTradingName")!;
     expect(finding.level).toBe("conflict");
     expect(finding.message).toContain("yulez.collectibles");
     expect(finding.message).toContain("leeren");
@@ -107,40 +108,34 @@ describe("findings", () => {
 
   it("the same trading_name is only a notice", () => {
     const same = buildIdentity(settings({ identity: { tradingName: "SkyIsles.shop" } }), null);
-    expect(identityFindings(same, ALIGNED).find((f) => f.code === "legal.legacyTradingName")!.level).toBe("notice");
+    expect(identityFindings(same).find((f) => f.code === "legal.legacyTradingName")!.level).toBe("notice");
   });
 
-  it("names every field in which the published legal pages disagree with the data", () => {
-    const id = buildIdentity(settings({
-      identity: { legalName: "J. Stocker", street: "Andere Straße 2", vatId: "DE000000000" },
-      contacts: { contactEmail: "hallo@skyisles.shop" },
-    }), null);
-    expect(codes(identityFindings(id, ALIGNED))).toEqual(expect.arrayContaining([
-      "published.legalName", "published.address", "published.email", "published.vatId",
-    ]));
-  });
-
-  it("today: the legal pages still name yulez.collectibles — said, not hidden", () => {
-    const finding = identityFindings(buildIdentity(settings(), null), TODAY)
-      .find((f) => f.code === "published.tradeName")!;
-    expect(finding.level).toBe("conflict");
-    expect(finding.message).toContain(SELLER_IDENTITY.contractingParty);
-    expect(finding.message).toContain("skyisles.shop");
+  it("no longer compares with published constants — the legal pages read the same row", () => {
+    const codesNow = codes(identityFindings(buildIdentity(settings(), null)));
+    expect(codesNow.some((c) => c.startsWith("published."))).toBe(false);
   });
 
   it("platform and shop must not carry the same name", () => {
     const merged = buildIdentity(settings({ identity: { displayName: "SkyIsles" } }), null);
-    expect(codes(identityFindings(merged, { ...ALIGNED, tradeName: "SkyIsles" }))).toContain("shop.equalsPlatform");
+    expect(codes(identityFindings(merged))).toContain("shop.equalsPlatform");
+  });
+
+  it("no further contact channel is a notice — said, not judged", () => {
+    const finding = identityFindings(buildIdentity(settings({ identity: { directContact: null } }), null))
+      .find((f) => f.code === "legal.directContact")!;
+    expect(finding.level).toBe("notice");
+    expect(finding.message).not.toMatch(/ausreich|genügt|erforderlich|Pflicht|§/);
   });
 
   it("a missing own reply address is a notice", () => {
     const id = buildIdentity(settings({ contacts: { replyTo: null } }), null);
-    expect(identityFindings(id, ALIGNED).map((f) => [f.code, f.level])).toEqual([["shop.replyTo", "notice"]]);
+    expect(identityFindings(id).map((f) => [f.code, f.level])).toEqual([["shop.replyTo", "notice"]]);
   });
 });
 
 describe("Wo erscheint welcher Name?", () => {
-  const rows = nameUsage(buildIdentity(settings({ identity: { tradingName: "yulez.collectibles" } }), null), TODAY);
+  const rows = nameUsage(buildIdentity(settings({ identity: { tradingName: "yulez.collectibles" } }), null));
   const row = (area: string) => rows.find((r) => r.area.startsWith(area))!;
 
   it("shop, mails and new invoices show the shop brand from the seller row", () => {
@@ -160,9 +155,10 @@ describe("Wo erscheint welcher Name?", () => {
     expect(receipts).not.toContain("v_seller.trading_name");
   });
 
-  it("the legal pages are marked as code until AP5", () => {
-    expect(row("Impressum").kind).toBe("code");
-    expect(row("Impressum").shows).toBe(SELLER_IDENTITY.contractingParty);
+  it("the legal pages read the seller row since AP5", () => {
+    expect(row("Impressum").kind).toBe("database");
+    expect(row("Impressum").shows).toBe("Julian Stocker, handelnd unter skyisles.shop");
+    expect(row("Impressum").source).toContain("seller_legal_public()");
   });
 
   it("the sender is a secret and is not guessed", () => {

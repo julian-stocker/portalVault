@@ -50,6 +50,16 @@ const accessoryTypeLabels = {
 export const de = {
   locale: "de-AT",
 
+  /**
+   * Eine Vercel-Vorschau, die nicht mit Staging spricht, bedient nichts
+   * (ADR-0185). Der Text nennt keine Konfigurationswerte.
+   */
+  deployment: {
+    previewBlocked:
+      "Diese Vorschau ist gesperrt: Sie ist nicht mit der Staging-Datenbank verbunden. " +
+      "Es wird nichts angezeigt und nichts gespeichert.",
+  },
+
   app: {
     // SkyIsles is the public product name; PortalVault stays the technical
     // project name in the repository and the code (ADR-0028).
@@ -736,6 +746,41 @@ export const de = {
       copy: "Formulartext kopieren",
       copied: "Kopiert",
     },
+    /**
+     * Wenn die Anbieterangaben nicht gelesen werden können (ADR-0184, AP5).
+     * Kein Ersatzwert, keine frühere Identität: die Seite sagt, dass die
+     * Angaben fehlen, und nennt keine.
+     */
+    unavailable: {
+      heading: "Anbieterangaben vorübergehend nicht verfügbar",
+      body:
+        "Die Angaben zum Anbieter konnten gerade nicht geladen werden. Diese Seite wird " +
+        "deshalb nicht angezeigt, statt unvollständige oder veraltete Angaben zu nennen. " +
+        "Bitte versuche es in einigen Minuten erneut.",
+      /* Welche Fassung gilt, sagt die Datenbank (0191). Ohne diese Auskunft
+         wird keine Fassung geraten. */
+      versionsHeading: "Rechtstext vorübergehend nicht verfügbar",
+      versionsBody:
+        "Welche Fassung gerade gilt, konnte nicht geladen werden. Diese Seite wird deshalb " +
+        "nicht angezeigt, statt eine womöglich andere Fassung zu nennen. Bitte versuche es " +
+        "in einigen Minuten erneut.",
+    },
+    /** Frühere Fassungen, unverändert archiviert (AP5). */
+    archive: {
+      heading: "Frühere Fassungen",
+      hint:
+        "Bestellungen behalten die Fassung, die bei der Bestellung galt. Frühere Fassungen " +
+        "stehen hier unverändert.",
+      item: (version: string) => `Fassung ${version}`,
+      banner: (version: string) =>
+        `Archivierte Fassung ${version}. Diese Fassung ist nicht mehr aktuell. Wiedergegeben ` +
+        "wird ihr zuletzt hinterlegter Stand, unverändert und einschließlich der damaligen " +
+        "Anbieterangaben.",
+      /* Eine Fassung, die der Code kennt, die aber gerade nicht gilt — etwa
+         eine neue vor ihrer Umschaltung (0192). */
+      notCurrent: (version: string) => `Fassung ${version}. Diese Fassung ist derzeit nicht die aktuelle.`,
+      current: "Zur aktuellen Fassung",
+    },
   },
 
   /**
@@ -997,7 +1042,7 @@ export const de = {
       legal: {
         heading: "Rechtlicher Betreiber",
         hint:
-          "Wer rechtlich verkauft: auf Rechnungen und künftig in Impressum und AGB. Der Shopname " +
+          "Wer rechtlich verkauft: auf Rechnungen und in Impressum und AGB. Der Shopname " +
           "ersetzt diese Angaben nie.",
       },
       /* AP6/AP7: Musterdokumente und die Stripe-Übersicht. */
@@ -6723,6 +6768,13 @@ export const de = {
         "ausgeübt wird, steht in der Widerrufsbelehrung.",
       legalAgb: "AGB",
       legalWithdrawal: "Widerrufsbelehrung",
+      /** Die Fassung, die mit der Bestellung gesendet wird (ADR-0184, AP5). */
+      legalVersion: (version: string) => `Fassung ${version}`,
+      /* Ohne die aktuelle Fassung aus der Datenbank kein Link und keine
+         Bestellung — nie eine geratene Kennung (ADR-0184, AP5). */
+      legalUnavailable:
+        "Die aktuelle Fassung der AGB und der Widerrufsbelehrung konnte gerade nicht " +
+        "geladen werden. Eine Bestellung ist deshalb im Moment nicht möglich.",
       legalPrivacy: "Datenschutz",
       legalShipping: "Versand",
       /* Datenschutz ist Information, keine Einwilligung — deshalb ein Link und
@@ -6836,6 +6888,17 @@ export const de = {
       "Für diese Adresse sind gerade mehrere Bestellungen offen. Bitte schließe sie ab " +
       "oder versuche es in ein paar Minuten noch einmal.",
     errorFailed: "Das hat gerade nicht geklappt. Bitte versuche es noch einmal.",
+    /* Die AGB oder die Widerrufsbelehrung, die hier angezeigt wurden, gelten
+       nicht mehr (LV002, 0191). Es wurde nichts bestellt und nichts
+       vorgemerkt. */
+    errorTermsUnavailable:
+      "Die aktuelle Fassung der AGB und der Widerrufsbelehrung konnte nicht geladen werden. " +
+      "Es wurde nichts bestellt, dein Warenkorb ist unverändert. Bitte lade die Seite in " +
+      "einigen Minuten neu.",
+    errorTermsChanged:
+      "Die AGB oder die Widerrufsbelehrung wurden gerade aktualisiert. Es wurde nichts " +
+      "bestellt, dein Warenkorb ist unverändert. Bitte lade die Seite neu, prüfe die " +
+      "aktuelle Fassung und bestelle dann erneut.",
     errorInvalid: "Bitte prüfe die markierten Angaben.",
     problem: {
       no_items: "Der Warenkorb ist leer.",

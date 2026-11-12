@@ -14,6 +14,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { ONBOARDING_PATH, signInUrlFor } from "@/lib/auth/redirect";
+import { supabasePublicConfig } from "@/lib/ops/deployment-target";
 
 /**
  * Routes that require a session.
@@ -45,9 +46,12 @@ const SIGNED_OUT_ONLY_PREFIXES = ["/login", "/register", "/forgot-password"];
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   let response = NextResponse.next({ request });
 
+  // The proxy has already answered 503 for a blocked preview; this is the
+  // second lock, for a caller that is not the proxy (ADR-0185).
+  const { url, anonKey } = supabasePublicConfig();
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    url,
+    anonKey,
     {
       cookies: {
         getAll() {

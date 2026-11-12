@@ -21,15 +21,27 @@
  * them is needed to sell a figure to a consumer, and several would be void.
  * A clause that would be struck out is worse than no clause: it makes the
  * document look copied.
+ *
+ * FROM THE SELLER ROW (ADR-0184, AP5). The contracting party, its address and
+ * the contact addresses come from `seller_legal_public()`; the clauses are the
+ * 2026-09-17 wording with the names substituted. The complaint address in § 8
+ * is `complaints_contact_email`, which falls back to the contact e-mail.
  */
 import type { LegalDocument } from "@/lib/legal/documents";
-import { LEGAL_VERSIONS } from "@/lib/legal/documents";
-import { SELLER_IDENTITY as S } from "@/lib/legal/seller-identity";
+import { LEGAL_VERSIONS, versionDate } from "@/lib/legal/documents";
+import { PLATFORM_NAME } from "@/lib/identity/model";
+import type { LegalSeller } from "@/lib/legal/seller-text";
 
-export const AGB: LegalDocument = {
-  slug: "agb",
+/** Title and lead, for page metadata — they name no seller. */
+export const AGB_HEAD = {
   title: "Allgemeine Geschäftsbedingungen",
-  lead: `Für Käufe über ${S.platformName}. Fassung vom 17. September 2026.`,
+  lead: `Für Käufe über ${PLATFORM_NAME}. Fassung vom ${versionDate(LEGAL_VERSIONS.agb)}.`,
+} as const;
+
+export const buildAgb = (S: LegalSeller): LegalDocument => ({
+  slug: "agb",
+  title: AGB_HEAD.title,
+  lead: AGB_HEAD.lead,
   version: LEGAL_VERSIONS.agb,
   sections: [
     {
@@ -43,7 +55,7 @@ export const AGB: LegalDocument = {
             `Vertragspartner ist **${S.contractingParty}**, ${S.street}, ` +
               `${S.postalCode} ${S.city}, ${S.country}, E-Mail ${S.email}.`,
             `${S.platformName} ist die Plattform — Katalog, Konto, Sammlung und Kasse. ` +
-              `${S.tradeName} ist die Geschäftsbezeichnung, unter der verkauft wird. Beides ` +
+              `${S.displayName} ist die Geschäftsbezeichnung, unter der verkauft wird. Beides ` +
               `wird von ${S.legalName} als ein Einzelunternehmen betrieben; es sind nicht zwei ` +
               "Unternehmen.",
             `${S.platformName} ist **kein Marktplatz**. Es gibt genau einen Verkäufer, und das ` +
@@ -198,7 +210,7 @@ export const AGB: LegalDocument = {
             "Bei gebrauchten Sammlerstücken gehört der im Artikel beschriebene Zustand zur " +
               "vereinbarten Beschaffenheit. Gebrauchsspuren, die dort genannt sind, sind " +
               "deshalb kein Mangel.",
-            "Wenn mit deiner Bestellung etwas nicht stimmt, schreib uns an " + S.email + ". " +
+            "Wenn mit deiner Bestellung etwas nicht stimmt, schreib uns an " + S.complaintsEmail + ". " +
               "Wir klären das.",
           ],
         },
@@ -262,4 +274,4 @@ export const AGB: LegalDocument = {
       ],
     },
   ],
-};
+});

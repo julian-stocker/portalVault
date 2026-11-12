@@ -33,28 +33,38 @@
  * NO EXCEPTIONS ARE CLAIMED. Nothing sold here is sealed hygiene goods, made
  * to order, or digital content, so no exclusion of the right applies and none
  * is asserted.
+ *
+ * FROM THE SELLER ROW (ADR-0184, AP5). The entrepreneur's details filled into
+ * the model come from `seller_legal_public()`: the legal name, the shop brand,
+ * the address, and `withdrawal_contact_email` (which falls back to the contact
+ * e-mail). The statutory wording around them is untouched; the 2026-09-17
+ * version is archived unchanged.
  */
 import type { LegalDocument } from "@/lib/legal/documents";
-import { LEGAL_VERSIONS } from "@/lib/legal/documents";
-import { SELLER_IDENTITY as S } from "@/lib/legal/seller-identity";
+import { LEGAL_VERSIONS, versionDate } from "@/lib/legal/documents";
+import type { WithdrawalFormText } from "@/lib/legal/archive/types";
+import type { LegalSeller } from "@/lib/legal/seller-text";
 
 /** Where the § 356a function lives. Named once; every mention reads it. */
 export const WITHDRAWAL_PATH = "/widerrufen";
 
-/** The entrepreneur block the statutory model asks to be inserted. */
-const ENTREPRENEUR = [
-  S.legalName,
-  S.tradeName,
-  S.street,
-  `${S.postalCode} ${S.city}`,
-  S.country,
-  `E-Mail: ${S.email}`,
-].join("\n");
+/** The postal lines of the entrepreneur, as the model asks them inserted. */
+const postalLines = (S: LegalSeller) =>
+  [S.legalName, S.displayName, S.street, `${S.postalCode} ${S.city}`, S.country];
 
-export const WIDERRUF: LegalDocument = {
-  slug: "widerruf",
+/** Title and lead, for page metadata — they name no seller. */
+export const WIDERRUF_HEAD = {
   title: "Widerrufsbelehrung",
-  lead: "Für Verbraucher. Fassung vom 17. September 2026.",
+  lead: `Für Verbraucher. Fassung vom ${versionDate(LEGAL_VERSIONS.widerruf)}.`,
+} as const;
+
+export function buildWiderruf(S: LegalSeller): LegalDocument {
+  /** The entrepreneur block the statutory model asks to be inserted. */
+  const ENTREPRENEUR = [...postalLines(S), `E-Mail: ${S.withdrawalEmail}`].join("\n");
+  return {
+  slug: "widerruf",
+  title: WIDERRUF_HEAD.title,
+  lead: WIDERRUF_HEAD.lead,
   version: LEGAL_VERSIONS.widerruf,
   sections: [
     {
@@ -110,9 +120,7 @@ export const WIDERRUF: LegalDocument = {
             "Sie haben die Waren unverzüglich und in jedem Fall spätestens binnen vierzehn " +
               "Tagen ab dem Tag, an dem Sie uns über den Widerruf dieses Vertrags unterrichten, " +
               "an\n\n" +
-              [S.legalName, S.tradeName, S.street, `${S.postalCode} ${S.city}`, S.country].join(
-                "\n",
-              ) +
+              postalLines(S).join("\n") +
               "\n\nzurückzusenden oder zu übergeben. Die Frist ist gewahrt, wenn Sie die Waren " +
               "vor Ablauf der Frist von vierzehn Tagen absenden.",
             "Sie tragen die unmittelbaren Kosten der Rücksendung der Waren.",
@@ -156,7 +164,7 @@ export const WIDERRUF: LegalDocument = {
           items: [
             `Online über die Widerrufsfunktion unter ${WITHDRAWAL_PATH} — zwei Schritte, ohne ` +
               "Konto, mit sofortiger Eingangsbestätigung per E-Mail.",
-            `Per E-Mail an ${S.email} mit einer eindeutigen Erklärung.`,
+            `Per E-Mail an ${S.withdrawalEmail} mit einer eindeutigen Erklärung.`,
             `Per Brief an ${S.legalName}, ${S.street}, ${S.postalCode} ${S.city}.`,
             "Mit dem Muster-Widerrufsformular unten — freiwillig, nicht vorgeschrieben.",
           ],
@@ -164,7 +172,8 @@ export const WIDERRUF: LegalDocument = {
       ],
     },
   ],
-};
+  };
+}
 
 /**
  * Das Muster-Widerrufsformular, Anlage 2 zu Art. 246a § 1 Abs. 2 Satz 1 Nr. 1
@@ -174,11 +183,11 @@ export const WIDERRUF: LegalDocument = {
  * the model marks for them. The statutory form is offered as the statutory
  * form — it is not replaced by a prettier one of our own.
  */
-export const WIDERRUFSFORMULAR = {
+export const buildWiderrufsformular = (S: LegalSeller): WithdrawalFormText => ({
   intro:
     "(Wenn Sie den Vertrag widerrufen wollen, dann füllen Sie bitte dieses Formular aus und " +
     "senden Sie es zurück.)",
-  recipient: [S.legalName, S.tradeName, S.street, `${S.postalCode} ${S.city}`, S.country, S.email],
+  recipient: [...postalLines(S), S.withdrawalEmail],
   lines: [
     "Hiermit widerrufe(n) ich/wir (*) den von mir/uns (*) abgeschlossenen Vertrag über den Kauf " +
       "der folgenden Waren (*)/die Erbringung der folgenden Dienstleistung (*)",
@@ -189,4 +198,4 @@ export const WIDERRUFSFORMULAR = {
     "Datum",
   ],
   footnote: "(*) Unzutreffendes streichen.",
-} as const;
+});

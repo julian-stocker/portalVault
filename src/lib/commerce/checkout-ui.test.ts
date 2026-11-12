@@ -110,9 +110,12 @@ describe("the trust block", () => {
    */
   it("carries the pre-contractual information and links it", () => {
     expect(view).toContain("legalLabel");
-    for (const slug of ["/agb", "/widerruf", "/versand", "/datenschutz"]) {
+    for (const slug of ["/versand", "/datenschutz"]) {
       expect(view, slug).toContain(slug);
     }
+    // AGB and Widerruf by the version this checkout shows and sends (ADR-0184, AP5).
+    expect(view).toContain('legalTextPath("agb", terms.agb)');
+    expect(view).toContain('legalTextPath("widerruf", terms.widerruf)');
     // And still no note to the developer.
     expect(view).not.toContain("legalPending");
     const copy = readFileSync("src/lib/i18n/de.ts", "utf8");

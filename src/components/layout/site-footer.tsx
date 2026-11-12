@@ -22,10 +22,13 @@
  * operator's workbench has no visitors to orient and no legal pages to offer.
  */
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { Wordmark } from "@/components/layout/wordmark";
 import { de } from "@/lib/i18n/de";
-import { SELLER_IDENTITY } from "@/lib/legal/seller-identity";
+import { LEGAL_VERSIONS } from "@/lib/legal/documents";
+import { loadLegalTexts } from "@/lib/legal/load";
+import { fetchLegalVersions } from "@/lib/legal/versions";
 import { WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
 
 /** One class for every foot link: same target size, same behaviour. */
@@ -52,6 +55,28 @@ const LEGAL_LINKS: readonly { href: string; label: string }[] = [
   { href: "/zahlung", label: de.footer.payment },
   { href: "/kontakt", label: de.footer.contact },
 ];
+
+/**
+ * Who sells, from `seller_legal_public()` (ADR-0184, AP5) — the same answer
+ * the legal page of this request gets. If the details cannot be read or are
+ * incomplete, the line is left out: no earlier identity, no placeholder. The
+ * links to the legal pages stay, and those pages say what is missing.
+ *
+ * Only while the Impressum in force is the one built from that row
+ * (`legal_versions_public()`, 0191). While the database still names the
+ * archived Impressum (before 0192), that text names the provider as it stood
+ * then, and a footer naming today's row beside it would contradict it — so the
+ * line is left out until the switch.
+ */
+export async function FooterSellerLine() {
+  const active = await fetchLegalVersions();
+  if (active.status !== "ok" || active.versions.impressum !== LEGAL_VERSIONS.impressum) return null;
+  const texts = await loadLegalTexts();
+  if (texts.status !== "ok") return null;
+  return (
+    <p className="text-sm text-on-deep-muted">{de.footer.seller(texts.seller.contractingParty)}</p>
+  );
+}
 
 export function SiteFooter() {
   return (
@@ -83,10 +108,11 @@ export function SiteFooter() {
           {/* What this is, in one sachliche line. Not a slogan. */}
           <p className="text-sm leading-relaxed text-on-deep-muted">{de.footer.positioning}</p>
           {/* And who sells, named from the seller data rather than written
-              here (ADR-0086). */}
-          <p className="text-sm text-on-deep-muted">
-            {de.footer.seller(SELLER_IDENTITY.contractingParty)}
-          </p>
+              here (ADR-0086, ADR-0184). Streamed: the footer of every page
+              does not wait for it. */}
+          <Suspense fallback={null}>
+            <FooterSellerLine />
+          </Suspense>
         </div>
 
         <div className="flex flex-col gap-8 sm:flex-row sm:gap-12">

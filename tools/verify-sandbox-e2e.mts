@@ -32,6 +32,22 @@ import { readEnvFile, requireStaging } from "./lib/staging-guard.mts";
 
 const FUNCTION = "create-payment";
 
+/**
+ * The AGB and Widerruf in force, exactly as the checkout reads them
+ * (`legal_versions_public()`, 0191; ADR-0184, AP5) — so this tool orders
+ * before and after 0192 alike, with the versions the shop shows at that
+ * moment, and never with a version taken from this code.
+ */
+async function termsInForce(client: SupabaseClient): Promise<{ agb: string; widerruf: string }> {
+  const { data, error } = await client.rpc("legal_versions_public");
+  if (error) throw new Error(`legal_versions_public: ${error.code} ${error.message}`);
+  const row = (Array.isArray(data) ? data[0] : null) as { agb?: unknown; widerruf?: unknown } | null;
+  if (typeof row?.agb !== "string" || typeof row?.widerruf !== "string") {
+    throw new Error("legal_versions_public: no current AGB/Widerruf version");
+  }
+  return { agb: row.agb, widerruf: row.widerruf };
+}
+
 function hex(bytes: number): string {
   return randomBytes(bytes).toString("hex");
 }
@@ -155,8 +171,11 @@ async function run(
   });
 
   const paymentToken = hex(32);
+  const terms = await termsInForce(asUser);
   const placed = await asUser.rpc("create_order", {
     p_request_id: `e2e-${hex(8)}`,
+    p_agb_version: terms.agb,
+    p_widerruf_version: terms.widerruf,
     p_payment_token: paymentToken,
     p_email: tester.email,
     p_shipping_method: "hermes",
@@ -309,8 +328,11 @@ async function runFailClosedLive(
     auth: { persistSession: false },
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
+  const terms = await termsInForce(client);
   const placed = await client.rpc("create_order", {
     p_request_id: `e2e-live-${hex(8)}`,
+    p_agb_version: terms.agb,
+    p_widerruf_version: terms.widerruf,
     p_payment_token: paymentToken,
     p_email: email,
     p_shipping_method: "hermes",

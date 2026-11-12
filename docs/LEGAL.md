@@ -38,13 +38,15 @@ zwischen Plattform- und Verkäuferidentität bleibt bestehen und ist weiterhin r
 zwei **Rollen**, nicht zwei **Rechtspersonen**. Wo der frühere Sprachgebrauch „zwei Rechtssubjekte"
 sagte, ist er falsch und wird korrigiert.
 
-> **Entschieden, noch nicht veröffentlicht (ADR-0184, 2026-11-11):** yulez.collectibles ist keine
-> aktive Identität mehr. Plattform: **SkyIsles**. Shop: **skyisles.shop** (`sellers.display_name`).
-> Rechtlicher Verkäufer: die Geschäftsdaten (`sellers.legal_name` usw.). Die Rechtstexte oben und
-> unter `/impressum`, `/agb`, `/widerruf`, `/datenschutz` nennen bis zur Umstellung (AP4/AP5) weiter
-> „Julian Stocker, handelnd unter yulez.collectibles“; die Seite „Identität & Dokumente“ zeigt den
-> Widerspruch an. **Offen:** ob „skyisles.shop“ als Geschäftsbezeichnung zulässig ist, ist rechtlich
-> nicht geprüft.
+> **Entschieden, im Code umgestellt, noch nicht ausgeliefert (ADR-0184, AP5, 2026-11-11):**
+> yulez.collectibles ist keine aktive Identität mehr. Plattform: **SkyIsles**. Shop:
+> **skyisles.shop** (`sellers.display_name`). Rechtlicher Verkäufer: die Geschäftsdaten
+> (`sellers.legal_name` usw.). Die Rechtsseiten lesen sie über `seller_legal_public()`; der
+> Vertragspartner heißt **vorläufig** „{legal_name}, handelnd unter {display_name}“. Die oben
+> beschriebene Fassung (`2026-09-17`) ist unverändert archiviert und unter
+> `/rechtstexte/<slug>/2026-09-17` abrufbar; bis zum Deployment ist sie die ausgelieferte.
+> **Offen:** ob „skyisles.shop“ als Geschäftsbezeichnung zulässig ist; die Vertragspartner-Zeile;
+> die anwaltliche Prüfung der Fassung `2026-11-11`.
 
 ---
 
@@ -296,6 +298,24 @@ sich später feststellen, welcher Text für eine konkrete Bestellung galt — un
 Bestellung zeigt nie auf einen später geänderten Text**.
 
 Kein CMS, keine Redaktionsoberfläche: eine Textänderung ist ein Commit mit neuer Versionskennung.
+
+**Welche Fassung gilt, sagt die Datenbank (ADR-0184, AP5, ab `0191`).** Der Code enthält jede Fassung,
+die er rendern kann: die archivierten und die gebaute (`LEGAL_VERSIONS`). `/impressum`, `/agb`,
+`/widerruf`, `/datenschutz` und der Checkout zeigen die Fassung, die `legal_versions_public()` nennt.
+Der Checkout sendet sie, und `create_order()` prüft sie. Eine neue Fassung kann so ausgeliefert
+werden, bevor sie gilt; die Umschaltung ist die Migration auf `legal_document_versions` (für
+`2026-11-11`: `0192`). Ohne Antwort der Datenbank zeigen die Seiten keinen Text, und der Checkout
+nimmt nichts an. Es wird keine Fassung geraten. Kontakt und Versand sind keine versionierten
+Dokumente; sie folgen der Verkäuferzeile.
+
+**Frühere Fassungen bleiben abrufbar (ADR-0184, AP5).** Hört eine Fassung auf, aktuell zu sein,
+wird ihr gerenderter Text unter `src/lib/legal/archive/<kennung>.ts` eingefroren — samt den
+damaligen Anbieterangaben — und ist unter `/rechtstexte/<slug>/<kennung>` erreichbar; jede
+Rechtsseite verlinkt „Frühere Fassungen“. Ein archivierter Text wird nie geändert
+(`archive.test.ts`). Ein Archiveintrag ist ein **belegter Repository-Stand** (Commit genannt), nicht
+zwingend die einzige je ausgelieferte Fassung dieser Kennung; zu `2026-09-17` gab es in `713527c`
+kurz einen Stand mit `info@skyisles.app` (ADR-0184, AP5). Die neue Kennung kommt mit einer eigenen Migration auf
+`legal_document_versions` (zuletzt `0192`: `2026-11-11`) im selben Commit wie `LEGAL_VERSIONS`.
 
 ---
 

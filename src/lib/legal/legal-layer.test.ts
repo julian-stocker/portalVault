@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 
-import { AGB } from "@/lib/legal/agb";
-import { DATENSCHUTZ } from "@/lib/legal/datenschutz";
+import { buildAgb } from "@/lib/legal/agb";
+import { NEVER_CLAIMED } from "@/lib/legal/claims";
+import { buildDatenschutz } from "@/lib/legal/datenschutz";
 import { LEGAL_VERSIONS } from "@/lib/legal/documents";
-import { IMPRESSUM } from "@/lib/legal/impressum";
-import { NEVER_CLAIMED, SELLER_IDENTITY } from "@/lib/legal/seller-identity";
-import { KONTAKT, VERSAND, ZAHLUNG } from "@/lib/legal/service-pages";
-import { WIDERRUF, WIDERRUFSFORMULAR, WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
+import { buildImpressum } from "@/lib/legal/impressum";
+import { toLegalSeller } from "@/lib/legal/seller-text";
+import { ZAHLUNG, buildKontakt, buildVersand } from "@/lib/legal/service-pages";
+import { WITHDRAWAL_PATH, buildWiderruf, buildWiderrufsformular } from "@/lib/legal/widerruf";
 import { latestFunction, migrationSource } from "@/test-support/migrations";
+import { SELLER_LEGAL_FIXTURE } from "@/test-support/seller-legal";
 
 /**
  * The legal layer (ADR-0086).
@@ -22,6 +24,21 @@ import { latestFunction, migrationSource } from "@/test-support/migrations";
  */
 
 const SQL = migrationSource("0047_legal_layer.sql");
+
+/*
+ * SINCE AP5 (ADR-0184) THE TEXTS ARE BUILT FROM THE SELLER ROW. They are
+ * rendered here from an invented, complete seller without register entry,
+ * W-IdNr. or second contact channel — so every "nothing is invented" check
+ * below still holds for the prose itself.
+ */
+const S = toLegalSeller(SELLER_LEGAL_FIXTURE);
+const IMPRESSUM = buildImpressum(S);
+const DATENSCHUTZ = buildDatenschutz(S);
+const AGB = buildAgb(S);
+const WIDERRUF = buildWiderruf(S);
+const WIDERRUFSFORMULAR = buildWiderrufsformular(S);
+const VERSAND = buildVersand(S);
+const KONTAKT = buildKontakt(S);
 const DOCS = [IMPRESSUM, DATENSCHUTZ, AGB, WIDERRUF, VERSAND, ZAHLUNG, KONTAKT];
 
 /** Executable code with comments removed. Prose may name what code may not. */
@@ -137,8 +154,9 @@ describe("nothing is invented", () => {
 describe("who the customer is contracting with", () => {
   it("is one sole proprietorship under two names, and says so", () => {
     const text = textOf(IMPRESSUM);
-    expect(text).toContain("Julian Stocker");
-    expect(text).toContain("yulez.collectibles");
+    expect(text).toContain(SELLER_LEGAL_FIXTURE.legalName);
+    expect(text).toContain(SELLER_LEGAL_FIXTURE.displayName);
+    expect(text).toContain("SkyIsles");
     expect(text).toContain("Einzelunternehmen");
     // The sentence that stops a reader wondering how many businesses these are.
     expect(text).toMatch(/nicht um zwei Unternehmen|ein\*{0,2} Einzelunternehmen/);
@@ -151,57 +169,35 @@ describe("who the customer is contracting with", () => {
   });
 
   it("names the contracting party the same way everywhere", () => {
-    expect(SELLER_IDENTITY.contractingParty).toBe(
-      "Julian Stocker, handelnd unter yulez.collectibles",
+    // Provisional wording, set by the operator for AP5 (ADR-0184).
+    expect(S.contractingParty).toBe(
+      `${SELLER_LEGAL_FIXTURE.legalName}, handelnd unter ${SELLER_LEGAL_FIXTURE.displayName}`,
     );
-    expect(textOf(AGB)).toContain(SELLER_IDENTITY.contractingParty);
+    expect(textOf(AGB)).toContain(S.contractingParty);
+    expect(textOf(IMPRESSUM)).toContain(S.contractingParty);
   });
 
-  it("agrees with what migration 0047 seeds into the database", () => {
+  it("knows no seller of its own: every name, address and e-mail comes from the row", () => {
     /*
-     * The pages read the constants; invoices and order snapshots read the
-     * database. If the two ever disagreed, a customer's invoice would name a
-     * different seller than the Impressum they read.
+     * Before AP5 the pages read a constant and a test compared it with the
+     * seed of 0047. There is no constant any more — the pages, the invoice
+     * and the order snapshot read the same `public.sellers` row. What is left
+     * to guard is that no seller detail creeps back into the code as a literal.
      */
-    // Derived from the constants, every one of them. Hardcoding the expected
-    // strings here is what let the SQL carry a split street ('Lechhalde' plus
-    // a house_number column that does not exist) while `SELLER_IDENTITY` had
-    // the correct single line — the test passed and the migration failed.
-    for (const value of [
-      SELLER_IDENTITY.legalName,
-      SELLER_IDENTITY.tradeName,
-      SELLER_IDENTITY.street,
-      SELLER_IDENTITY.postalCode,
-      SELLER_IDENTITY.city,
-      SELLER_IDENTITY.vatId,
-    ]) {
-      expect(SQL, value).toContain(`'${value}'`);
+    for (const file of ["impressum", "agb", "widerruf", "datenschutz", "service-pages", "seller-text"]) {
+      const source = code(`src/lib/legal/${file}.ts`);
+      expect(source, file).not.toMatch(/@[a-z0-9-]+\.[a-z]{2,}/i); // no e-mail literal
+      expect(source, file).not.toMatch(/\b\d{5}\b/); // no postal code literal
+      expect(source, file).not.toMatch(/Stocker|Füssen|Lechhalde|DE3\d{8}/);
     }
+    expect(existsSync("src/lib/legal/seller-identity.ts")).toBe(false);
   });
 
-  it("except the contact address, which has deliberately moved on", () => {
-    /*
-     * `0047` seeds `info@skyisles.app`. The published address is now
-     * `info@skyisles.de`, and the two are allowed to differ — which is why
-     * this is its own test rather than a gap in the loop above.
-     *
-     * WHY THE MIGRATION IS NOT UPDATED. `0047` is applied to Staging and
-     * Production, and an applied migration is never rewritten. It cannot do
-     * any harm either: every contact field is seeded through
-     * `coalesce(nullif(btrim(x), ''), …)`, so the seed only ever fills a NULL
-     * and can never overwrite a value that exists.
-     *
-     * WHERE THE TRUTH LIVES NOW. The legal pages render `SELLER_IDENTITY`;
-     * the invoice and each new `order_legal_snapshots` row read
-     * `public.sellers.contact_email`. Both carry the new address. The seed
-     * literal is a historical default, not the authority.
-     */
-    expect(SELLER_IDENTITY.email).toBe("info@skyisles.de");
+  it("the 0047 seed can only fill an empty contact field", () => {
+    // `0047` seeds `info@skyisles.app`; the live value is whatever the row
+    // carries. The seed goes through `coalesce(nullif(btrim(x), ''), …)`, so it
+    // can never overwrite a value that exists.
     expect(SQL).toContain("'info@skyisles.app'");
-    expect(SQL).not.toContain(SELLER_IDENTITY.email);
-
-    // The seed can only fill an empty field — that is what makes the
-    // divergence harmless rather than a landmine.
     for (const field of [
       "contact_email",
       "withdrawal_contact_email",
@@ -268,7 +264,9 @@ describe("the statutory texts are reproduced, not improved", () => {
     );
     expect(WIDERRUFSFORMULAR.lines[0]).toContain("Hiermit widerrufe(n) ich/wir (*)");
     expect(WIDERRUFSFORMULAR.footnote).toBe("(*) Unzutreffendes streichen.");
-    expect(WIDERRUFSFORMULAR.recipient).toContain(SELLER_IDENTITY.legalName);
+    expect(WIDERRUFSFORMULAR.recipient).toContain(SELLER_LEGAL_FIXTURE.legalName);
+    // A withdrawal goes to the withdrawal contact (falling back to the contact e-mail).
+    expect(WIDERRUFSFORMULAR.recipient).toContain(SELLER_LEGAL_FIXTURE.withdrawalContactEmail);
   });
 });
 
@@ -627,11 +625,13 @@ describe("legal document versions", () => {
     expect(SQL).toContain("after insert on public.orders");
   });
 
-  it("match what the migration seeds", () => {
-    for (const [slug, version] of Object.entries(LEGAL_VERSIONS)) {
+  it("start from what the migration seeded", () => {
+    // 0047 seeded every document; later versions are set by their own
+    // migration (`legal-versions.test.ts` holds LEGAL_VERSIONS to the latest).
+    for (const slug of Object.keys(LEGAL_VERSIONS)) {
       expect(SQL, slug).toContain(`('${slug}',`);
-      expect(SQL, `${slug}@${version}`).toContain(`'${version}'`);
     }
+    expect(SQL).toContain("'2026-09-17'");
   });
 
   it("are shown on the page and in the confirmation mail", () => {
@@ -689,9 +689,12 @@ describe("every legal route exists and is linked", () => {
 
   it("and the checkout links what § 312j Abs. 2 requires before the order", () => {
     const view = readFileSync("src/components/checkout/checkout-view.tsx", "utf8");
-    for (const route of ["/agb", "/widerruf", "/versand", "/datenschutz"]) {
+    for (const route of ["/versand", "/datenschutz"]) {
       expect(view, route).toContain(route);
     }
+    // AGB and Widerruf link the exact version the order sends (ADR-0184, AP5).
+    expect(view).toContain('legalTextPath("agb", terms.agb)');
+    expect(view).toContain('legalTextPath("widerruf", terms.widerruf)');
   });
 
   it("and the basket says what § 312j Abs. 1 requires at the start", () => {

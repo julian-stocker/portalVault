@@ -30,20 +30,67 @@
  */
 
 /**
- * The current version of each text.
+ * The version of each text this code BUILDS — the newest it carries.
  *
- * A date, because that is what a version of a legal document usefully is.
- * Bump it in the same commit that changes the text, and change the matching
- * row in a new migration — `src/lib/legal/versions.test.ts` fails otherwise.
+ * A date, because that is what a version of a legal document usefully is: the
+ * day this wording was settled — not a claim about when it went live. Bump it
+ * in the same commit that changes the text, freeze the old text into
+ * `src/lib/legal/archive/`, and set the matching row in a new migration —
+ * `legal-versions-0192.test.ts` fails otherwise.
+ *
+ * NOT "the version in force". Which version is in force is the database's
+ * answer (`legal_versions_public()`, `versions.ts`): the pages and the
+ * checkout render whichever built or archived version it names, so a new text
+ * can ship before it is switched on (ADR-0184, AP5).
+ *
+ * `2026-11-11` (ADR-0184, AP5): all four name the seller from
+ * `seller_legal_public()` instead of the retired constant. The earlier
+ * `2026-09-17` texts are archived unchanged (`archive/2026-09-17.ts`).
  */
 export const LEGAL_VERSIONS = {
-  agb: "2026-09-17",
-  widerruf: "2026-09-17",
-  datenschutz: "2026-09-17",
-  impressum: "2026-09-17",
+  agb: "2026-11-11",
+  widerruf: "2026-11-11",
+  datenschutz: "2026-11-11",
+  impressum: "2026-11-11",
 } as const;
 
+const LONG_DATE = new Intl.DateTimeFormat("de-DE", {
+  day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
+});
+
+/** `2026-11-11` → "11. November 2026", for the "Fassung vom …" line of a text. */
+export function versionDate(version: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(version);
+  if (!match) throw new Error(`not a dated version: ${version}`);
+  return LONG_DATE.format(new Date(Date.UTC(+match[1], +match[2] - 1, +match[3], 12)));
+}
+
 export type LegalSlug = keyof typeof LEGAL_VERSIONS;
+
+/**
+ * The versions a checkout SHOWS and sends with the order (ADR-0184, AP5).
+ *
+ * Read from the database when the checkout page is rendered
+ * (`fetchLegalVersions()`), never from this file. `create_order()` compares
+ * them with `legal_document_versions` inside the order transaction and refuses
+ * the order if they differ (0191), so an order can only ever be snapshotted
+ * with the AGB and Widerruf the customer saw. A tab rendered before a switch
+ * sends the versions it still displays and is refused.
+ */
+export type ShownTerms = { agb: string; widerruf: string };
+
+/**
+ * The stable URL of one version of a document — archived or built. The
+ * checkout links the version it shows here, so the text a customer opened is
+ * the version the order sends (ADR-0184, AP5). Kept in this data-free module
+ * because the checkout is a client component.
+ */
+export const legalTextPath = (slug: "impressum" | "agb" | "widerruf" | "datenschutz", version: string) =>
+  `/rechtstexte/${slug}/${version}`;
+
+/** The shape `legal_document_versions` accepts (0047). */
+export const isLegalVersion = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9]{4}-[0-9]{2}-[0-9]{2}(\.[0-9]+)?$/.test(value);
 
 /** One block of a document. `list` renders as a list, `paragraphs` as prose. */
 export type LegalBlock =

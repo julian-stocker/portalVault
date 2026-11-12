@@ -29,6 +29,7 @@
 
 import { isPaymentToken, type CheckoutCredentials } from "@/lib/commerce/capability";
 import { draftPayload, validateDraft, type DraftProblem, type OrderDraft } from "@/lib/commerce/order";
+import { isLegalVersion, type ShownTerms } from "@/lib/legal/documents";
 import { isShippingMethod, type ShippingOption } from "@/lib/commerce/shipping";
 import { createClient } from "@/lib/supabase/server";
 
@@ -58,6 +59,11 @@ export type PlaceOrderResult =
    * "unavailable", because the article is fine and the basket is not lost.
    */
   | { ok: false; reason: "too_many_checkouts" }
+  /**
+   * The AGB or Widerruf version the checkout showed is not the one in force
+   * (`LV002`, 0191). No order and no reservation exist; the basket stays.
+   */
+  | { ok: false; reason: "terms_changed" }
   | { ok: false; reason: "failed" };
 
 /**
@@ -110,6 +116,14 @@ const UNAVAILABLE = new Set(["23514", "P0002", "no_data_found", "check_violation
 const THROTTLED = new Set(["53300", "too_many_connections"]);
 
 /**
+ * `LV002`, raised by `create_order()` when the versions sent are not the ones
+ * in `legal_document_versions` (0191). Decided in the database, under a row
+ * lock, inside the order transaction — this file only names the outcome.
+ * `LV001` (a version missing) is a broken client and stays `failed`.
+ */
+const TERMS_CHANGED = new Set(["LV002"]);
+
+/**
  * @param credentials Generated **by the browser**, once per checkout attempt,
  *   and stable across retries. The request id makes a repeat harmless; the
  *   payment capability is what proves, on that repeat, that this is the same
@@ -117,14 +131,22 @@ const THROTTLED = new Set(["53300", "too_many_connections"]);
  *
  *   Both travel forward only. Neither is ever returned, so a lost response
  *   cannot destroy either of them (see `capability.ts`).
+ * @param shown The AGB and Widerruf versions the checkout DISPLAYED (ADR-0184,
+ *   AP5). Sent as they came from the rendered page — not replaced by this
+ *   deployment's constant — so the database compares what the customer saw.
  */
 export async function placeOrder(
   draft: OrderDraft,
   credentials: CheckoutCredentials,
+  shown: ShownTerms,
 ): Promise<PlaceOrderResult> {
   // A malformed capability would be refused by the database anyway; catching
   // it here keeps a broken client from spending a round trip.
   if (!credentials || !isPaymentToken(credentials.paymentToken)) {
+    return { ok: false, reason: "failed" };
+  }
+  // The same for the versions: `create_order()` refuses a missing one (LV001).
+  if (!shown || !isLegalVersion(shown.agb) || !isLegalVersion(shown.widerruf)) {
     return { ok: false, reason: "failed" };
   }
   const problems = validateDraft(draft);
@@ -136,6 +158,8 @@ export async function placeOrder(
       p_request_id: credentials.requestId,
       p_payment_token: credentials.paymentToken,
       ...draftPayload(draft),
+      p_agb_version: shown.agb,
+      p_widerruf_version: shown.widerruf,
     });
 
     if (error) {
@@ -146,6 +170,7 @@ export async function placeOrder(
       // else's checkout, or a client that regenerated its own credentials.
       if (NOT_YOURS.has(error.code ?? "")) return { ok: false, reason: "failed" };
       if (THROTTLED.has(error.code ?? "")) return { ok: false, reason: "too_many_checkouts" };
+      if (TERMS_CHANGED.has(error.code ?? "")) return { ok: false, reason: "terms_changed" };
       if (UNAVAILABLE.has(error.code ?? "")) return { ok: false, reason: "unavailable" };
       return { ok: false, reason: "failed" };
     }

@@ -11,12 +11,17 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
+import { supabasePublicConfig } from "@/lib/ops/deployment-target";
+
 export async function createClient() {
+  // Throws on a Vercel preview that is not wired to Staging (ADR-0185) —
+  // before a cookie is read or a request is made.
+  const { url, anonKey } = supabasePublicConfig();
   const cookieStore = await cookies();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    url,
+    anonKey,
     {
       cookies: {
         getAll() {

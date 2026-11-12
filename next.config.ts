@@ -1,5 +1,20 @@
 import type { NextConfig } from "next";
 
+import { blockedMessage, currentDeploymentEnv, deploymentVerdict } from "./src/lib/ops/deployment-target";
+
+/**
+ * A Vercel PREVIEW that is not wired to Staging does not build (ADR-0185).
+ *
+ * The `NEXT_PUBLIC_SUPABASE_*` values are written into the bundle by this
+ * build, so this is the one moment that sees exactly what the deployment
+ * would use. A refused preview never becomes a deployment; Production, local
+ * builds and `next dev` are never refused here (`deployment-target.ts`).
+ */
+const deployment = deploymentVerdict(currentDeploymentEnv());
+if (!deployment.allowed) {
+  throw new Error(blockedMessage(deployment));
+}
+
 /**
  * Origins the DEV server may serve its own assets to (ADR-0149).
  *

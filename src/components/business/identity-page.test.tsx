@@ -29,7 +29,6 @@ const { ShopProfilePanel } = await import("@/components/admin/shop-profile-panel
 const { IdentityFindings, NameUsage, PlatformIdentity } = await import("./identity-overview");
 const { NO_SHOP_SETTINGS } = await import("@/lib/admin/shop-profile-model");
 const { buildIdentity, identityFindings, nameUsage } = await import("@/lib/identity/model");
-const { SELLER_IDENTITY } = await import("@/lib/legal/seller-identity");
 const { de } = await import("@/lib/i18n/de");
 
 const SETTINGS = {
@@ -128,11 +127,10 @@ describe("the legal panel on this page cannot overwrite the contact e-mail", () 
 describe("the read-only sections", () => {
   const identity = buildIdentity(SETTINGS, null);
 
-  it("findings: the old designation and the legal pages' fixed values are named", async () => {
-    await mount(createElement(IdentityFindings, { findings: identityFindings(identity, SELLER_IDENTITY) }));
+  it("findings: the old designation is named as a conflict", async () => {
+    await mount(createElement(IdentityFindings, { findings: identityFindings(identity) }));
     expect(text()).toContain("yulez.collectibles");
     expect(text()).toContain(de.business.identity.levels.conflict);
-    expect(text()).toContain("AP5");
   });
 
   it("findings: nothing to report says so", async () => {
@@ -156,11 +154,11 @@ describe("the read-only sections", () => {
   });
 
   it("usage: every row with its value and its real source", async () => {
-    const rows = nameUsage(identity, SELLER_IDENTITY);
+    const rows = nameUsage(identity);
     await mount(createElement(NameUsage, { rows }));
     expect(document.querySelectorAll("tbody tr")).toHaveLength(rows.length);
     expect(text()).toContain("sellers.display_name über seller_public()");
-    expect(text()).toContain(SELLER_IDENTITY.contractingParty);
+    expect(text()).toContain("seller_legal_public()");
     expect(text()).toContain(de.business.identity.usage.notReadable);
   });
 });
