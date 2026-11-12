@@ -14,6 +14,7 @@ import { TestFlag } from "@/components/business/test-flag";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { loadSaleItemCorrections } from "@/lib/orderbook/sales-actions";
+import { legacySaleItemCorrectionsAvailable } from "@/lib/ops/schema-features";
 import { fetchSale } from "@/lib/orderbook/sales-queries";
 import { CHANNEL_LABELS, countryLabel, safeSalesBackHref } from "@/lib/orderbook/sales-view";
 import { parseReturn, returnHref } from "@/lib/reconciliation/routes";
@@ -69,8 +70,12 @@ export default async function SalePage({
    * 0181: ein importierter externer Verkauf, nicht storniert — seine Positionen
    * lassen sich von Hand korrigieren (Figur, fehlende Position). Die Sperren
    * der normalen Wege bleiben; das ist ein eigener, engerer.
+   *
+   * Nur, wo 0181 liegt (Production-Release F0). Ohne die Migration zeigt die
+   * Seite genau das, was sie vor 0181 zeigte: den Hinweis „importiert“ und
+   * keinen Korrekturknopf.
    */
-  const correctable = historical && !internal && !cancelled;
+  const correctable = legacySaleItemCorrectionsAvailable() && historical && !internal && !cancelled;
   const corrections = correctable ? await loadSaleItemCorrections(Number(id)) : [];
   /*
    * The classification, as the database decided it (0063) — the operator's own

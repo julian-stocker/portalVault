@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-11-11 (ADR-0184, Plattform SkyIsles, Shop skyisles.shop, rechtlicher Betreiber aus den Geschäftsdaten — ersetzt ADR-0064 teilweise; davor 2026-11-09 ADR-0183, Bestellzuordnung und finanzieller Abgleich getrennt, Zuordnung trotz Konkurrenz `0186` auf Staging angewendet; ADR-0182, Kandidaten und ausdrückliche Zuordnung, `0185`; ADR-0181, CSV-Abgleich öffnet den bestehenden Verkaufsdialog, `0184`; ADR-0180, nicht zugeordnete Bestellung als offene Bestellung anlegen, `0183`; ADR-0179 ergänzt: korrigiertes Datum vor dem Sync geschützt,
+Letzte Aktualisierung: 2026-11-12 (ADR-0186, kleinster Production-Release: `0190`/`0191`, `0181`- und `0184`-Funktionen außerhalb von Staging gesperrt; davor 2026-11-11 ADR-0184, Plattform SkyIsles, Shop skyisles.shop, rechtlicher Betreiber aus den Geschäftsdaten — ersetzt ADR-0064 teilweise; davor 2026-11-09 ADR-0183, Bestellzuordnung und finanzieller Abgleich getrennt, Zuordnung trotz Konkurrenz `0186` auf Staging angewendet; ADR-0182, Kandidaten und ausdrückliche Zuordnung, `0185`; ADR-0181, CSV-Abgleich öffnet den bestehenden Verkaufsdialog, `0184`; ADR-0180, nicht zugeordnete Bestellung als offene Bestellung anlegen, `0183`; ADR-0179 ergänzt: korrigiertes Datum vor dem Sync geschützt,
 Korrekturspur in beiden Sicherungen, `0182`; davor 2026-11-08 ADR-0179, Positionen importierter Verkäufe korrigieren; davor
 ADR-0171, die Variante erbt die Familie ihrer Basisfigur,
 leere Familien auf Staging; davor ADR-0170, Familie im kompakten Editor und SKY-ID-Suche).
@@ -17074,6 +17074,64 @@ Abbruch ist kostenlos**, weil nichts committet ist.
   ohne jede fachliche Anweisung, kein Platzhalter, zehn Abwesenheiten vorher
   und zehn Anwesenheiten nachher, und bei `admin_merge_draft` die Zahl **2**.
 
+
+---
+
+## ADR-0186 · Kleinster Production-Release: `0190` und `0191`, der übrige Code gesperrt, wo seine Migration fehlt
+
+**Status:** ANGENOMMEN · 2026-11-12 (Umfang vom Betreiber freigegeben: Production-Migrationen `0190` und
+`0191`, kompatibler Code, **kein** `0192`, **keine** pauschale Übernahme von `0168`–`0189`).
+Umgesetzt lokal, **nicht committet, nicht deployt, nichts auf Production geändert**.
+
+**Kontext.** Production steht gemessen (2026-11-12, rein lesend über die PostgREST-Beschreibung) bei
+`0167` ohne `0166`. Es fehlen `0168`–`0191`. Der Branch bringt 56 Commits. Der Code ruft auf Production
+fehlende Funktionen auf. Abgleich, Familienpflege und Variantenanlage waren schon auf Staging begrenzt.
+Zwei Betriebsfunktionen waren es **nicht**:
+
+- **`0181`, die Korrektur importierter Verkaufspositionen:** Die Seite bot Knöpfe an, die nur mit
+  `PGRST202` enden konnten.
+- **`0184`, Verkauf ohne Reservierung:** Die Wahl erscheint nur aus dem Abgleich, die Action war aber
+  direkt aufrufbar und scheiterte erst in der Datenbank.
+
+**Entscheidung.** `src/lib/ops/schema-features.ts` schaltet beide ab, wenn die Anwendung nicht genau
+mit Staging spricht. Es gilt dieselbe Regel wie bei `reconciliationEnvironment()` und
+`isEditorialCatalogSource()`: fail-closed, keine Umgebungsvariable, umgestellt per Commit.
+
+- **Seite** (`verkauf/[id]/page.tsx`): `correctable` ist ohne `0181` falsch. Die Seite zeigt dann
+  genau den Stand vor `0181` (Hinweis „importiert“, kein Korrekturknopf) und liest keine
+  Korrekturspur.
+- **Actions** (`sales-actions.ts`): Korrigieren, Ergänzen und Entfernen weisen ohne `0181` mit
+  einem Satz ab, bevor die Datenbank gefragt wird. `loadSaleItemCorrections` liefert eine leere
+  Liste. `createSaleWithDetails` mit `hold: false` weist ohne `0184` ab. Der normale Aufruf mit
+  Reservierung bleibt byte-gleich.
+- **Keine Sicherheitsgrenze.** Auf Production fehlen die Funktionen ohnehin. Die Sperre verhindert
+  nur, dass die Anwendung anbietet, was die Datenbank nicht kann.
+
+**Geprüft und ohne Änderung kompatibel:**
+
+- **Plattform-Export:** Production führt den Rumpf aus `0164` (Formatversion 2, 54 Bereiche). Der
+  neue Code bescheinigt Version 2 weiter (`SECTIONS_BY_FORMAT_VERSION`). Es fehlen genau die sieben
+  Bereiche aus `0174` und der eine aus `0182`, deren Tabellen es auf Production nicht gibt.
+- **Betriebssicherung:** Production führt den Rumpf aus `0140` mit 28 Bereichen. Die Route reicht
+  das Dokument der Datenbank durch und prüft es nicht gegen das Manifest des Codes.
+- Beides belegt `src/lib/backup/production-schema-backup.test.ts`, lokal ohne Verbindung.
+- **Sonst:** Abgesehen von den gesperrten Funktionen und `0190`/`0191` ruft der Code auf Production
+  keine fehlende Funktion und keine fehlende Spalte. Gemessen wurden die Parameterlisten aller RPCs
+  und die Spalten aller Tabellen und Sichten, Staging gegen Production.
+- **`tools/sync-legacy-orderbook.mts`** liest `sale_item_corrections` und behandelt die fehlende
+  Tabelle als „keine Korrektur“.
+
+**Konsequenzen.**
+
+- Eine Production-Freigabe von `0181` oder `0184` braucht die Migration dort **und** die Umstellung in
+  `schema-features.ts`, im selben Release.
+- Unverändert gilt: Der AP5-Code darf nie vor `0190` und `0191` auf Production treffen (ADR-0184).
+- **Ein erfolgreicher Export ist kein Restore.** Production läuft ohne PITR. Ein Restore aus
+  Production-Daten wurde nie erprobt (M-03), und beide Exportformate tragen `restore_supported: false`.
+
+Tests: `src/lib/ops/schema-features.test.ts` (neu), `src/lib/backup/production-schema-backup.test.ts`
+(neu), `create-sale-hold-action.test.ts` und `verkauf/[id]/page.test.tsx` (je um den Production-Fall
+erweitert).
 
 ---
 

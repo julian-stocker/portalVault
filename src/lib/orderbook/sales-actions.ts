@@ -13,6 +13,7 @@ import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
 import { fetchOrderbookCatalog } from "@/lib/orderbook/queries";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
+import { legacySaleItemCorrectionsAvailable, saleWithoutHoldAvailable } from "@/lib/ops/schema-features";
 import { createClient } from "@/lib/supabase/server";
 
 export type Result = { ok: true } | { ok: false; message: string };
@@ -453,6 +454,15 @@ export async function createSaleWithDetails(input: {
     return { ok: false as const, message: de.business.sales.create.dateRequired };
   }
   if (typeof input.hold !== "boolean") return { ok: false as const, message: de.admin.writeFailed };
+  /*
+   * OHNE RESERVIERUNG NUR, WO 0184 LIEGT (Production-Release F0). Die
+   * Oberfläche bietet die Wahl nur aus dem Abgleich an, und der ist auf
+   * Staging begrenzt. Diese Action ist aber über ihre eigene Route aufrufbar
+   * — also weist sie selbst ab, bevor die Datenbank gefragt wird.
+   */
+  if (!input.hold && !saleWithoutHoldAvailable()) {
+    return { ok: false as const, message: copy.errors.holdOptionUnavailable };
+  }
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_create_sale_with_details", {
     p_channel: input.channel,
@@ -557,20 +567,32 @@ export async function removeSaleItem(itemId: number, saleId: number) {
  * Reservierung, keine Lagerbewegung, kein Betrag.
  */
 
+/*
+ * NUR, WO 0181 LIEGT (Production-Release F0). Auf Production fehlen die vier
+ * Funktionen; die Seite bietet die Korrektur dort nicht an
+ * (`legacySaleItemCorrectionsAvailable()` in `verkauf/[id]/page.tsx`), und
+ * die Actions weisen vor jedem Datenbankaufruf ab — sie sind über ihre
+ * eigene Route aufrufbar, ganz ohne die Seite.
+ */
+const legacyCorrectionRefused = (): ItemResult => ({ ok: false, message: copy.errors.legacyCorrectionUnavailable });
+
 /** Die Katalogfigur einer Position korrigieren — `raw_name` und Herkunft bleiben. */
 export async function correctLegacySaleItem(itemId: number, skyId: string, saleId: number, expectedUpdatedAt: string | null) {
+  if (!legacySaleItemCorrectionsAvailable()) return legacyCorrectionRefused();
   return runItem("seller_correct_legacy_sale_item",
     { p_item_id: itemId, p_sky_id: skyId, p_expected_updated_at: expectedUpdatedAt }, saleId);
 }
 
 /** Eine fehlende Position ergänzen — ohne Herkunftszeile, ohne Reservierung. */
 export async function addLegacySaleItem(saleId: number, skyId: string | null, rawName: string | null, expectedUpdatedAt: string | null) {
+  if (!legacySaleItemCorrectionsAvailable()) return legacyCorrectionRefused();
   return runItem("seller_add_legacy_sale_item", { p_sale_id: saleId, p_sky_id: skyId, p_raw_name: rawName,
     p_condition: "loose", p_expected_updated_at: expectedUpdatedAt }, saleId);
 }
 
 /** Eine ergänzte Position wieder entfernen — nie eine Arbeitsmappenzeile. */
 export async function removeLegacyAddedItem(itemId: number, saleId: number, expectedUpdatedAt: string | null) {
+  if (!legacySaleItemCorrectionsAvailable()) return legacyCorrectionRefused();
   return runItem("seller_remove_legacy_added_item", { p_item_id: itemId, p_expected_updated_at: expectedUpdatedAt }, saleId);
 }
 
@@ -580,7 +602,7 @@ export type SaleItemCorrection = {
   oldSkyId: string | null; oldRawName: string | null; newSkyId: string | null; newRawName: string | null; correctedAt: string;
 };
 export async function loadSaleItemCorrections(saleId: number): Promise<SaleItemCorrection[]> {
-  if (!(await canOperateSeller())) return [];
+  if (!legacySaleItemCorrectionsAvailable() || !(await canOperateSeller())) return [];
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_sale_item_corrections", { p_sale_id: saleId });
   if (error || !Array.isArray(data)) return [];

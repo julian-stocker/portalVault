@@ -4,7 +4,7 @@
  * before 0184 (no `p_hold`), so it works on a database without 0184 too.
  * A duplicate order number and a database without 0184 are said in words.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const MOCK = vi.hoisted(() => ({ calls: [] as { name: string; args: Record<string, unknown> }[],
   answer: { data: 412 as unknown, error: null as { code: string; message?: string } | null } }));
@@ -22,7 +22,30 @@ const input = (hold: boolean) => ({
   subtotal: 30.01, shipping: 5.49, discount: 0, items: [{ sky_id: "SKY-0150" }], fees: [], refunds: [], adjustments: [], hold,
 });
 
-beforeEach(() => { MOCK.calls = []; MOCK.answer = { data: 412, error: null }; });
+/* 0184 lies on Staging only (Production release F0, `schema-features.ts`). */
+const STAGING = "https://qqxcpesbwfxzgytkdsac.supabase.co";
+const PRODUCTION = "https://zmiwxswrpkmizvqsgype.supabase.co";
+
+beforeEach(() => {
+  MOCK.calls = []; MOCK.answer = { data: 412, error: null };
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", STAGING);
+});
+afterEach(() => { vi.unstubAllEnvs(); });
+
+describe("without 0184 (Production): refused before the database, the normal path unchanged", () => {
+  it.each([["Production", PRODUCTION], ["no URL", ""]])("%s: hold false is refused, nothing is called", async (_l, url) => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", url);
+    expect(await createSaleWithDetails(input(false))).toEqual({ ok: false, message: de.business.sales.errors.holdOptionUnavailable });
+    expect(MOCK.calls).toEqual([]);
+  });
+
+  it("Production: hold true is exactly the call of before 0184", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", PRODUCTION);
+    expect(await createSaleWithDetails(input(true))).toMatchObject({ ok: true, id: 412 });
+    expect(MOCK.calls.map((c) => c.name)).toEqual(["seller_create_sale_with_details"]);
+    expect("p_hold" in MOCK.calls[0].args).toBe(false);
+  });
+});
 
 describe("the reservation mode reaches the database unambiguously", () => {
   it("hold false: p_hold false is sent", async () => {

@@ -6,7 +6,7 @@
  */
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const MOCK = vi.hoisted(() => ({
   items: [] as Record<string, unknown>[],
@@ -38,7 +38,15 @@ const render = async (q: Record<string, string> = {}) =>
   renderToStaticMarkup(await SalePage({ params: Promise.resolve({ id: "152" }), searchParams: Promise.resolve(q) }));
 const returnLinks = (html: string) => [...html.matchAll(/<a href="([^"]+)" data-return-to-reconciliation=""/g)].map((m) => m[1]);
 
-beforeEach(() => { MOCK.items = []; MOCK.sale = { ...WORKBOOK }; MOCK.order = null; MOCK.correctionsRead = []; });
+/* 0181 lies on Staging only (Production release F0, `schema-features.ts`). */
+const STAGING = "https://qqxcpesbwfxzgytkdsac.supabase.co";
+const PRODUCTION = "https://zmiwxswrpkmizvqsgype.supabase.co";
+
+beforeEach(() => {
+  MOCK.items = []; MOCK.sale = { ...WORKBOOK }; MOCK.order = null; MOCK.correctionsRead = [];
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", STAGING);
+});
+afterEach(() => { vi.unstubAllEnvs(); });
 
 describe("opened from the reconciliation", () => {
   it("'Zurück zum Abgleich' to the same session, filter and order card", async () => {
@@ -83,4 +91,13 @@ describe("the hand correction (0181)", () => {
       expect(MOCK.correctionsRead).toEqual([]);
     }
   });
+
+  it.each([["Production", PRODUCTION], ["no URL", ""], ["an unknown host", "https://example.invalid"]])(
+    "without 0181 (%s): the imported sale is shown as before 0181 — not correctable, no corrections read", async (_label, url) => {
+      vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", url);
+      const html = await render();
+      expect(MOCK.items[0]).toMatchObject({ correctable: false, historical: true, corrections: [] });
+      expect(MOCK.correctionsRead).toEqual([]);
+      expect(html).not.toContain(de.business.sales.errors.legacyCorrectionUnavailable);
+    });
 });

@@ -3855,6 +3855,9 @@ export const de = {
         /* 0184 noch nicht auf dieser Datenbank: ohne Reservierung kann noch nicht angelegt werden. */
         holdOptionUnavailable:
           "Das Anlegen ohne Reservierung ist hier noch nicht verfügbar — es wurde nichts angelegt.",
+        /* 0181 nicht auf dieser Datenbank (Production): die Korrektur wird gar nicht erst versucht. */
+        legacyCorrectionUnavailable:
+          "Die Korrektur importierter Positionen ist hier noch nicht verfügbar — es wurde nichts geändert.",
         /*
          * Der alte, mehrdeutige Satz derselben Funktion — solange eine
          * Umgebung 0093 noch nicht hat. Er behauptet nichts, was er nicht
