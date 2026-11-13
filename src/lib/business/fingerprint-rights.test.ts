@@ -522,6 +522,138 @@ describe("und keine vergleicht proargtypes oder proconfig als Text", () => {
   }
 });
 
+/* --------------------------------------------------------------------------
+ * ACL-Wächter: jede Fundstelle von `a.grantee <> p.proowner` nach ihrer Form
+ * ------------------------------------------------------------------------ */
+
+/** Die Dateien, die der Wächter liest: alle Prüfdateien, Migrationen ab 0124. */
+const aclGuardFiles = checkSql.concat(
+  migrationFiles.filter((f) => Number(f.slice(0, 4)) >= 124)
+    .map((f) => ({ file: f, sql: migrationSource(f) })));
+
+/**
+ * Wo eine AUFLISTUNG stehen darf, und warum. Eng: genau diese drei Dateien.
+ * Eine neue Datei mit derselben Form wird hier mit Grund eingetragen, sonst
+ * schlägt der Wächter an.
+ */
+const LISTING_FILES: Record<string, string> = {
+  "0191_create_order_terms_versions.sql":
+    "kopiert die Rechte der Sechser-Überladung von create_order Empfänger für Empfänger auf die Achter"
+    + " (service_role eingeschlossen), vergleicht danach beide Mengen auf Gleichheit und verlangt für"
+    + " legal_versions_public() genau die Liste 'anon,authenticated' ohne PUBLIC — keine Nullzählung",
+  "0191_preflight.sql":
+    "zeigt die vollständige Rechtemenge der Sechser-Überladung als Messung (Erwartung null) — nichts wird gezählt",
+  "0191_postflight.sql":
+    "vergleicht die Rechtemengen der Sechser- und Achter-Überladung auf Gleichheit, zeigt die Menge der"
+    + " Achter als Messung und erwartet für legal_versions_public() genau 'anon,authenticated'"
+    + " (PUBLIC würde als 'PUBLIC' sichtbar) — keine Nullzählung",
+};
+
+type AclGuardUse = {
+  kind: "zero_count" | "listing" | "unclassified";
+  /** Die ersten Zeichen nach dem SELECT, dem die Bedingung gehört. */
+  head: string;
+  /** Nur bei zero_count aussagekräftig: Ausnahme UND PUBLIC in derselben Anweisung. */
+  exempt: boolean;
+};
+
+/**
+ * Zwei gleich lange Fassungen des SQL: `plain` ohne Kommentare (auch in
+ * Dollar-Rümpfen, dort stehen die meisten), `masked` zusätzlich mit
+ * geleerten Literalen — damit Klammern und Schlüsselwörter in Zeichenketten
+ * die Struktur nicht verfälschen. Gleiche Länge, gleiche Positionen.
+ */
+function aclScan(sql: string): { plain: string; masked: string } {
+  let plain = "";
+  let masked = "";
+  let i = 0;
+  const n = sql.length;
+  const blank = (s: string) => s.replace(/[^\n]/g, " ");
+  while (i < n) {
+    if (sql[i] === "'") {
+      const start = i;
+      i += 1;
+      while (i < n) {
+        if (sql[i] === "'" && sql[i + 1] === "'") { i += 2; continue; }
+        if (sql[i] === "'") { i += 1; break; }
+        i += 1;
+      }
+      const lit = sql.slice(start, i);
+      plain += lit;
+      masked += "'" + blank(lit.slice(1, -1)) + (lit.length > 1 ? "'" : "");
+      continue;
+    }
+    if (sql.startsWith("/*", i)) {
+      const start = i;
+      let depth = 1; i += 2;
+      while (i < n && depth > 0) {
+        if (sql.startsWith("/*", i)) { depth += 1; i += 2; continue; }
+        if (sql.startsWith("*/", i)) { depth -= 1; i += 2; continue; }
+        i += 1;
+      }
+      const b = blank(sql.slice(start, i));
+      plain += b; masked += b;
+      continue;
+    }
+    if (sql.startsWith("--", i)) {
+      const start = i;
+      while (i < n && sql[i] !== "\n") i += 1;
+      const b = blank(sql.slice(start, i));
+      plain += b; masked += b;
+      continue;
+    }
+    plain += sql[i]; masked += sql[i];
+    i += 1;
+  }
+  return { plain, masked };
+}
+
+const GUARD = "a.grantee <> p.proowner";
+/** `<> 'service_role'` oder eine `not in (…)`-Liste, die service_role nennt (0127). */
+const EXEMPT_SERVICE = /a\.grantee::regrole::text\s*(?:<>\s*'service_role'|not in\s*\([^)]*'service_role'[^)]*\))/;
+const EXEMPT_PUBLIC = "a.grantee = 0";
+
+/** Jede Fundstelle, eingeordnet nach dem SELECT, dem sie gehört. */
+function aclGuardUses(sql: string): AclGuardUse[] {
+  const { plain, masked } = aclScan(sql);
+  const uses: AclGuardUse[] = [];
+  for (let at = masked.indexOf(GUARD); at !== -1; at = masked.indexOf(GUARD, at + GUARD.length)) {
+    // Rückwärts zum SELECT auf derselben Klammerebene; balancierte Klammern
+    // dazwischen (Unterselects, Funktionsaufrufe) werden übersprungen.
+    let depth = 0;
+    let owner = -1;
+    for (let i = at - 1; i >= 0; i--) {
+      const c = masked[i];
+      if (c === ")") { depth += 1; continue; }
+      if (c === "(") { if (depth > 0) { depth -= 1; continue; } break; }
+      if (depth === 0 && c === ";") break;
+      if (depth === 0 && masked.startsWith("select", i) && !/[a-z0-9_]/i.test(masked[i - 1] ?? " ")
+          && !/[a-z0-9_]/i.test(masked[i + 6] ?? " ")) { owner = i; break; }
+    }
+    if (owner === -1) { uses.push({ kind: "unclassified", head: "(kein SELECT)", exempt: false }); continue; }
+    // Vorwärts bis zum Ende der Anweisung: ';' oder die schließende Klammer.
+    let end = masked.length;
+    depth = 0;
+    for (let i = owner; i < masked.length; i++) {
+      const c = masked[i];
+      if (c === "(") depth += 1;
+      else if (c === ")") { if (depth === 0) { end = i; break; } depth -= 1; }
+      else if (c === ";" && depth === 0) { end = i; break; }
+    }
+    const statement = plain.slice(owner, end);
+    const head = masked.slice(owner + 6, owner + 60).replace(/\s+/g, " ").trim();
+    const kind: AclGuardUse["kind"] =
+      /^count\s*\(/.test(head) || /^1\b/.test(head) ? "zero_count"
+        : /^(coalesce\s*\(\s*)?string_agg\s*\(/.test(head) || /^a\.grantee\b(?!\s*::)/.test(head) ? "listing"
+          : "unclassified";
+    uses.push({
+      kind, head: head.slice(0, 40),
+      exempt: EXEMPT_SERVICE.test(statement) && statement.includes(EXEMPT_PUBLIC),
+    });
+  }
+  return uses;
+}
+
 describe("ein ACL-Wächter muss service_role zulassen", () => {
   /*
    * DER FEHLER, DEN 140 GEMACHT HAT.
@@ -535,17 +667,130 @@ describe("ein ACL-Wächter muss service_role zulassen", () => {
    *
    * ABGESCHWÄCHT WIRD NICHTS: wer so zählt, muss PUBLIC weiter ausschließen.
    * Beides zusammen ist die Bedingung.
+   *
+   * SEIT 2026-11-13 JE FUNDSTELLE, NICHT JE DATEI (F2-Gate). Die erste
+   * Fassung verlangte beide Zeichenketten irgendwo in der Datei, sobald
+   * `a.grantee <> p.proowner` darin stand. Das traf 0191, das gar nicht auf
+   * null zählt, sondern Rechtemengen VOLLSTÄNDIG ausgibt — und es ließ eine
+   * Datei durch, die die Ausnahme in einer Anweisung schreibt und in einer
+   * anderen ohne sie auf null zählt. Jetzt entscheidet das SELECT, dem die
+   * Bedingung gehört (`aclGuardUses` unten):
+   *
+   *   Nullzählung  `count(*)` oder `select 1` (EXISTS). Hier verdeckt ein
+   *                mitgezählter `service_role` nichts, er ERZEUGT einen
+   *                Fehlalarm — also verlangt: Ausnahme für `service_role` und
+   *                PUBLIC (`a.grantee = 0`) in DERSELBEN Anweisung.
+   *   Auflistung   `string_agg(…)`, auch in `coalesce(…)`, oder `select
+   *                a.grantee` (Rechte Empfänger für Empfänger kopieren). Die
+   *                ganze Menge wird gezeigt und verglichen; `service_role`
+   *                steht darin sichtbar, nichts wird gezählt, nichts muss
+   *                ausgenommen werden. Erlaubt nur in den Dateien von
+   *                `LISTING_FILES`, je mit Grund.
+   *   alles andere unbekannte Form — der Test schlägt fehl, bis jemand sie
+   *                einordnet. Kein stilles Durchwinken.
    */
-  for (const { file, sql } of checkSql.concat(
-         migrationFiles.filter((f) => Number(f.slice(0, 4)) >= 124)
-           .map((f) => ({ file: f, sql: migrationSource(f) })))) {
+  for (const { file, sql } of aclGuardFiles) {
     it(file, () => {
-      const code = ohneKommentare(sql);
-      if (!code.includes("a.grantee <> p.proowner")) return;
-      expect(code).toContain("a.grantee::regrole::text <> 'service_role'");
-      expect(code).toContain("a.grantee = 0");
+      for (const use of aclGuardUses(sql)) {
+        expect(use.kind, `${file}: unbekannte Form „select ${use.head}…“`).not.toBe("unclassified");
+        if (use.kind === "zero_count") {
+          expect(use.exempt, `${file}: Nullzählung ohne service_role-Ausnahme: „select ${use.head}…“`).toBe(true);
+        }
+        if (use.kind === "listing") {
+          expect(Object.keys(LISTING_FILES), `${file}: Auflistung außerhalb der begründeten Liste`).toContain(file);
+        }
+      }
     });
   }
+
+  it("die Auflistungen stehen genau in den drei 0191-Dateien — keine weitere, keine weggefallene", () => {
+    const withListing = aclGuardFiles
+      .filter(({ sql }) => aclGuardUses(sql).some((u) => u.kind === "listing"))
+      .map(({ file }) => file).sort();
+    expect(withListing).toEqual(Object.keys(LISTING_FILES).sort());
+  });
+
+  it("die Nullzählungen der bisherigen Dateien werden weiter erkannt und geprüft", () => {
+    // Fände die Einordnung keine Nullzählung mehr, prüfte sie nichts mehr.
+    const zero = aclGuardFiles.filter(({ sql }) => aclGuardUses(sql).some((u) => u.kind === "zero_count"))
+      .map(({ file }) => file).sort();
+    expect(zero).toEqual(expect.arrayContaining([
+      "0124_orderbook_receipt_status.sql", "0125_revoke_internal_fingerprint_execute.sql",
+      "0126_purchase_item_edit.sql", "0124_postflight.sql", "0125_postflight.sql", "0126_postflight.sql",
+      "0127_postflight.sql", "0128_postflight.sql",
+    ]));
+  });
+});
+
+describe("aclGuardUses: die Einordnung selbst (Regression)", () => {
+  const ACL = "from pg_proc p, aclexplode(p.proacl) a where p.oid = 'public.f()'::regprocedure"
+    + " and a.privilege_type = 'EXECUTE' and a.grantee <> p.proowner";
+
+  it("eine Nullzählung OHNE service_role-Ausnahme wird erkannt — der Fehler von 140", () => {
+    const [use] = aclGuardUses(`select (select count(*) ${ACL}) = 0;`);
+    expect(use).toMatchObject({ kind: "zero_count", exempt: false });
+  });
+
+  it("dasselbe als EXISTS", () => {
+    const [use] = aclGuardUses(`do $$ begin if exists (select 1 ${ACL}) then raise exception 'x'; end if; end $$;`);
+    expect(use).toMatchObject({ kind: "zero_count", exempt: false });
+  });
+
+  it("mit Ausnahme UND PUBLIC in derselben Anweisung: zulässig", () => {
+    const [use] = aclGuardUses(
+      `select count(*) ${ACL} and (a.grantee = 0 or a.grantee::regrole::text <> 'service_role');`);
+    expect(use).toMatchObject({ kind: "zero_count", exempt: true });
+  });
+
+  it("die Ausnahme als not-in-Liste mit service_role (Form von 0127): zulässig — ohne service_role darin: nicht", () => {
+    const [ok] = aclGuardUses(
+      `select count(*) ${ACL} and (a.grantee = 0 or a.grantee::regrole::text not in ('authenticated', 'service_role'));`);
+    const [bad] = aclGuardUses(
+      `select count(*) ${ACL} and (a.grantee = 0 or a.grantee::regrole::text not in ('authenticated'));`);
+    expect([ok.exempt, bad.exempt]).toEqual([true, false]);
+  });
+
+  it("die Ausnahme nur für service_role, PUBLIC vergessen: nicht zulässig", () => {
+    const [use] = aclGuardUses(`select count(*) ${ACL} and a.grantee::regrole::text <> 'service_role';`);
+    expect(use).toMatchObject({ kind: "zero_count", exempt: false });
+  });
+
+  it("die Ausnahme in einer ANDEREN Anweisung derselben Datei zählt nicht — das ließ die alte Fassung durch", () => {
+    const uses = aclGuardUses([
+      `select count(*) ${ACL} and (a.grantee = 0 or a.grantee::regrole::text <> 'service_role');`,
+      `select count(*) ${ACL};`,
+    ].join("\n"));
+    expect(uses.map((u) => u.exempt)).toEqual([true, false]);
+  });
+
+  it("die Ausnahme nur im Kommentar zählt nicht", () => {
+    const [a] = aclGuardUses(`select count(*) ${ACL} -- a.grantee = 0 or a.grantee::regrole::text <> 'service_role'\n;`);
+    expect(a).toMatchObject({ kind: "zero_count", exempt: false });
+  });
+
+  it("ein Unterselect VOR der Bedingung bestimmt nicht die Form", () => {
+    const [use] = aclGuardUses("select count(*) from pg_proc p, aclexplode(p.proacl) a"
+      + " where p.oid = (select string_agg('x', ',')::regprocedure) and a.grantee <> p.proowner;");
+    expect(use.kind).toBe("zero_count");
+  });
+
+  it("Auflistungen: string_agg, coalesce(string_agg …), die Kopierschleife", () => {
+    const uses = aclGuardUses([
+      `select string_agg(a.grantee::text, ',') ${ACL};`,
+      `select coalesce(string_agg(a.grantee::regrole::text, ','), '(keine)') ${ACL};`,
+      `do $$ declare r record; begin for r in select a.grantee ${ACL} loop null; end loop; end $$;`,
+    ].join("\n"));
+    expect(uses.map((u) => u.kind)).toEqual(["listing", "listing", "listing"]);
+  });
+
+  it("eine unbekannte Form wird nicht durchgewinkt", () => {
+    const [use] = aclGuardUses(`select sum(1) ${ACL};`);
+    expect(use.kind).toBe("unclassified");
+  });
+
+  it("eine Fundstelle nur im Kommentar ist keine", () => {
+    expect(aclGuardUses("/* a.grantee <> p.proowner */ select 1;\n-- a.grantee <> p.proowner\n")).toEqual([]);
+  });
 });
 
 describe("eine Inhaltsprüfung am Funktionsrumpf liest kommentarfrei", () => {
