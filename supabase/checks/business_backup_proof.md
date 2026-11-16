@@ -53,19 +53,32 @@ Abweichungen meldete, jede richtig gerechnet und keine ein Mangel der Datei.
 | **`counts` deckungsgleich** | die Zähler stimmen mit den Listen |
 | **keine Kontoidentität im Belegbereich** | |
 
-### Was abweichen WIRD, und kein Mangel ist
+### Bestandszahlen: berichtet, nicht beurteilt (seit F4a.1, 2026-11-14)
 
-Die `PRODUCTION_BASELINE` hält die **Bestände vom 2026-10-17** fest:
-`purchases` 88, `purchase_items` 2 142, Gesamtsumme 6 152, 0 Eigenbelege.
-Der Betrieb läuft seitdem weiter — Abweichungen in diesen Zeilen sind eine
-Auskunft über den Betrieb, keine über die Datei.
+Bis F4a hielt die `PRODUCTION_BASELINE` die **Bestände vom 2026-10-17** fest
+(`purchases` 88, `purchase_items` 2 142, Gesamtsumme 6 152, 0 Eigenbelege).
+Production ist live; jede spätere, einwandfreie Sicherung wäre an diesen
+Zeilen gescheitert. Die Baseline trägt seitdem **nur die Struktur**:
+Formatname und -version, die 28 Bereiche, den Feldplan. Gesamtsumme,
+Bereichszahlen, Belegzahl und Belegabdrücke stehen im Bericht als `Info`
+bzw. „nur Bericht" — die Gegenzahl ist eine **frische lesende Messung**
+unmittelbar neben dem Export (F4b: `baseline-rows.csv`), nicht ein Wert im
+Code.
+
+Dafür prüft das Werkzeug offline zusätzlich, was jede Datei unabhängig vom
+Bestand erfüllen muss:
+
+| Prüfung | Grund |
+|---|---|
+| **jeder Verweis zwischen Bereichen ist geschlossen** | 28 Fremdschlüssel der Datenbank (`BACKUP_REFERENCES`), z. B. `invoices.order_id → orders`; eine Momentaufnahme kann keinen offenen Verweis enthalten |
+| **kein Schlüssel doppelt** | `id` je Bereich, `order_id` beim Rechtssnapshot |
+| **je Einkauf höchstens ein Ursprungsbeleg** | Teilindex `purchase_receipts_origin_uniq` (0122) |
+| **je Belegkette genau eine aktuelle Fassung** | statt „genau eine" über alles, das nur für eine Kette galt |
 
 > **Eine Prüfung, die man wegerklären muss, ist die schlechteste Art von
-> Prüfung: eine, die man zu ignorieren lernt.** Deshalb gilt hier die Regel
-> ausdrücklich: **struktureller Teil grün = bestanden.** Weicht eine
-> Zeilenzahl ab, ist der richtige nächste Schritt, die neue Zahl in die
-> Baseline zu übernehmen — mit Datum und Quelle, so wie es am 2026-10-17
-> gemacht wurde —, nicht sie zu übersehen.
+> Prüfung: eine, die man zu ignorieren lernt.** Ein `FEHL` ist deshalb
+> wieder ein Befund über die Datei — es gibt keine Zeile mehr, die bei
+> einer gesunden Datei „erwartbar" abweicht.
 
 ### Wenn das Werkzeug mit „nicht einig" abbricht
 

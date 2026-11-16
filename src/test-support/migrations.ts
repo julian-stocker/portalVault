@@ -260,6 +260,21 @@ export function tablesFromMigrations(
  * and `columnsOf` throws rather than quietly reporting "no columns", because a
  * guard that fails open is not a guard.
  */
+/**
+ * `code(allMigrations)`, computed once per test module.
+ *
+ * `allMigrations` is a module constant, so its stripped form is too. Before
+ * F4a.1 every `columnsOf()` call re-stripped the ~4 MB history (~20 ms);
+ * `check-sql-references.test.ts` asks for 64 relations in `0174` alone and hit
+ * the 5 s timeout under full-suite load. The text handed to the regexes
+ * below is byte-for-byte what it was.
+ */
+let strippedHistoryCache: string | undefined;
+function strippedHistory(): string {
+  strippedHistoryCache ??= code(allMigrations);
+  return strippedHistoryCache;
+}
+
 export function columnsOf(table: string): ReadonlySet<string> {
   const out = new Set<string>();
 
@@ -270,7 +285,7 @@ export function columnsOf(table: string): ReadonlySet<string> {
    * concerned, three lines before the first `add column`. Matching raw text
    * found 12 columns and silently missed 13.
    */
-  const history = code(allMigrations);
+  const history = strippedHistory();
 
   const created = new RegExp(
     `create table (?:if not exists )?public\\.${table}\\s*\\(([\\s\\S]*?)\\n\\);`,

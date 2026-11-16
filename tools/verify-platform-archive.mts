@@ -42,10 +42,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
-import { PLATFORM_ARCHIVE_LAYOUT, PLATFORM_SECTIONS, SECTIONS_BY_FORMAT_VERSION }
+import { PLATFORM_ARCHIVE_LAYOUT, PLATFORM_SECTIONS }
   from "../src/lib/backup/platform-manifest.ts";
-import { SALES_RECONCILIATION_SECTIONS } from "../src/lib/backup/manifest.ts";
+import { checkPlatformAreas, resolveExpectedProject }
+  from "../src/lib/backup/platform-archive-audit.ts";
 import { projectRef, readEnvFile, STAGING_ENV_FILE } from "./lib/staging-guard.mts";
+import { PRODUCTION_REF, STAGING_REF } from "./lib/staging-db.mts";
 
 /* --------------------------------------------------------------- Aufruf */
 
@@ -62,8 +64,10 @@ const pfad = arg("file");
 if (pfad === null) {
   console.error(
     "Aufruf: npm run verify:platform-archive -- --file <pfad zum zip>\n"
-    + "        [--project <ref>]           erwartete Projektkennung\n"
-    + "                                    (Vorgabe: die aus .env.staging)\n"
+    + "        [--project production|staging|<ref>]\n"
+    + "                                    erwartete Herkunft; nur die zwei\n"
+    + "                                    festgelegten Projekte sind erlaubt\n"
+    + "                                    (Vorgabe: Staging aus .env.staging)\n"
     + "        [--calculations <n>]        erwartete Anzahl Kalkulationen\n"
     + "        [--positions <n>]           erwartete Positionen in der ersten\n"
     + "        [--units <n>]               erwartete Stückzahl in der ersten\n"
@@ -82,10 +86,28 @@ if (!innerhalb.startsWith("..") && !innerhalb.startsWith("/")) {
   process.exit(2);
 }
 
-/** Die erwartete Projektkennung — aus `.env.staging`, nicht aus einem Literal. */
-const ERWARTETES_PROJEKT =
-  arg("project") ?? projectRef(readEnvFile(STAGING_ENV_FILE).NEXT_PUBLIC_SUPABASE_URL);
+/*
+ * Die erwartete Herkunft. Nur die zwei festgelegten Projekte sind zulaessig;
+ * ein Tippfehler bricht ab, statt gegen ein Projekt zu pruefen, das es nicht
+ * gibt. Ohne --project bleibt die Vorgabe Staging aus `.env.staging`.
+ */
+const stagingAusEnv = (() => {
+  try { return projectRef(readEnvFile(STAGING_ENV_FILE).NEXT_PUBLIC_SUPABASE_URL); }
+  catch { return null; }
+})();
+const projektWahl = resolveExpectedProject(
+  arg("project"), { production: PRODUCTION_REF, staging: STAGING_REF }, stagingAusEnv);
+if (!projektWahl.ok) {
+  console.error(`ABBRUCH: ${projektWahl.reason}.`);
+  console.error("Erlaubt: --project production | staging | " + `${PRODUCTION_REF} | ${STAGING_REF}`);
+  process.exit(2);
+}
+const ERWARTETES_PROJEKT = projektWahl.ref;
 const ERWARTETE_VERSION = zahlArg("version") ?? 2;
+if (!Number.isInteger(ERWARTETE_VERSION)) {
+  console.error(`ABBRUCH: --version muss eine ganze Zahl sein.`);
+  process.exit(2);
+}
 
 /* ---------------------------------------------------------- Berichtsform */
 
@@ -122,6 +144,7 @@ function liste(): { pfad: string; groesse: number }[] {
 }
 
 console.log(`Plattformarchiv: ${absolut}`);
+console.log(`Erwartete Herkunft: ${projektWahl.label} · Formatversion ${ERWARTETE_VERSION}`);
 console.log(`Groesse: ${bytes.length} Bytes · SHA-256: ${archivHash}`);
 
 /* ================================================= 1. Gueltiges Archiv */
@@ -182,10 +205,7 @@ pruef(manifest.format_version === datenbank.format_version,
 pruef(manifest.format === "skyisles-platform-backup", "der Formatname stimmt",
       String(manifest.format));
 
-if (ERWARTETES_PROJEKT === null) {
-  pruef(false, "erwartete Projektkennung bekannt",
-        "weder --project noch .env.staging liefern eine");
-} else {
+{
   const ist = String(manifest.source_project);
   pruef(ist === ERWARTETES_PROJEKT, `source_project ist ${ERWARTETES_PROJEKT}`, ist);
   /*
@@ -203,56 +223,29 @@ if (ERWARTETES_PROJEKT === null) {
 /* ============================================== 3. Die Bereiche */
 kopf("3. Die Bereiche — Anzahl, Deckung, nichts verloren");
 
+/*
+ * Die Erwartung je Formatversion steht in `platform-archive-audit.ts`: jede
+ * Version ist ihre Vorgaengerin plus die Bereiche, die sie eingefuehrt hat.
+ * Ein Archiv der Version 2 (Production, 0164) fuehrt 54 Bereiche — weder die
+ * sieben aus 0174 noch `sale_item_corrections` aus 0182.
+ */
 const data = datenbank.data;
 const imDokument = data !== null && typeof data === "object"
   ? Object.keys(data as Json).sort() : [];
-const sollZahl = SECTIONS_BY_FORMAT_VERSION[ERWARTETE_VERSION];
-pruef(imDokument.length === sollZahl,
-      `database.json fuehrt ${sollZahl} Bereiche`, `gefunden: ${imDokument.length}`);
-
-const counts = manifest.counts as Json | undefined;
-const imDeckblatt = counts ? Object.keys(counts).sort() : [];
-pruef(imDeckblatt.length === sollZahl,
-      `manifest.json zaehlt ${sollZahl} Bereiche`, `gefunden: ${imDeckblatt.length}`);
-pruef(JSON.stringify(imDokument) === JSON.stringify(imDeckblatt),
-      "Deckblatt und Dokument nennen DIESELBEN Bereiche");
-
-/*
- * NICHTS VERLOREN. Gegen das Manifest dieser Codebasis, und zwar getrennt:
- * die 53 alten muessen vollstaendig da sein, der neue dazu. So faellt ein
- * verschwundener alter Bereich auf, auch wenn die Gesamtzahl stimmt, weil ein
- * anderer dazugekommen ist.
- */
-const NEU = "purchase_calculations";
-/* The seven reconciliation areas exist from format_version 3 (0174) on; an
-   older archive cannot carry them and is not short of anything. */
-const abVersion3 = new Set(SALES_RECONCILIATION_SECTIONS.map((s) => s.key));
-const alte = PLATFORM_SECTIONS.map((s) => s.key)
-  .filter((k) => k !== NEU && (ERWARTETE_VERSION >= 3 || !abVersion3.has(k)));
-const fehlendeAlte = alte.filter((k) => !imDokument.includes(k));
-pruef(fehlendeAlte.length === 0, `alle ${alte.length} bisherigen Bereiche sind da`,
-      fehlendeAlte.length ? `fehlen: ${fehlendeAlte.join(", ")}` : "");
-pruef(imDokument.includes(NEU), `der neue Bereich ${NEU} ist da`);
-
-const unbekannte = imDokument.filter((k) => !PLATFORM_SECTIONS.some((s) => s.key === k));
-pruef(unbekannte.length === 0, "kein Bereich, den das Manifest nicht kennt",
-      unbekannte.join(", "));
-
-/* Und die Zahlen des Deckblatts stimmen mit den Zeilen des Dokuments. */
-let zaehlerStimmen = true;
-const abweichendeZaehler: string[] = [];
+const counts = manifest.counts !== null && typeof manifest.counts === "object"
+  ? manifest.counts as Json : null;
+const zeilenJeBereich: Record<string, number> = {};
 for (const name of imDokument) {
   const zeilen = (data as Json)[name];
-  const istZahl = Array.isArray(zeilen) ? zeilen.length : 0;
-  if ((counts as Json)[name] !== istZahl) {
-    zaehlerStimmen = false;
-    abweichendeZaehler.push(name);
-  }
+  zeilenJeBereich[name] = Array.isArray(zeilen) ? zeilen.length : -1;
 }
-pruef(zaehlerStimmen, "jede Zahl in counts stimmt mit den Zeilen im Dokument",
-      abweichendeZaehler.join(", "));
+for (const c of checkPlatformAreas({
+  version: ERWARTETE_VERSION, documentKeys: imDokument,
+  coverCounts: counts, rowCounts: zeilenJeBereich,
+})) pruef(c.ok, c.name, c.detail);
 
 /* ================================ 4. Der neue Bereich, Spalte fuer Spalte */
+const NEU = "purchase_calculations";
 kopf("4. purchase_calculations");
 
 const abschnitt = PLATFORM_SECTIONS.find((s) => s.source === NEU);

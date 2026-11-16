@@ -683,18 +683,17 @@ describe("leere Bereiche beweisen keine Vollständigkeit", () => {
  * ist die schlechteste Art von Prüfung: eine, die man zu ignorieren lernt.
  */
 describe("zwei Umgebungen, zwei Baselines", () => {
-  const LEER = md5("");
-
-  it("die Production-Baseline nennt ihre Quelle und 0 Belege", () => {
+  it("die Production-Baseline nennt ihre Quelle und trägt NUR Struktur", () => {
+    /* F4a.1: die eingefrorenen Zahlen vom 2026-10-17 (6 152 / 88 / 2 142 /
+       0 Belege) sind entfernt — Production ist live, und jede spätere,
+       einwandfreie Sicherung wäre an ihnen gescheitert. */
     expect(PRODUCTION_BASELINE.source).toContain("zmiwxswrpkmizvqsgype");
-    expect(PRODUCTION_BASELINE.source).toContain("0 Eigenbelege");
-    expect(PRODUCTION_BASELINE.receipts).toEqual([]);
+    expect(PRODUCTION_BASELINE.source).toContain("keine festen Bestandszahlen");
     expect(PRODUCTION_BASELINE.areas).toBe(28);
-    expect(PRODUCTION_BASELINE.totalRecords).toBe(6152);
-    expect(PRODUCTION_BASELINE.counts).toEqual({
-      purchases: 88, purchase_items: 2142, purchase_receipts: 0,
-      purchase_receipt_downloads: 0, purchase_receipt_counters: 0,
-    });
+    for (const feld of ["totalRecords", "counts", "receipts", "fingerprintDigest",
+                        "chainDigest", "linesDigest", "canonicalLinesDigest"] as const) {
+      expect(PRODUCTION_BASELINE[feld], feld).toBeUndefined();
+    }
   });
 
   it("und beide Umgebungen führen dieselben 28 Bereiche", () => {
@@ -705,20 +704,14 @@ describe("zwei Umgebungen, zwei Baselines", () => {
       .toEqual(VOR_0174.map((s) => s.key).sort());
   });
 
-  it("die Belegabdrücke der leeren Menge sind md5 über nichts", () => {
-    /* Kein Fingerabdruck von Daten, sondern die Abwesenheit von Daten. */
-    expect(PRODUCTION_BASELINE.fingerprintDigest).toBe(LEER);
-    expect(PRODUCTION_BASELINE.chainDigest).toBe(LEER);
-    expect(PRODUCTION_BASELINE.linesDigest).toBe(LEER);
-    expect(PRODUCTION_BASELINE.canonicalLinesDigest).toBe(LEER);
-  });
-
-  it("die Zahlen der beiden Umgebungen sind verschieden — darum zwei", () => {
-    expect(PRODUCTION_BASELINE.totalRecords)
-      .not.toBe(STAGING_BASELINE.totalRecords);
-    expect(PRODUCTION_BASELINE.counts.purchases)
-      .not.toBe(STAGING_BASELINE.counts.purchases);
-    expect(STAGING_BASELINE.receipts.length).toBe(2);
+  it("die Staging-Baseline bleibt eine eingefrorene Messung — unverändert", () => {
+    expect(STAGING_BASELINE.totalRecords).toBe(5508);
+    expect(STAGING_BASELINE.counts).toEqual({
+      purchases: 90, purchase_items: 2128, purchase_receipts: 2,
+      purchase_receipt_downloads: 7, purchase_receipt_counters: 1,
+    });
+    expect(STAGING_BASELINE.receipts?.length).toBe(2);
+    expect(STAGING_BASELINE.fingerprintDigest).toBe("ad7d01f4ff1284cfb0a6ee1b6f38c67f");
   });
 
   /* ------------------------------------------------- Zuordnung aus der Datei */
@@ -777,12 +770,11 @@ describe("die Kettenspitze bei null Belegen", () => {
   };
 
   it("ohne Beleg und ohne Erwartung: bestanden, als nicht anwendbar", () => {
-    const basis = { ...PRODUCTION_BASELINE, fieldPlan: PLAN.plan,
-                    totalRecords: Object.values(
-                      leeresDokument.data as Record<string, unknown[]>)
-                      .reduce((n, l) => n + l.length, 0),
-                    counts: {} };
-    const f = fassung(auditBackup(leeresDokument, basis).findings);
+    /* Die Production-Baseline erwartet seit F4a.1 keine feste Belegzahl;
+       die Prüfung heißt dort „je Belegkette genau eine aktuelle Fassung". */
+    const basis = { ...PRODUCTION_BASELINE, fieldPlan: PLAN.plan };
+    const f = auditBackup(leeresDokument, basis).findings
+      .find((x) => x.label === "je Belegkette genau eine aktuelle Fassung")!;
     expect(f.ok).toBe(true);
     expect(f.detail).toBe("nicht anwendbar (keine Belege)");
   });
@@ -823,10 +815,21 @@ describe("die Kettenspitze bei null Belegen", () => {
     expect(f.detail).toBe("2");
   });
 
-  it("die echte Production-Datei würde damit durchlaufen", () => {
-    /* Keine Datei im Test — nur die Rechnung: 0 Belege, 0 Abrufe, 0 Zähler,
-       6 152 Datensätze, und die Baseline erwartet genau das. */
-    expect(PRODUCTION_BASELINE.counts.purchase_receipts).toBe(0);
-    expect(PRODUCTION_BASELINE.receipts).toHaveLength(0);
+  it("ohne feste Erwartung fallen ZWEI Ursprungsbelege zum selben Einkauf trotzdem", () => {
+    /* Ohne Belegzahl in der Baseline darf die Prüfung auf zwei gültige
+       Fassungen nicht wegfallen: der Teilindex aus 0122 erlaubt je Einkauf
+       genau einen Ursprungsbeleg. */
+    const doc = {
+      ...dokument({
+        receipts: [beleg(), beleg({ id: 2, receipt_number: "SI-E-2026-000002",
+                                    content_fingerprint: "b".repeat(64) })],
+        downloads: [],
+      }),
+      source_project: "zmiwxswrpkmizvqsgype",
+    };
+    const ergebnis = auditBackup(doc, { ...PRODUCTION_BASELINE, fieldPlan: PLAN.plan });
+    const f = ergebnis.findings.find((x) => x.label === "je Einkauf höchstens ein Ursprungsbeleg")!;
+    expect(f.ok).toBe(false);
+    expect(f.detail).toBe("1 Einkäufe mit mehreren");
   });
 });

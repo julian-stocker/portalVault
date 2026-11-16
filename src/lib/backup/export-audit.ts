@@ -50,14 +50,27 @@ export type ExportBaseline = {
    */
   areaKeys: readonly string[];
   areas: number;
-  totalRecords: number;
+  /*
+   * EINGEFRORENE MESSUNG ODER NICHT — die Felder ab hier sind optional.
+   *
+   * Eine Baseline mit Zahlen ist die Messung EINER Umgebung zu EINEM
+   * Zeitpunkt. Für eine laufende Umgebung veraltet sie mit der ersten
+   * Buchung: die Production-Baseline vom 2026-10-17 (6 152 Datensätze,
+   * 88 Einkäufe) hätte jede spätere, einwandfreie Production-Sicherung als
+   * fehlerhaft gemeldet (F4a, 2026-11-14). Fehlt ein Feld, wird der Wert
+   * BERICHTET und nicht beurteilt — die Gegenzahl kommt dann aus einer
+   * frischen lesenden Messung neben der Datei, nicht aus diesem Code.
+   * Die Prüfungen auf Form, Bereiche, Felder, Verweise und Belegkette
+   * gelten unabhängig davon.
+   */
+  totalRecords?: number;
   /** Nur die Bereiche, deren Zahl die Baseline ausdrücklich genannt hat. */
-  counts: Readonly<Record<string, number>>;
-  receipts: readonly BaselineReceipt[];
+  counts?: Readonly<Record<string, number>>;
+  receipts?: readonly BaselineReceipt[];
   /** md5 über `id:content_fingerprint`, `|`-verbunden, nach id sortiert. */
-  fingerprintDigest: string;
+  fingerprintDigest?: string;
   /** md5 über `id:revision:supersedes_id`, `-` für keinen Vorgänger. */
-  chainDigest: string;
+  chainDigest?: string;
   /**
    * md5 über `id:lines::text` aus der Datenbank.
    *
@@ -69,7 +82,7 @@ export type ExportBaseline = {
    * kanonische Prüfsumme, die beide Seiten gleich bilden können (Prüfung 211
    * der Baseline).
    */
-  linesDigest: string;
+  linesDigest?: string;
   /** md5 über `id:position:sky_id:condition` je Position — beidseitig bildbar. */
   canonicalLinesDigest?: string;
   /**
@@ -136,57 +149,32 @@ export const STAGING_BASELINE: ExportBaseline = {
 };
 
 /**
- * `md5` über die leere Zeichenkette.
+ * Production: die STRUKTUR, ohne eingefrorene Bestände (seit F4a.1, 2026-11-14).
  *
- * Eine Umgebung ohne Eigenbeleg bildet jeden der drei Belegabdrücke über
- * nichts — `string_agg` über keine Zeile ergibt die leere Menge. Der Wert ist
- * deshalb kein Fingerabdruck von Daten, sondern die Abwesenheit von Daten,
- * und der Bericht sagt das auch so.
- */
-const DIGEST_DER_LEEREN_MENGE = "d41d8cd98f00b204e9800998ecf8427e";
-
-/**
- * Production, gemessen am 2026-10-17 nach dem Rollout von `0126`–`0131`.
+ * WARUM ES EINE EIGENE PRODUCTION-BASELINE GIBT. Die erste Prüfung der
+ * Production-Sicherung lief gegen die Staging-Baseline und meldete zwölf
+ * Abweichungen — jede richtig gerechnet und keine ein Mangel der Datei. Eine
+ * Baseline mit Zahlen ist die Messung EINER Umgebung zu EINEM Zeitpunkt.
  *
- * WARUM ES EINE ZWEITE BASELINE BRAUCHT, UND ZWAR GENAU SO
+ * WARUM SIE KEINE ZAHLEN MEHR TRÄGT. Bis F4a stand hier die Messung vom
+ * 2026-10-17 (6 152 Datensätze, 88 Einkäufe, 2 142 Positionen, 0 Belege).
+ * Production ist live; am 2026-11-12 waren es schon 100 Einkäufe. Jede
+ * einwandfreie Sicherung hätte damit drei Abweichungen gemeldet — dieselbe
+ * Sorte Fehlalarm, die diese Baseline einmal abschaffen sollte, nur
+ * zeitversetzt. Bestandszahlen, Belegzahl und Belegabdrücke werden deshalb
+ * berichtet und nicht beurteilt; die Gegenzahl ist eine frische lesende
+ * Messung unmittelbar neben dem Export (F4b, `baseline-rows.csv`).
  *
- * Die erste Prüfung der Production-Sicherung lief gegen die Staging-Baseline
- * und meldete zwölf Abweichungen — jede davon richtig gerechnet und keine
- * davon ein Mangel der Datei: Production hat 88 Einkäufe statt 90, 2 142
- * Positionen statt 2 128 und **keinen** Eigenbeleg statt zwei. Eine Baseline
- * ist die Messung EINER Umgebung zu EINEM Zeitpunkt; sie auf eine andere
- * anzuwenden erzeugt Fehlalarme, die man dann wegerklären muss. Das ist die
- * schlechteste Art von Prüfung: eine, die man zu ignorieren lernt.
- *
- * Die Zahlen stammen aus zwei voneinander unabhängigen Quellen: der lesenden
- * Zielbestätigung vor dem Rollout (88 / 2 142 / 296 / 284 / 333 / 1 / 1 / 0)
- * und dem Vergleich der beiden Exporte von 23:12Z und 23:35Z, deren 25
- * gemeinsame Bereiche zeilengleich sind — Gesamtsumme 6 152 vor und nach den
- * Migrationen.
- *
- * `receipts: []` ist keine Lücke, sondern der Zustand: die Ausstellung ist auf
- * Datenbankebene gesperrt, Freigabe B ist nicht erteilt, und es gibt auf
- * Production keinen Eigenbeleg.
+ * WAS STRENG BLEIBT: Formatname und -version, die 28 Bereiche des 0140-Rumpfs
+ * (Production trägt weder 0174 noch 0182), der Feldplan je Bereich, die
+ * Verweise zwischen den Bereichen, eindeutige Schlüssel, die geschlossene
+ * Belegkette und der Nummernkreis.
  */
 export const PRODUCTION_BASELINE: ExportBaseline = {
-  source: "Production zmiwxswrpkmizvqsgype, 2026-10-17 nach 0126-0131: "
-    + "lesende Zielbestaetigung und der Vergleich der Exporte 23:12Z/23:35Z, "
-    + "0 Eigenbelege",
+  source: "Production zmiwxswrpkmizvqsgype: Struktur (28 Bereiche aus 0140), "
+    + "keine festen Bestandszahlen — Gegenzahl ist eine frische lesende Messung",
   areaKeys: STAGING_BASELINE.areaKeys,
   areas: 28,
-  totalRecords: 6152,
-  counts: {
-    purchases: 88,
-    purchase_items: 2142,
-    purchase_receipts: 0,
-    purchase_receipt_downloads: 0,
-    purchase_receipt_counters: 0,
-  },
-  receipts: [],
-  fingerprintDigest: DIGEST_DER_LEEREN_MENGE,
-  chainDigest: DIGEST_DER_LEEREN_MENGE,
-  linesDigest: DIGEST_DER_LEEREN_MENGE,
-  canonicalLinesDigest: DIGEST_DER_LEEREN_MENGE,
 };
 
 /** Die Projektreferenzen, wie sie in `source_project` der Datei stehen. */
@@ -403,6 +391,63 @@ function lineKeys(lines: unknown): string[] {
 }
 
 /**
+ * Die Verweise zwischen den 28 Bereichen, die die Datenbank als Fremdschlüssel
+ * erzwingt — und die deshalb auch IN DER DATEI geschlossen sein müssen.
+ *
+ * WARUM DAS OFFLINE PRÜFBAR IST. `seller_business_backup()` ist EIN
+ * Statement, also eine Momentaufnahme, und jeder dieser Bereiche wird
+ * vollständig exportiert (keine `where`-Einschränkung im Rumpf). Ein Verweis,
+ * der in der Datei ins Leere zeigt, kann deshalb nur eine beschädigte oder
+ * unvollständige Datei bedeuten. `figures` ist bewusst NICHT dabei: es führt
+ * nur die verwendeten Figuren.
+ *
+ * `export-audit.test.ts` hält fest, dass jede Zeile einem Fremdschlüssel aus
+ * den Migrationen entspricht und dass jede Spalte im Manifest steht.
+ * `null` ist kein Verweis und wird übersprungen.
+ */
+export const BACKUP_REFERENCES: readonly {
+  from: string; column: string; to: string;
+}[] = [
+  { from: "inventory_movements", column: "inventory_id", to: "shop_inventory" },
+  { from: "purchase_items", column: "purchase_id", to: "purchases" },
+  { from: "purchase_items", column: "movement_id", to: "inventory_movements" },
+  { from: "purchase_receipts", column: "purchase_id", to: "purchases" },
+  { from: "purchase_receipt_downloads", column: "receipt_id", to: "purchase_receipts" },
+  { from: "sales", column: "order_id", to: "orders" },
+  { from: "sale_items", column: "sale_id", to: "sales" },
+  { from: "sale_items", column: "movement_id", to: "inventory_movements" },
+  { from: "sale_items", column: "return_movement_id", to: "inventory_movements" },
+  { from: "sale_fees", column: "sale_id", to: "sales" },
+  { from: "sale_refunds", column: "sale_id", to: "sales" },
+  { from: "settlement_adjustments", column: "sale_id", to: "sales" },
+  { from: "order_lines", column: "order_id", to: "orders" },
+  { from: "order_lines", column: "inventory_id", to: "shop_inventory" },
+  { from: "order_line_events", column: "order_id", to: "orders" },
+  { from: "order_line_events", column: "order_line_id", to: "order_lines" },
+  { from: "order_line_events", column: "movement_id", to: "inventory_movements" },
+  { from: "order_line_events", column: "correction_movement_id", to: "inventory_movements" },
+  { from: "order_reservations", column: "order_id", to: "orders" },
+  { from: "order_reservations", column: "inventory_id", to: "shop_inventory" },
+  { from: "order_reservations", column: "movement_id", to: "inventory_movements" },
+  { from: "order_reservations", column: "reverted_movement_id", to: "inventory_movements" },
+  { from: "order_reservations", column: "sale_item_id", to: "sale_items" },
+  { from: "order_refunds", column: "order_id", to: "orders" },
+  { from: "order_refund_allocations", column: "refund_id", to: "order_refunds" },
+  { from: "order_refund_allocations", column: "order_line_id", to: "order_lines" },
+  { from: "order_legal_snapshots", column: "order_id", to: "orders" },
+  { from: "invoices", column: "order_id", to: "orders" },
+];
+
+/**
+ * Der Schlüssel je Bereich, der in der Datei nur einmal vorkommen darf.
+ * `id` überall, wo eine Zeile ihn trägt; der Rechtssnapshot hängt an genau
+ * einer Bestellung.
+ */
+const UNIQUE_KEY_OVERRIDE: Readonly<Record<string, string>> = {
+  order_legal_snapshots: "order_id",
+};
+
+/**
  * Die Datei gegen die Baseline halten.
  *
  * Reihenfolge der Prüfungen: erst die Form des Dokuments, dann die Bereiche,
@@ -455,10 +500,14 @@ export function auditBackup(
       keinArray.length === 0 ? "alle" : keinArray.join(", "));
 
   const summe = Object.values(areaCounts).reduce((n, v) => n + Math.max(v, 0), 0);
-  add(summe === baseline.totalRecords, "Summe aller Datensätze",
-      `${summe} erwartet ${baseline.totalRecords}`);
+  if (baseline.totalRecords === undefined) {
+    add(true, "Info: Summe aller Datensätze (keine feste Erwartung)", `${summe}`);
+  } else {
+    add(summe === baseline.totalRecords, "Summe aller Datensätze",
+        `${summe} erwartet ${baseline.totalRecords}`);
+  }
 
-  for (const [bereich, n] of Object.entries(baseline.counts)) {
+  for (const [bereich, n] of Object.entries(baseline.counts ?? {})) {
     add(areaCounts[bereich] === n, `Bereich ${bereich}`,
         `${areaCounts[bereich] ?? "(fehlt)"} erwartet ${n}`);
   }
@@ -540,6 +589,48 @@ export function auditBackup(
         `${leer} von ${baseline.fieldPlan.length}`);
   }
 
+  /* ---- 2c. eindeutige Schlüssel und geschlossene Verweise ---------- */
+  /*
+   * Nur Zahlen und Bereichsnamen im Befund — nie ein Schlüsselwert: auch
+   * eine Bestellnummer ist hier kein Inhalt für einen Bericht.
+   */
+  const doppelt: string[] = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (!Array.isArray(value)) continue;
+    const spalte = UNIQUE_KEY_OVERRIDE[key] ?? "id";
+    const werte = value
+      .filter((z) => z !== null && typeof z === "object" && spalte in (z as object))
+      .map((z) => (z as Record<string, unknown>)[spalte])
+      .filter((v) => v !== null && v !== undefined)
+      .map(String);
+    const n = werte.length - new Set(werte).size;
+    if (n > 0) doppelt.push(`${key}.${spalte}: ${n}`);
+  }
+  add(doppelt.length === 0, "kein Schlüssel kommt in einem Bereich doppelt vor",
+      doppelt.length === 0 ? "keiner" : doppelt.join(" · "));
+
+  const offen: string[] = [];
+  let geprueft = 0;
+  for (const ref of BACKUP_REFERENCES) {
+    const kinder = data[ref.from];
+    const eltern = data[ref.to];
+    if (!Array.isArray(kinder) || !Array.isArray(eltern)) continue;
+    const ids = new Set(eltern
+      .filter((z) => z !== null && typeof z === "object")
+      .map((z) => String((z as Record<string, unknown>).id)));
+    let n = 0;
+    for (const z of kinder) {
+      if (z === null || typeof z !== "object") continue;
+      const v = (z as Record<string, unknown>)[ref.column];
+      if (v === null || v === undefined) continue;
+      geprueft += 1;
+      if (!ids.has(String(v))) n += 1;
+    }
+    if (n > 0) offen.push(`${ref.from}.${ref.column} → ${ref.to}: ${n}`);
+  }
+  add(offen.length === 0, "jeder Verweis zwischen Bereichen zeigt auf eine Zeile der Datei",
+      offen.length === 0 ? `${geprueft} Verweise, alle geschlossen` : offen.join(" · "));
+
   /* ---- 3. die Belegkette ------------------------------------------- */
   const belege = (Array.isArray(data.purchase_receipts)
     ? data.purchase_receipts : []) as ReceiptRow[];
@@ -567,10 +658,14 @@ export function auditBackup(
     formatVersion: zahl(r.format_version),
   }));
 
-  add(chain.length === baseline.receipts.length, "Anzahl Belege",
-      `${chain.length} erwartet ${baseline.receipts.length}`);
+  if (baseline.receipts === undefined) {
+    add(true, "Info: Anzahl Belege (keine feste Erwartung)", `${chain.length}`);
+  } else {
+    add(chain.length === baseline.receipts.length, "Anzahl Belege",
+        `${chain.length} erwartet ${baseline.receipts.length}`);
+  }
 
-  for (const soll of baseline.receipts) {
+  for (const soll of baseline.receipts ?? []) {
     const ist = chain.find((c) => c.number === soll.number);
     if (ist === undefined) {
       add(false, `Beleg ${soll.number}`, "fehlt in der Datei");
@@ -623,10 +718,40 @@ export function auditBackup(
    * bleibt es ein Fehler — das fängt die Prüfung „Anzahl Belege" weiter
    * oben, und diese hier zählt dann 0 gegen 1.
    */
+  /*
+   * JE EINKAUF HÖCHSTENS EIN URSPRUNGSBELEG — der Teilindex
+   * `purchase_receipts_origin_uniq` (0122). Zwei Ursprungsbelege zum selben
+   * Einkauf wären zwei gültige Fassungen; das darf auch eine Baseline ohne
+   * feste Belegzahl nicht durchlassen.
+   */
+  const ursprungJeEinkauf = new Map<string, number>();
+  for (const r of sortiert) {
+    if (r.supersedes_id !== null && r.supersedes_id !== undefined) continue;
+    const k = text((r as Record<string, unknown>).purchase_id);
+    ursprungJeEinkauf.set(k, (ursprungJeEinkauf.get(k) ?? 0) + 1);
+  }
+  const mehrfach = [...ursprungJeEinkauf.values()].filter((n) => n > 1).length;
+  add(mehrfach === 0, "je Einkauf höchstens ein Ursprungsbeleg",
+      mehrfach === 0 ? "eingehalten" : `${mehrfach} Einkäufe mit mehreren`);
+
   const aktuelle = chain.filter((c) => c.isCurrent).length;
-  const keineBelege = baseline.receipts.length === 0 && chain.length === 0;
-  add(keineBelege || aktuelle === 1, "genau eine aktuelle Fassung",
-      keineBelege ? "nicht anwendbar (keine Belege)" : `${aktuelle}`);
+  if (baseline.receipts === undefined) {
+    /*
+     * OHNE FESTE ERWARTUNG: je Kette genau eine Spitze. Eine Kette beginnt
+     * an einem Beleg ohne Vorgänger; ist sie weder gegabelt noch offen (die
+     * Prüfungen oben), hat jede genau eine aktuelle Fassung — also so viele
+     * aktuelle Fassungen wie Anfänge. Bei null Belegen: null gegen null.
+     */
+    const anfaenge = sortiert.filter(
+      (r) => r.supersedes_id === null || r.supersedes_id === undefined).length;
+    add(aktuelle === anfaenge, "je Belegkette genau eine aktuelle Fassung",
+        chain.length === 0 ? "nicht anwendbar (keine Belege)"
+          : `${aktuelle} aktuell, ${anfaenge} Ketten`);
+  } else {
+    const keineBelege = baseline.receipts.length === 0 && chain.length === 0;
+    add(keineBelege || aktuelle === 1, "genau eine aktuelle Fassung",
+        keineBelege ? "nicht anwendbar (keine Belege)" : `${aktuelle}`);
+  }
 
   const ohneFingerprint = sortiert.filter(
     (r) => !/^[0-9a-f]{64}$/.test(text(r.content_fingerprint)));
@@ -652,14 +777,22 @@ export function auditBackup(
   /* ---- 4. die Prüfsummen ------------------------------------------- */
   const fp = md5(sortiert.map((r) => `${zahl(r.id)}:${text(r.content_fingerprint)}`)
     .join("|"));
-  add(fp === baseline.fingerprintDigest, "Fingerabdruck-Prüfsumme",
-      `${fp} erwartet ${baseline.fingerprintDigest}`);
+  if (baseline.fingerprintDigest === undefined) {
+    add(true, "Fingerabdruck-Prüfsumme (ohne Gegenwert, nur Bericht)", fp);
+  } else {
+    add(fp === baseline.fingerprintDigest, "Fingerabdruck-Prüfsumme",
+        `${fp} erwartet ${baseline.fingerprintDigest}`);
+  }
 
   const kette = md5(sortiert.map((r) => `${zahl(r.id)}:${zahl(r.revision)}:${
     r.supersedes_id === null || r.supersedes_id === undefined
       ? "-" : zahl(r.supersedes_id)}`).join("|"));
-  add(kette === baseline.chainDigest, "Ketten-Prüfsumme",
-      `${kette} erwartet ${baseline.chainDigest}`);
+  if (baseline.chainDigest === undefined) {
+    add(true, "Ketten-Prüfsumme (ohne Gegenwert, nur Bericht)", kette);
+  } else {
+    add(kette === baseline.chainDigest, "Ketten-Prüfsumme",
+        `${kette} erwartet ${baseline.chainDigest}`);
+  }
 
   /*
    * DIE POSITIONSLISTEN: STRUKTUR, UND EINE KANONISCHE PRÜFSUMME.

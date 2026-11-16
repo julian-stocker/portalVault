@@ -905,12 +905,18 @@ describe("verify:platform-archive hält sich an seine eigenen Regeln", () => {
     expect(quelle).not.toContain("zmiwxswrpkmizvqsgype");
   });
 
-  it("prüft die Bereiche gegen das Manifest, getrennt nach alt und neu", () => {
+  it("prüft die Bereiche gegen die Erwartung DER Formatversion, getrennt nach fehlend und zu neu", () => {
     /* Sonst fiele ein verschwundener alter Bereich nicht auf, wenn die
-       Gesamtzahl stimmt, weil ein anderer dazugekommen ist. */
+       Gesamtzahl stimmt, weil ein anderer dazugekommen ist. Seit F4a.1
+       (2026-11-14) entscheidet `checkPlatformAreas()` je Version — die
+       Inline-Fassung verlangte bei Version 2 `sale_item_corrections` (0182).
+       Das Verhalten prüft `platform-archive-audit.test.ts`, hier nur, dass
+       das Werkzeug genau diese Entscheidung benutzt. */
     expect(quelle).toContain('const NEU = "purchase_calculations"');
-    expect(quelle).toContain("alle ${alte.length} bisherigen Bereiche sind da");
-    expect(quelle).toContain("SECTIONS_BY_FORMAT_VERSION[ERWARTETE_VERSION]");
+    expect(quelle).toContain("checkPlatformAreas({");
+    expect(quelle).toContain("version: ERWARTETE_VERSION");
+    expect(quelle).not.toContain("SALES_RECONCILIATION_SECTIONS");
+    expect(quelle).toContain("resolveExpectedProject(");
   });
 
   it("nennt die Grenze: eine Wiederherstellung prüft es nicht", () => {
