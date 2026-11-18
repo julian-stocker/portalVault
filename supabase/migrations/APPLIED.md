@@ -751,6 +751,43 @@ und die Risiken stehen in ADR-0162.
 Production gemessen ANGEWENDET; diese Dateien verlangen in ihren
 Vorbedingungen, dass die Objekte fehlen.
 
+### `0190` auf Production — angewendet und belegt (F5, 2026-11-18)
+
+`public.seller_legal_public()` (ADR-0184, AP4): neue Lesefunktion, `STABLE`,
+`SECURITY DEFINER`, leerer `search_path`, ausführbar nur für `anon` und
+`authenticated`. Keine Tabelle, keine Zeile, kein bestehender Rumpf und kein
+bestehendes Recht verändert.
+
+| | |
+|---|---|
+| Vorher gesichert (F4) | `pg_dump` vom 2026-11-18 (lokal wiederhergestellt und verglichen, `60-compare.sh` ohne Befund), Betriebssicherung und Plattform-Export vom selben Tag, alles im verschlüsselten Volume |
+| Preflight | `supabase/checks/prod_0190_preflight.sql` (`d20fcfcd…`), vom Betreiber im SQL-Editor als `postgres`: 101–106 `true`, `9998 = 0`, `9999 = 0`. Zeile 900: `skyisles-p0190-1\|7\|504e8b376dc2f4ac511a7b6438ff0b85\|2\|f09e79301d99068ede65b422a6610e8f\|7\|4fc4d0a0dc8e7283008a46d935531066\|2094\|57c0d0504e8409e7a3c5a021acb4f53b\|1862\|f6ae168a63fde09f610e30cb64d7a557\|cdfd7f22135a3aefeb9856c2a51a49bd\|42d8433ea1182bef37257cb7b2bd4397\|54c063a46d6112f486ea0ce582a6cd2f\|2b415755841cc33883ac61898895b7e0\|cf360d2dd6a1d6ea50875f30de509673\|7d2e9278c6a0` (17 Teile, Schutzsumme nachgerechnet: stimmt) |
+| Weg | `supabase/operations/prod-0190.sql` (SHA-256 `1e5a67103ea7c63107f2a78eb438a2e73435abdbb0259914f15140a734ce933d`), manuell im SQL-Editor als `postgres`, eine Transaktion (REPEATABLE READ). Der Editor meldete „Success“; die NOTICE `0190 ok` wurde nicht gesondert gemeldet — belegt ist die Anwendung durch A5 und 201 der Nachkontrolle |
+| Eingebettet | `0190_seller_legal_public.sql` (`a4554ac3…`), zeichengleich dieselbe Fassung wie auf Staging |
+| Nachkontrolle | `supabase/operations/prod-s-postflight-0190.sql` (`0fda3d13…`): `begin; set transaction read only;`, Production-Riegel A1–A5, Baseline wortgleich in derselben Transaktion, `prod_0190_postflight.sql` zeichengleich eingebettet, `rollback`. Laut Betreiber: **`9998 = 0`, `9999 = 0`**; 201–207 bestanden (Rumpf aus 0190, Form, Rechte, eine Überladung, Spalten, eine Zeile, `skyisles.shop`); 811–817 bestanden (Bestellungen, Rechnungen, Snapshots, Lager, Bewegungen, Verkäufer, Rechtsfassungen unverändert); 821–823 bestanden (Funktionen, Tabellenrechte, Policies unverändert); 898 = 899; keine neuen Geschäftsvorfälle (891–895) |
+| Probelauf vorher | dieselbe Nachkontrolle lokal auf dem Restore des Dumps vom 2026-11-18, 0190 in derselben Transaktion angewendet und zurückgerollt: 811–817 gleich der Baseline; 821/822 wichen nur lokal ab (Kollation `C` statt `en_US.UTF-8`; leere ACL von `platform_export_runs` aus dem Restore) — beides nachgerechnet, auf Production nicht zutreffend |
+| Nicht Teil dieses Laufs | `0191` (eigene Freigabe), `0192` (gesperrt), kein Deployment. Der laufende Code (`main`) ruft die neue Funktion nicht |
+
+### `0191` auf Production — angewendet und belegt (F6, 2026-11-18)
+
+`create_order` mit den angezeigten Rechtsfassungen (ADR-0184, AP5, Phase 1
+von 2): eine **zweite** Überladung mit acht Parametern (`p_agb_version`,
+`p_widerruf_version`, ohne Standardwerte) **neben** der bisherigen mit sechs,
+und die Lesefunktion `legal_versions_public()`. Die bisherige Überladung,
+jede Tabelle, jede Zeile und jedes bestehende Recht sind unverändert. **`0192`
+ist NICHT angewendet** — die Rechtsfassungen stehen weiter viermal auf
+`2026-09-17`, und die Sechser bleibt bis `0192`.
+
+| | |
+|---|---|
+| Voraussetzung | `0190` auf Production angewendet und belegt (Abschnitt oben); Rumpf der Sechser vorab am Restore des Dumps vom 2026-11-18 gemessen: `c233337c…`, der aus `0139` |
+| Preflight | `supabase/checks/prod_0191_preflight.sql` (`2ba96dee…`), vom Betreiber im SQL-Editor als `postgres`: `9998 = 0`, `9999 = 0`, alle bewerteten Zeilen bestanden (0190 liegt, 0191 nicht, Sechser = Rumpf aus 0139). Zeile 900: `skyisles-p0191-1\|7\|504e8b376dc2f4ac511a7b6438ff0b85\|2\|f09e79301d99068ede65b422a6610e8f\|7\|4fc4d0a0dc8e7283008a46d935531066\|2094\|57c0d0504e8409e7a3c5a021acb4f53b\|1862\|f6ae168a63fde09f610e30cb64d7a557\|cdfd7f22135a3aefeb9856c2a51a49bd\|42d8433ea1182bef37257cb7b2bd4397\|ff57cc3e2546c7a52efcb2c3ef5fc293\|2b415755841cc33883ac61898895b7e0\|cf360d2dd6a1d6ea50875f30de509673\|90d3fc7fd664` (17 Teile, Schutzsumme nachgerechnet: stimmt; gegenüber der 0190-Baseline nur der Funktionsabdruck verändert — durch `seller_legal_public`) |
+| Weg | `supabase/operations/prod-0191.sql` (SHA-256 `69a58ff9ffd1055b6cd8ee1c1e7b4dc734c9601b7c61c5c21920ff5a7d93ce74`), manuell im SQL-Editor als `postgres`, eine Transaktion (REPEATABLE READ), mit `notify pgrst`. Der Editor meldete „Success“; die NOTICE `0191 ok` wurde nicht gesondert gemeldet — belegt ist die Anwendung durch A5, 201 und 211 der Nachkontrolle |
+| Eingebettet | `0191_create_order_terms_versions.sql` (`66e57d3a…`), zeichengleich dieselbe Fassung wie auf Staging |
+| Nachkontrolle | `supabase/operations/prod-s-postflight-0191.sql` (`e8102489…`): `begin; set transaction read only;`, Production-Riegel A1–A5 (A5: Achter und `legal_versions_public` liegen), Baseline wortgleich in derselben Transaktion, `prod_0191_postflight.sql` zeichengleich eingebettet, `rollback`. Laut Betreiber: **37 bestanden, 0 fehlgeschlagen, 8 Auskunftszeilen; `9998 = 0`, `9999 = 0`**; 201–206 (Achter: Rumpf aus 0191, Form, keine Standardwerte, dieselben Empfänger, nicht PUBLIC, genau zwei Überladungen), 207–209 (Sechser unverändert der Rumpf aus 0139, Form, `anon`/`authenticated` dürfen sie weiter), 211–215 (`legal_versions_public()`: Rumpf, Form, vier Spalten, Rechte; Fassungstabelle gesperrt), 221/232 (viermal `2026-09-17`), 231 (`seller_legal_public` unverändert), 801–803, 811–817 (Geschäftsdaten unverändert), 821–823 (Funktionen, Rechte, Policies unverändert); 898 = 899 |
+| Probelauf vorher | dieselbe Nachkontrolle lokal auf dem Restore des Dumps vom 2026-11-18, 0190 und 0191 in derselben Transaktion angewendet und zurückgerollt: alle bewerteten Zeilen ok außer 821/822, die nur lokal abwichen (Kollation `C`; leere ACL von `platform_export_runs`) — unter Production-Bedingungen nachgerechnet exakt die Baseline-Werte |
+| Nicht Teil dieses Laufs | `0192` (gesperrt), kein Deployment. Der laufende Code (`main`, `bfbb112`) ruft die Sechser und läuft unverändert; der neue Checkout (Achter) kommt erst mit dem Release (F7) |
+
 ## Nicht angewendet
 
 Diese Migrationen liegen vor und sind **nirgends** ausgeführt — weder auf
@@ -791,9 +828,9 @@ ist am 2026-10-21 erfolgt (`21353e4`), und `0138` lief danach am selben Tag.
 
 **`0179` stand hier vom 2026-11-04 an als lokal vorbereitet** — seit dem Lauf auf Staging am 2026-11-05 steht sie in der Tabelle oben, mit Prüfsumme, berechtigtem Nachweis und funktionaler Leseabnahme. Production: nicht angewendet.
 
-**`0191` stand hier am 2026-11-11 als lokal vorbereitet** — seit dem Lauf auf Staging am 2026-11-12 steht sie in der Tabelle oben: angewendet, Runner-Nachkontrolle 9999 = 0, berechtigter Postflight 9998 = 0 und 9999 = 0. Production: nicht angewendet; eigene Freigabe, nach `0190`.
+**`0191` stand hier am 2026-11-11 als lokal vorbereitet** — seit dem Lauf auf Staging am 2026-11-12 steht sie in der Tabelle oben: angewendet, Runner-Nachkontrolle 9999 = 0, berechtigter Postflight 9998 = 0 und 9999 = 0. **Production: angewendet am 2026-11-18** (Abschnitt „`0191` auf Production“).
 
-**`0190` stand hier am 2026-11-11 als lokal vorbereitet** — seit dem Lauf auf Staging am selben Tag steht sie in der Tabelle oben: angewendet, Runner-Nachkontrolle 9999 = 0, berechtigter Postflight 9998 = 0 und 9999 = 0. Production: nicht angewendet; eigene Freigabe.
+**`0190` stand hier am 2026-11-11 als lokal vorbereitet** — seit dem Lauf auf Staging am selben Tag steht sie in der Tabelle oben: angewendet, Runner-Nachkontrolle 9999 = 0, berechtigter Postflight 9998 = 0 und 9999 = 0. **Production: angewendet am 2026-11-18** (Abschnitt „`0190` auf Production“).
 
 **`0189` stand hier am 2026-11-10 als lokal vorbereitet** — seit dem Lauf auf Staging am selben Tag steht sie in der Tabelle oben: angewendet, Runner-Nachkontrolle 9999 = 0, berechtigter Postflight 9998 = 0 und 9999 = 0. Production: nicht angewendet (dort fehlt `0170`).
 
