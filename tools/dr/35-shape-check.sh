@@ -19,7 +19,8 @@ SQL="$(dirname "$0")/../../supabase/checks/dr/shape-auth-storage.sql"
 OUT="$DR_VOL/shape"
 mkdir -p "$OUT"
 
-"$PGBIN/psql" "$DR_SOURCE_URI" --no-psqlrc --set=ON_ERROR_STOP=1 --csv --file="$SQL" > "$OUT/quelle.csv"
+# Die Quelle ist Production: lesend gesperrt in der Sitzung selbst (lib.sh).
+psql_read_only "$DR_SOURCE_URI" < "$SQL" > "$OUT/quelle.csv"
 "$PGBIN/psql" "$DR_TARGET_URI" --no-psqlrc --set=ON_ERROR_STOP=1 --csv --file="$SQL" > "$OUT/ziel.csv"
 
 note "--- Unterschiede in der Spaltenform (leer = gut)"

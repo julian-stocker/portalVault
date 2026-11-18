@@ -14,6 +14,14 @@
 
 set -euo pipefail
 
+# Everything these scripts create (dumps, measurements, manifests) carries
+# customer data or describes it: files 600, directories 700 from the first
+# byte. The volume may be mounted with `noowners`, where ownership is not
+# enforced; the encryption of the volume stays the primary protection, this
+# is the second line (F4b.2, 2026-11-18: the first Production dump came out
+# with 644/755).
+umask 077
+
 PROD_REF="zmiwxswrpkmizvqsgype"
 STAGING_REF="qqxcpesbwfxzgytkdsac"
 
@@ -43,7 +51,7 @@ require_client() {
 
 # ------------------------------------------------- verschluesseltes Volume
 require_volume() {
-  : "${DR_VOL:?DR_VOL muss auf das eingebundene verschluesselte Volume zeigen, z. B. /Volumes/skyisles-dr}"
+  : "${DR_VOL:?DR_VOL muss auf das eingebundene verschluesselte Volume zeigen, z. B. /Volumes/skyisles-backup}"
   [ -d "$DR_VOL" ] || fail "$DR_VOL ist nicht eingebunden"
   [ -w "$DR_VOL" ] || fail "$DR_VOL ist nicht beschreibbar"
   case "$DR_VOL" in
@@ -111,6 +119,35 @@ forbid_target_prod_and_staging() {
     *"$DR_TARGET_REF"*) note "Ziel ist das Testprojekt ($DR_TARGET_REF)";;
     *) fail "Die Ziel-URI enthaelt DR_TARGET_REF ($DR_TARGET_REF) nicht";;
   esac
+}
+
+# ------------------------------------------- lesende Sitzung auf der Quelle
+# The session pooler (Supavisor) does not pass startup options on:
+# PGOPTIONS='-c default_transaction_read_only=on' never reaches the database
+# (measured on Production 2026-11-17: transaction_read_only = off). So the
+# lock lives INSIDE every session: one psql connection, one explicit
+# read-only transaction, checked from within that same transaction before
+# the first query runs. A write then fails with SQLSTATE 25006.
+#
+# The prologue prints nothing (--quiet, \gset), so the CSV that reaches
+# stdout is exactly what the query alone would have produced.
+DR_READ_ONLY_PROLOGUE='BEGIN TRANSACTION READ ONLY;
+SHOW transaction_read_only \gset dr_
+\if :dr_transaction_read_only
+\else
+DO $dr$ BEGIN RAISE EXCEPTION '"'"'ABBRUCH: transaction_read_only ist nicht on'"'"'; END $dr$;
+\endif'
+
+# psql_read_only URI  < query.sql  > result.csv
+#
+# Runs stdin in ONE psql session inside the read-only transaction above and
+# commits. Every call is its own connection and carries its own lock; there
+# is no SET in some other session that this relies on. Any error (including
+# a refused write) stops psql with exit 3, and set -e stops the script.
+psql_read_only() {
+  local uri="$1"
+  { printf '%s\n' "$DR_READ_ONLY_PROLOGUE"; cat; printf '\n%s\n' 'COMMIT;'; } \
+    | "$PGBIN/psql" "$uri" --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --csv --file=-
 }
 
 # Eine Bestaetigung, die man nicht aus Gewohnheit wegtippt.

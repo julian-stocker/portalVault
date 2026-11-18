@@ -3,7 +3,7 @@
 #
 #   PGBIN=… PG_SERVER_MAJOR=… DR_VOL=… PGPASSFILE=… \
 #   DR_TARGET_URI='postgresql://postgres.TESTREF@HOST:5432/postgres?sslmode=require' \
-#   DR_TARGET_REF=TESTREF DR_DUMP_DIR=/Volumes/skyisles-dr/dump-2026… \
+#   DR_TARGET_REF=TESTREF DR_DUMP_DIR=/Volumes/skyisles-backup/dump-2026… \
 #   bash tools/dr/40-restore.sh
 #
 # WARUM EINE TRANSAKTION: `--single-transaction` macht einen TEILWEISEN

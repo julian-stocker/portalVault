@@ -32,8 +32,8 @@
  * WHAT IT DROPS, ALWAYS
  *   * every `CREATE SCHEMA` (all three exist in the target)
  *   * every structural object of `auth` and `storage` — tables, functions,
- *     triggers, constraints, indexes, ACLs, and above all the two version
- *     ledgers
+ *     triggers, constraints, indexes, column defaults, ACLs, and above all
+ *     the two version ledgers
  *   * extensions and anything owned by the platform
  *
  * It reads a file and writes two. No database, no network.
@@ -44,8 +44,24 @@ import { readFileSync, writeFileSync } from "node:fs";
 const DESCS = [
   "MATERIALIZED VIEW DATA", "MATERIALIZED VIEW", "TEXT SEARCH CONFIGURATION",
   "TEXT SEARCH DICTIONARY", "PUBLICATION TABLE", "FK CONSTRAINT", "TABLE DATA",
+  /*
+   * SEQUENCE OWNED BY ties a sequence to its column. Until F4b.2 it was read
+   * as "SEQUENCE" with the schema "OWNED" and dropped as a foreign schema —
+   * right for the one entry in auth, silently wrong for one in public.
+   */
+  "SEQUENCE OWNED BY",
   "SEQUENCE SET", "DEFAULT ACL", "ROW SECURITY", "INDEX ATTACH", "TABLE ATTACH",
   "EVENT TRIGGER", "FOREIGN TABLE", "LARGE OBJECT", "SHELL TYPE",
+  /*
+   * DEFAULT: a column default that pg_dump emits as its own entry
+   * (`ALTER TABLE … ALTER COLUMN … SET DEFAULT …`), typically a nextval()
+   * on a sequence created separately. First met on 2026-11-18 in the
+   * Production dump: `DEFAULT auth refresh_tokens id supabase_auth_admin`.
+   * It sits AFTER "DEFAULT ACL" above, so that one still wins its lines.
+   * Decided like every other object: kept in public, dropped in auth and
+   * storage (the target's own table already carries its default).
+   */
+  "DEFAULT",
   "TABLE", "VIEW", "SEQUENCE", "INDEX", "CONSTRAINT", "TRIGGER", "FUNCTION",
   "PROCEDURE", "AGGREGATE", "OPERATOR", "TYPE", "DOMAIN", "SCHEMA", "EXTENSION",
   "COMMENT", "ACL", "POLICY", "RULE", "CAST", "SERVER", "PUBLICATION",
@@ -222,7 +238,8 @@ export function filterToc(toc: string): Ergebnis {
   }
   const systemArten = new Set(["TABLE", "FUNCTION", "TRIGGER", "CONSTRAINT",
                                "FK CONSTRAINT", "INDEX", "ACL", "DEFAULT ACL",
-                               "SEQUENCE", "VIEW", "TYPE"]);
+                               "DEFAULT", "SEQUENCE", "SEQUENCE OWNED BY",
+                               "VIEW", "TYPE"]);
   const eigenerTrigger = (e: Entry) =>
     e.schema === "auth" && e.desc === "TRIGGER" && e.name === EIGENER_AUTH_TRIGGER;
   if (zahl((e) => (e.schema === "auth" || e.schema === "storage")
@@ -301,8 +318,10 @@ function main(): void {
     process.exit(2);
   }
   const r = filterToc(readFileSync(toc, "utf8"));
-  writeFileSync(keep, r.zeilen.join("\n"), "utf8");
-  writeFileSync(rep, bericht(r), "utf8");
+  /* 600 when created: the plan names every table of the dump (F4b.2).
+     An existing file keeps its mode; write a new name instead. */
+  writeFileSync(keep, r.zeilen.join("\n"), { encoding: "utf8", mode: 0o600 });
+  writeFileSync(rep, bericht(r), { encoding: "utf8", mode: 0o600 });
   console.log(bericht(r));
   if (r.verstoesse.length > 0) {
     console.error("\n  ABBRUCH — der gefilterte Plan ist nicht zulaessig:");

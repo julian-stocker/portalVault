@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { parseLine, decide, filterToc, bericht }
@@ -349,5 +350,95 @@ describe("M-03D: Rechte auf das Schema public", () => {
 
   it("und sie löst die Fremd-Schema-Zusicherung nicht aus", () => {
     expect(filterToc(TOC).verstoesse.join(" ")).not.toContain("fremden Schemata");
+  });
+});
+
+describe("F4b.2: DEFAULT, der Spalten-Default als eigener Eintrag", () => {
+  /*
+   * Am 2026-11-18 brach der Filter am Production-Dump ab: die Zeile
+   * `DEFAULT auth refresh_tokens id supabase_auth_admin` hatte eine
+   * unbekannte Form. Richtig so — jetzt ist über den Typ entschieden:
+   * in public behalten, in auth und storage verwerfen.
+   */
+  const u = (line: string) => decide(parseLine(line)!);
+  const AUTH_DEFAULT = "4428; 2604 16514 DEFAULT auth refresh_tokens id supabase_auth_admin";
+
+  it("die Zeile aus dem Production-Dump wird gelesen", () => {
+    expect(parseLine(AUTH_DEFAULT)).toEqual(
+      { id: "4428", desc: "DEFAULT", schema: "auth", name: "refresh_tokens id" });
+  });
+
+  it("DEFAULT ACL bleibt DEFAULT ACL — der längere Typ gewinnt weiter", () => {
+    expect(parseLine("900; 826 16999 DEFAULT ACL auth DEFAULT PRIVILEGES FOR TABLES supabase_auth_admin")?.desc)
+      .toBe("DEFAULT ACL");
+  });
+
+  it("in auth und storage verworfen, in public behalten, in fremden Schemata verworfen", () => {
+    expect(u(AUTH_DEFAULT)).toEqual({ keep: false, grund: "Supabase-Systemobjekt in auth" });
+    expect(u("4429; 2604 16600 DEFAULT storage s3_multipart_uploads id supabase_storage_admin"))
+      .toEqual({ keep: false, grund: "Supabase-Systemobjekt in storage" });
+    expect(u("4430; 2604 16700 DEFAULT public inventory_movements id postgres"))
+      .toEqual({ keep: true, grund: "eigenes Schema" });
+    expect(u("4431; 2604 16800 DEFAULT cron job jobid supabase_admin").keep).toBe(false);
+  });
+
+  it("ein ganzer Lauf mit DEFAULT in allen drei Schemata: zulässig, nichts ungeparst", () => {
+    const r = filterToc(TOC + "\n" + [
+      AUTH_DEFAULT,
+      "4429; 2604 16600 DEFAULT storage s3_multipart_uploads id supabase_storage_admin",
+      "4430; 2604 16700 DEFAULT public inventory_movements id postgres",
+    ].join("\n"));
+    expect(r.ungeparst).toEqual([]);
+    expect(r.verstoesse).toEqual([]);
+    expect(r.behalten.filter((e) => e.desc === "DEFAULT").map((e) => `${e.schema} ${e.name}`))
+      .toEqual(["public inventory_movements id"]);
+    expect(r.zeilen).toContain(`; Supabase-Systemobjekt in auth: ${AUTH_DEFAULT}`);
+  });
+
+  it("die Zusicherung über das Ganze zählt DEFAULT zu den Strukturobjekten", () => {
+    /*
+     * `decide` verwirft DEFAULT in auth und storage. Die zweite, unabhängige
+     * Sicherung in `filterToc` muss es ebenfalls kennen — sonst ginge ein
+     * Fehler in `decide` unbemerkt durch. Von außen nicht auslösbar, ohne
+     * `decide` zu ersetzen; deshalb hier an der Quelle festgehalten.
+     */
+    const src = readFileSync("tools/dr/30-filter-toc.mts", "utf8");
+    expect(src).toMatch(/systemArten = new Set\(\[[\s\S]*?"DEFAULT"[\s\S]*?\]\)/);
+  });
+
+  it("weiterhin unbekannte Typen brechen ab — auch mit DEFAULT-ähnlichem Präfix", () => {
+    for (const neu of ["999; 1 2 VOELLIG NEUE ART public dings postgres",
+                       "998; 1 2 DEFAULTS public dings postgres"]) {
+      const r = filterToc(TOC + "\n" + neu);
+      expect(r.ungeparst, neu).toEqual([neu]);
+      expect(r.verstoesse.join(" "), neu).toContain("unbekannte Form");
+    }
+  });
+});
+
+describe("F4b.2: SEQUENCE OWNED BY wird als eigener Typ gelesen", () => {
+  /* Bis F4b.2 las der Filter das als SEQUENCE im Schema "OWNED". */
+  const AUTH_OWNED = "6986; 0 0 SEQUENCE OWNED BY auth refresh_tokens_id_seq supabase_auth_admin";
+  const u = (line: string) => decide(parseLine(line)!);
+
+  it("Schema und Name stimmen", () => {
+    expect(parseLine(AUTH_OWNED)).toEqual(
+      { id: "6986", desc: "SEQUENCE OWNED BY", schema: "auth", name: "refresh_tokens_id_seq" });
+  });
+
+  it("in auth verworfen als Systemobjekt, in public behalten", () => {
+    expect(u(AUTH_OWNED)).toEqual({ keep: false, grund: "Supabase-Systemobjekt in auth" });
+    expect(u("6987; 0 0 SEQUENCE OWNED BY public order_number_seq postgres"))
+      .toEqual({ keep: true, grund: "eigenes Schema" });
+  });
+
+  it("SEQUENCE und SEQUENCE SET bleiben, was sie waren", () => {
+    expect(parseLine("212; 1259 16434 SEQUENCE public order_number_seq postgres")?.desc).toBe("SEQUENCE");
+    expect(parseLine("402; 0 0 SEQUENCE SET public order_number_seq postgres")?.desc).toBe("SEQUENCE SET");
+  });
+
+  it("die Zusicherung über das Ganze kennt den Typ", () => {
+    const src = readFileSync("tools/dr/30-filter-toc.mts", "utf8");
+    expect(src).toMatch(/systemArten = new Set\(\[[\s\S]*?"SEQUENCE OWNED BY"[\s\S]*?\]\)/);
   });
 });

@@ -11,7 +11,7 @@ nach Production oder Staging.
 
 | Datei | tut |
 |---|---|
-| `lib.sh` | die gemeinsamen Wächter: Clientversion ≥ Server, verschlüsseltes Volume, `PGPASSFILE` mit Rechten 600, Quelle **ist** Production, Ziel ist **weder** Production **noch** Staging |
+| `lib.sh` | `umask 077` für alles, was die Skripte anlegen. Die gemeinsamen Wächter: Clientversion ≥ Server, verschlüsseltes Volume, `PGPASSFILE` mit Rechten 600, Quelle **ist** Production, Ziel ist **weder** Production **noch** Staging. Dazu `psql_read_only`: jede Abfrage an die Quelle in einer eigenen, von innen geprüften `READ ONLY`-Transaktion |
 | `00-preflight.sh` | prüft die Lage, verbindet nichts |
 | `10-baseline.sh` | Messung **(a)** auf der Quelle — fünf `SELECT`s, rein lesend |
 | `20-dump.sh` | die drei Dumps, das Inhaltsverzeichnis, Mindestprüfungen auf die Datei, `MANIFEST.txt` |
@@ -22,7 +22,7 @@ nach Production oder Staging.
 | `60-compare.sh` | (a) gegen (b), dazu das Urteil jeder Zielprüfung (`ok`) und der Rechteproben. **Hier** wird bestanden oder nicht |
 | `../../supabase/checks/dr/` | die sechs Abfragen, die auf beiden Seiten gleich laufen |
 
-## Die drei Regeln, die in den Skripten stehen und nicht nur im Plan
+## Die vier Regeln, die in den Skripten stehen und nicht nur im Plan
 
 1. **Ein teilweise gelungener Restore kann nicht entstehen.**
    `--single-transaction` — entweder alles oder nichts.
@@ -33,19 +33,29 @@ nach Production oder Staging.
    kommentiert jede Zeile aus, die sie berührte — insbesondere
    `auth.schema_migrations` und `storage.migrations`, die Versionsregister der
    Plattformdienste. Geprüft in `src/lib/admin/dr-toc-filter.test.ts`
-   (20 Prüfungen, ohne Datenbank).
+   (42 Prüfungen, ohne Datenbank). Ein Objekttyp, den der Filter nicht
+   kennt, bricht ab; `DEFAULT` und `SEQUENCE OWNED BY` sind seit F4b.2
+   bekannt (Befund am Production-Dump vom 2026-11-18).
+
+4. **Jede Abfrage an Production ist in der Sitzung gesperrt.**
+   `psql_read_only` (`lib.sh`) öffnet `BEGIN TRANSACTION READ ONLY`, prüft
+   `SHOW transaction_read_only` = `on` und bricht sonst vor der ersten
+   Abfrage ab. `PGOPTIONS` reicht dafür nicht, der Session-Pooler gibt es nicht
+   weiter (gemessen 2026-11-17). Geprüft in
+   `src/lib/admin/dr-read-only.test.ts`, mit `DR_REAL_PG=1` gegen einen
+   Wegwerf-Server.
 
 ## Umgebungsvariablen
 
 ```
 PGBIN=/usr/local/opt/postgresql@17/bin      # versionierter Pfad, nie das blanke pg_dump
 PG_SERVER_MAJOR=17                          # aus dem Dashboard abgelesen
-DR_VOL=/Volumes/skyisles-dr                 # eingebundenes verschlüsseltes Volume
-PGPASSFILE=/Volumes/skyisles-dr/.pgpass     # Rechte 600, IM Volume
+DR_VOL=/Volumes/skyisles-backup             # eingebundenes verschlüsseltes Volume
+PGPASSFILE=/Volumes/skyisles-backup/.pgpass # Rechte 600, IM Volume
 DR_SOURCE_URI='postgresql://postgres.PRODREF@HOST:5432/postgres?sslmode=require'
 DR_TARGET_URI='postgresql://postgres.TESTREF@HOST:5432/postgres?sslmode=require'
 DR_TARGET_REF=TESTREF                       # bewusste Bestätigung des Ziels
-DR_DUMP_DIR=/Volumes/skyisles-dr/dump-…     # von 20-dump.sh angelegt
+DR_DUMP_DIR=/Volumes/skyisles-backup/dump-… # von 20-dump.sh angelegt
 ```
 
 **Kein Passwort in einer URI.** `lib.sh` bricht ab, wenn eines drinsteht — es

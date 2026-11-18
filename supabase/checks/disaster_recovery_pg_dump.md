@@ -316,9 +316,9 @@ vorher, schriftlich.**
   ```bash
   # innerhalb des verschlüsselten Volumes, Rechte 600
   printf '%s:%s:%s:%s:%s\n' HOST 5432 postgres 'postgres.REF' 'PASSWORT' \
-    > /Volumes/skyisles-dr/.pgpass
-  chmod 600 /Volumes/skyisles-dr/.pgpass
-  export PGPASSFILE=/Volumes/skyisles-dr/.pgpass
+    > /Volumes/skyisles-backup/.pgpass
+  chmod 600 /Volumes/skyisles-backup/.pgpass
+  export PGPASSFILE=/Volumes/skyisles-backup/.pgpass
   PGURI='postgresql://postgres.REF@HOST:5432/postgres?sslmode=require'
   ```
 
@@ -335,15 +335,51 @@ Ohne `gpg` und `age` bleibt das Beste auf diesem Rechner ein
 **verschlüsseltes Sparse-Bundle**:
 
 ```bash
-hdiutil create -size 2g -type SPARSEBUNDLE -fs APFS \
-  -encryption AES-256 -stdinpass \
-  -volname skyisles-dr ~/Backups/skyisles-dr.sparsebundle
-# Passphrase kommt von stdin, nicht aus der History
+hdiutil create -size 4g -type SPARSEBUNDLE -fs APFS \
+  -encryption AES-256 \
+  -volname skyisles-backup ~/Backups/skyisles-backup.sparsebundle
+# fragt verdeckt und zweimal nach der Passphrase — nichts in der History
 
-hdiutil attach ~/Backups/skyisles-dr.sparsebundle   # fragt nach der Passphrase
-# … Dumps, Manifest, Konfigurationsnotiz, APPLIED.md hineinschreiben …
-hdiutil detach /Volumes/skyisles-dr
+hdiutil attach ~/Backups/skyisles-backup.sparsebundle   # fragt nach der Passphrase
+chmod 700 /Volumes/skyisles-backup                       # nur der Betreiber
+# … Dumps, Manifest, Konfigurationsnotiz, APPLIED.md hineinschreiben, je Rechte 600 …
+hdiutil detach /Volumes/skyisles-backup
 ```
+
+Seit 2026-11-17 ist **`skyisles-backup`** das Volume (eingerichtet nach den
+Regeln unten; der Dump vom 2026-10-14 liegt darin, SHA-256 gleich dem
+Original). Die Werkzeuge in `tools/dr/` bekommen es über
+`DR_VOL=/Volumes/skyisles-backup` und
+`PGPASSFILE=/Volumes/skyisles-backup/.pgpass`.
+
+**Die Passphrase — erst ablegen, dann verschlüsseln.**
+
+* **Zuerst** im Passwortmanager des Betreibers (macOS: App *Passwörter*)
+  einen Eintrag anlegen, die Passphrase dort **generieren** (mindestens
+  24 Zeichen) und speichern. Erst danach `hdiutil create` aufrufen. Eine
+  Passphrase, die nur im Kopf existiert, ist nach einem Monat verloren.
+  Genau das ist mit `skyisles-dr.sparsebundle` passiert: angelegt am
+  2026-10-16, nie eingebunden, Passphrase unbekannt.
+* **Eintragen nur über die Abfrage.** Ohne `-stdinpass` fragt `hdiutil`
+  verdeckt und zweimal nach; die Passphrase aus dem Passwortmanager dort
+  einfügen. Sie steht dann weder in der Shell-History noch in `ps`. Nie als
+  Argument, nie per `echo …|`, nie in eine Datei, ein Skript, einen Chat.
+* **Nicht im macOS-Schlüsselbund speichern lassen** (Häkchen beim Einbinden
+  im Finder). Sonst bindet jedes Programm unter deinem Konto das Volume ohne
+  Rückfrage ein (`docs/SECURITY.md`, Abschnitt Production-Zugangsdaten).
+* **Sofort prüfen:** `hdiutil detach` und erneut `hdiutil attach` mit der
+  Passphrase aus dem Passwortmanager. Erst wenn das klappt, kommt etwas
+  hinein.
+
+**Passphrase verloren?** Es gibt keinen Weg zurück. AES-256 lässt sich
+nicht zurücksetzen, und Raten ist ausgeschlossen. Dann:
+1. Das alte Bundle **nicht** löschen, solange nicht feststeht, was darin
+   liegt (Änderungszeiten von `bands/` ansehen, `hdiutil isencrypted`).
+2. Ein **neues** Bundle unter anderem Namen anlegen, nach den Regeln oben.
+3. Den Inhalt aus der Quelle **neu** erzeugen (Dump, Exporte) oder aus
+   einer anderen vorhandenen Kopie übernehmen. Eine Kopie gilt erst als
+   übernommen, wenn die SHA-256 gleich ist.
+4. Das alte Bundle erst nach deiner ausdrücklichen Entscheidung löschen.
 
 Hinein gehören: die drei Dumps, das Inhaltsverzeichnis samt Auswahl
 (`full.toc`, `toc.keep`, `toc.report.txt`), das Bild-Manifest, die
@@ -723,7 +759,7 @@ Mit ⚠ markierte Schritte brauchen vorher deine ausdrückliche Entscheidung.
 | 5 | Verschlüsseltes Sparse-Bundle anlegen und einbinden | Abschnitt 6.3 |
 | 6 | `.pgpass` **darin** anlegen (Rechte 600), `PGPASSFILE` setzen | Abschnitt 6.2 |
 | 7 | Lage prüfen, ohne zu verbinden | `bash tools/dr/00-preflight.sh` |
-| 8 | **Messung (a)** auf Production — fünf `SELECT`s, rein lesend | `bash tools/dr/10-baseline.sh` |
+| 8 | **Messung (a)** auf Production — nur `SELECT`s, jede Verbindung in `BEGIN TRANSACTION READ ONLY`, geprüft mit `SHOW transaction_read_only` (siehe unten) | `bash tools/dr/10-baseline.sh` |
 | 9 | Die drei Dumps, Inhaltsverzeichnis, `MANIFEST.txt` | `bash tools/dr/20-dump.sh` |
 | 10 | `npm run images:export:prod` — Bilddateien und Manifest ins Volume | npm |
 | 11 | Konfigurationsnotiz schreiben, `APPLIED.md` und `SHA256SUMS.txt` dazulegen | Abschnitt 5.2 |
@@ -736,6 +772,22 @@ Mit ⚠ markierte Schritte brauchen vorher deine ausdrückliche Entscheidung.
 | 18 | **Der Vergleich.** Hier wird bestanden oder nicht | `bash tools/dr/60-compare.sh` |
 | 19 | `verify-target.csv` lesen — jede Zeile trägt `ok`, `60-compare.sh` wertet sie seit M-03D selbst aus; hier nur erklären | — |
 | 20 | Testprojekt **löschen**, Volume abmelden, Protokoll ablegen, mir die Zahlen geben | — |
+
+**Lesend heißt: in der Sitzung gesperrt, nicht nur gemeint.** Der
+Session-Pooler reicht Startoptionen nicht weiter. Mit
+`PGOPTIONS='-c default_transaction_read_only=on'` meldete Production am
+2026-11-17 `transaction_read_only = off`. Die Rolle `postgres` darf alles,
+also wäre nichts da, was ein versehentliches Schreiben aufhält. Deshalb läuft
+jede Abfrage an die Quelle (`10-baseline.sh`, Quellseite von
+`35-shape-check.sh`) über `psql_read_only` in `tools/dr/lib.sh`: **eine**
+Verbindung, darin `BEGIN TRANSACTION READ ONLY`, dann
+`SHOW transaction_read_only`. Ist der Wert nicht `on`, bricht es vor der
+ersten Abfrage ab. Danach folgt die unveränderte Datei und `COMMIT`. Ein
+Schreibversuch scheitert mit SQLSTATE 25006, `psql` endet mit 3. Die CSV ist
+Byte für Byte dieselbe wie vorher. Geprüft in
+`src/lib/admin/dr-read-only.test.ts`, gegen einen echten Server mit
+`DR_REAL_PG=1`. `pg_dump` (`20-dump.sh`) ist davon nicht berührt: es liest
+in einer eigenen Snapshot-Transaktion und schreibt nicht.
 
 Keinen dieser Schritte kann ich übernehmen: ich darf Production nicht
 verbinden, kein Werkzeug installieren und kein Projekt anlegen. Was ich danach
@@ -851,9 +903,38 @@ Der Schutz steht damit auf drei Beinen:
    aus `public` vorhanden, Sequenzstände vorhanden, Tabellenstruktur
    vorhanden, kein `CREATE SCHEMA`, kein Versionsregister, kein Strukturobjekt
    aus `auth`/`storage`, kein fremdes Schema, keine ungeparste Zeile.
-3. **22 Prüfungen ohne Datenbank** in `src/lib/admin/dr-toc-filter.test.ts`,
+3. **42 Prüfungen ohne Datenbank** in `src/lib/admin/dr-toc-filter.test.ts`,
    darunter das Parsen von Funktionssignaturen mit Leerzeichen und fünf
    Positivkontrollen.
+
+**Befund F4b.1/F4b.2 (2026-11-18): zwei Objekttypen, die der Filter nicht
+kannte.** Am ersten echten Production-Dump (`dump-20261118T191823Z`) brach der
+Filter ab, wie er soll: die Zeile
+`DEFAULT auth refresh_tokens id supabase_auth_admin` hatte eine unbekannte
+Form. Das ist ein Spalten-Default als eigener Eintrag
+(`ALTER TABLE … ALTER COLUMN … SET DEFAULT nextval(…)`). Der Dump vom
+2026-10-14 hatte ihn noch nicht, Supabase hat `auth.refresh_tokens` seither
+geändert. Bei der Durchsicht fiel ein zweiter auf:
+`SEQUENCE OWNED BY auth refresh_tokens_id_seq` las der Filter als
+`SEQUENCE` im Schema „OWNED“ und verwarf ihn als fremdes Schema. Richtig im
+Ergebnis, aber aus dem falschen Grund; ein `SEQUENCE OWNED BY public …` wäre
+genauso stillschweigend verloren gegangen.
+
+Korrektur: beide Typen stehen jetzt in der Typliste, `DEFAULT` hinter
+`DEFAULT ACL`, `SEQUENCE OWNED BY` vor `SEQUENCE`, damit der längere Typ
+gewinnt. Sie werden wie jedes Objekt entschieden: in `public` behalten, in
+`auth` und `storage` verworfen, in fremden Schemata verworfen. Beide stehen
+auch in der Zusicherung „kein Strukturobjekt aus `auth`/`storage`“. Ein
+unbekannter Typ bricht weiter ab. Vereinbar mit der Restore-Strategie, weil
+aus `auth` nur die Zeilen von `users` und `identities` zurückgehen;
+`refresh_tokens` samt Default und Sequenz bringt das Zielprojekt selbst mit.
+Am Dump vom 2026-11-18: 2.119 Einträge behalten, 404 verworfen, keine
+ungeparste Zeile, keine Verletzung. Die angewendeten Zeilen sind dieselben
+wie im abgebrochenen Lauf, nur die Begründung der zwei Zeilen hat sich
+geändert. Die abgebrochene Auswahl liegt als `toc.keep.INVALID-…` daneben.
+
+Außerdem setzt `lib.sh` seit F4b.2 `umask 077`, und der Filter schreibt
+mit Rechten 600: der erste Production-Dump war mit 644/755 entstanden.
 
 Dazu die Prüfungen in `40-restore.sh`: das Ziel muss **leer** sein (0 Tabellen
 in `public`), die Prüfsummen aus `MANIFEST.txt` müssen stimmen, und der

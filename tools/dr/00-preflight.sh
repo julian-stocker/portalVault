@@ -2,7 +2,7 @@
 # Schritt 0 — prueft die Lage, verbindet nichts.
 #
 #   PGBIN=/usr/local/opt/postgresql@17/bin PG_SERVER_MAJOR=17 \
-#   DR_VOL=/Volumes/skyisles-dr PGPASSFILE=/Volumes/skyisles-dr/.pgpass \
+#   DR_VOL=/Volumes/skyisles-backup PGPASSFILE=/Volumes/skyisles-backup/.pgpass \
 #   bash tools/dr/00-preflight.sh
 source "$(dirname "$0")/lib.sh"
 
