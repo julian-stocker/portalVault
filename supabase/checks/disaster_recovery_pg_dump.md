@@ -966,3 +966,80 @@ Filters, damit sie nicht aus der Auswahl fallen.
 `60-compare.sh` vergleicht nun **acht** Dateien und prüft **elf**
 Mindestmengen. Letzteres ist der Teil, der „teilweise gelungen" abfängt: ein
 leeres Ziel gegen eine leere Messung wäre sonst „gleich".
+
+## 12. Lokaler Restore-Nachweis mit dem Production-Dump vom 2026-11-18 (F4b.4–F4b.7)
+
+**Ergebnis: PASS für ein lokales Ziel.** `40-restore.sh` lief durch,
+`50-verify.sh` und `60-compare.sh` (mit `DR_TARGET_KIND=local`) endeten mit
+Exit 0 und „KEIN BEFUND“. Gleich sind alle 70 Tabellen in `public` samt
+Zeilenzahlen, `auth.users`/`identities` und `storage.buckets`/`objects`,
+alle 43 Sequenzen in `public`, alle 29 Inhaltsabdrücke, alle Definitionen
+und Rechte sowie die 22 Geschäftsinvarianten. Alle 9 Zielprüfungen sind
+`ok`, und `anon` liest `purchases` nicht.
+
+### 12.1 Aufbau
+
+* Quelle: `dump-20261118T191823Z` (Production, Server 17.6), Messung (a)
+  in `baseline-quelle/`, beides im verschlüsselten Volume `skyisles-backup`.
+* Ziel: Wegwerf-Cluster PostgreSQL 17.11 unter
+  `restore-test-<Zeitstempel>/` im selben Volume. Er lauscht nur auf
+  `127.0.0.1`, ohne Unix-Socket, verlangt TLS 1.3 und SCRAM, und er hat eine
+  eigene Passwortdatei. Die Production-`.pgpass` wird nie geladen.
+* Plattformhülle vor dem Restore: sieben NOLOGIN-Rollen (`anon`,
+  `authenticated`, `service_role`, `supabase_admin`, `supabase_auth_admin`,
+  `supabase_storage_admin`, `dashboard_user`) und die Struktur von `auth`
+  und `storage` aus **demselben** Dump. Das sind genau die Einträge, die
+  `30-filter-toc.mts` als Supabase-Systemobjekt verwirft (368, keine Daten),
+  eingespielt in einer Transaktion.
+
+### 12.2 Die sechs Befundgruppen des ersten Vergleichs und ihre Ursachen
+
+| # | Befund | Ursache | Behandlung in `60-compare.sh` |
+|---|---|---|---|
+| 1 | 23 von 29 Inhaltsabdrücken verschieden | Der Abdruck bildet `row::text`. Zeitstempel werden in der Zeitzone der Sitzung geschrieben: Production UTC, lokal `Europe/Berlin`. In einer UTC-Sitzung waren alle 29 identisch | `lib.sh` setzt `PGTZ=UTC` für jede DR-Sitzung |
+| 2 | Zeilenzahlen von 7 Plattformtabellen | Sitzungen, Tokens, Flows und die Versionsregister gehen laut Plan nicht zurück | 33 benannte Tabellen (`PLATTFORM_OHNE_ZEILEN`): Zeilenzahl ausgenommen, Vorhandensein weiter geprüft. Eine nicht gelistete Tabelle wird voll verglichen |
+| 3 | `auth.refresh_tokens_id_seq` | gehört zu 2 | benannt in `PLATTFORM_SEQUENZEN_OHNE_STAND` |
+| 4 | 6 statt 1 Extension | Supabase bringt Extensions mit, ein lokaler Cluster nicht. Kein behaltenes Objekt verweist auf eine | nur mit `DR_TARGET_KIND=local` als `umgebung` ausgegeben, sonst ein Befund |
+| 5 | 4 CHECK-Constraints | `between` wird als verschachteltes `AND` gespeichert, und das erneute Einlesen fasst die Kette zusammen. Nachweis: md5 des Dumptexts = Quell-Abdruck, derselbe Text im Ziel eingelesen = Ziel-Abdruck | je Name genau ein Paar Quell-/Ziel-Abdruck (`CHECK_AND_KETTE`), jede andere Änderung bleibt ein Befund |
+| 6 | Rechte: Schema-ACL von auth/storage, `platform_export_runs` | Die Schema-ACL stammt aus der lokalen Hülle. `platform_export_runs` hat in Production genau die Eigentümerrechte, dafür schreibt `pg_dump` keine Anweisung, und im Ziel steht NULL | Schema-ACL von auth/storage nur mit `DR_TARGET_KIND=local` ausgewiesen, die von `public` immer verglichen. NULL gegen Eigentümer-ACL nur gleichwertig, wenn `50-verify.sh` (`rights-effective.csv`) belegt: Eigentümer `postgres`, `anon`/`authenticated`/`service_role` ohne SELECT, INSERT, UPDATE, DELETE |
+
+Jede Ausnahme ist in `src/lib/admin/dr-compare.test.ts` gegen ihr Gegenteil
+geprüft.
+
+### 12.3 Synthetische Proben verändern Sequenzen, trotz ROLLBACK
+
+Die Belegprobe (ein synthetischer Beleg, `UPDATE` und `DELETE` werden
+abgewiesen, danach `ROLLBACK`) hat `public.purchase_receipts_id_seq` von
+„unbenutzt“ auf 1 gesetzt: `nextval()` wird von keinem Rollback
+zurückgenommen. Der nächste Vergleich meldete das richtig als Befund.
+Behoben im Testziel mit `setval('public.purchase_receipts_id_seq', 1, false)`,
+nachdem der Sollzustand dreifach belegt war: leer in Messung (a),
+`setval(…, 1, false)` im Dump, leer im Ziel-Lauf vor den Proben.
+
+**Verbindliche Reihenfolge für jeden Restore-Test:**
+
+1. `40-restore.sh`
+2. `50-verify.sh`
+3. `60-compare.sh` — **Exit 0 ist das Urteil über den Restore**
+4. erst danach synthetische Funktionsproben (Registrierung mit einem Konto
+   unter `example.invalid`, Belegsperre mit einem synthetischen Beleg), jede
+   in einer Transaktion mit `ROLLBACK`. Danach nicht erneut vergleichen,
+   ohne die berührten Sequenzen zurückzusetzen.
+
+Beide Proben haben am 2026-11-18 bestanden: Das synthetische Konto bekam sein
+Profil, und der synthetische Beleg ließ sich weder ändern noch löschen.
+
+### 12.4 Was dieser Nachweis NICHT zeigt
+
+* **Das Rechtemodell von Supabase.** Lokal ist `postgres` Superuser. Dass
+  der Trigger auf `auth.users`, die Storage-Policies und
+  `ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin` angelegt werden konnten,
+  zeigt nur, dass ein Superuser das kann. Die Spalte `postgres` in
+  `rights-effective.csv` sagt lokal nichts.
+* **Standardrechte eines Supabase-Ziels.** Dort können neue Tabellen beim
+  Anlegen Rechte für `anon`/`authenticated` erben, die der Dump nicht
+  zurücknimmt, etwa bei `platform_export_runs`. Das ist ungeprüft.
+* **Die Form von auth/storage gegen eine andere Supabase-Version.** Die
+  Hülle stammt aus demselben Dump, die Formgleichheit ist damit vorgegeben.
+* Login über den Auth-Dienst, Storage-Dateien (der Dump enthält nur
+  Metadaten), `cron`, Extensions, und der Weg über `data.dump`.

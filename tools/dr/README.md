@@ -56,7 +56,16 @@ DR_SOURCE_URI='postgresql://postgres.PRODREF@HOST:5432/postgres?sslmode=require'
 DR_TARGET_URI='postgresql://postgres.TESTREF@HOST:5432/postgres?sslmode=require'
 DR_TARGET_REF=TESTREF                       # bewusste Bestätigung des Ziels
 DR_DUMP_DIR=/Volumes/skyisles-backup/dump-… # von 20-dump.sh angelegt
+DR_TARGET_KIND=local                        # nur fuer 60-compare.sh, nur bei einem LOKALEN Ziel
 ```
+
+`lib.sh` setzt `PGTZ=UTC` fuer jede Sitzung: die Inhaltsabdruecke haengen
+von der Zeitzone ab. `DR_TARGET_KIND=local` laesst in `60-compare.sh` genau
+zwei Unterschiede als Eigenschaft der Testumgebung gelten (Zahl der
+Extensions, Schema-ACL von auth/storage aus der lokalen Huelle); ohne die
+Angabe sind beide ein Befund. Reihenfolge eines Restore-Tests: `40`, `50`,
+`60`, **erst danach** synthetische Proben — sie verschieben Sequenzen auch
+nach `ROLLBACK` (Runbook §12.3).
 
 **Kein Passwort in einer URI.** `lib.sh` bricht ab, wenn eines drinsteht — es
 stünde in `ps` und in der Shell-History. Das Passwort gehört in `PGPASSFILE`.

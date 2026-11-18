@@ -22,6 +22,14 @@ set -euo pipefail
 # with 644/755).
 umask 077
 
+# Every DR session renders timestamps in UTC. The content digests hash
+# `row::text`, and a timestamptz turns into text in the session's TimeZone:
+# Production (Supabase) runs UTC, a local cluster inherits the machine's zone
+# (Europe/Berlin), and on 2026-11-18 that alone made 23 of 29 digests differ
+# for identical data (F4b.6). PGTZ is read by libpq for every psql/pg_dump
+# connection these scripts open.
+export PGTZ=UTC
+
 PROD_REF="zmiwxswrpkmizvqsgype"
 STAGING_REF="qqxcpesbwfxzgytkdsac"
 

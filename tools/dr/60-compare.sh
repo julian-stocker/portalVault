@@ -35,14 +35,136 @@ pruef() {                       # pruef <datei> <was> [filter]
 
 note "--- Vergleich (a) Quelle vor dem Dump  gegen  (b) Ziel nach dem Restore"
 
-# Der Katalog von `cron` darf abweichen: das Schema wird absichtlich nicht
-# restauriert. Alles andere muss Zeile fuer Zeile gleich sein.
-pruef baseline-catalog.csv     "Katalog-Inventar (ohne cron)" "grep -v '^cron,'"
-pruef baseline-rows.csv        "Zeilenzahlen je Tabelle (alle)"
-pruef baseline-sequences.csv   "Sequenzstaende (alle, inkl. Identitaetsspalten)"
+# ---------------------------------------------------------------------------
+# DIE AUSNAHMEN (F4b.6, 2026-11-18). Jede ist einzeln benannt, begruendet und
+# in src/lib/admin/dr-compare.test.ts gegen ihr Gegenteil geprueft. Keine
+# gilt fuer ein ganzes Schema.
+# ---------------------------------------------------------------------------
+
+# (1) Plattformtabellen, deren ZEILEN der Plan bewusst nicht zurueckspielt
+#     (30-filter-toc.mts: aus auth nur users/identities, aus storage nur
+#     buckets/objects). Sitzungen, Tokens, Flows und die beiden
+#     Versionsregister gehoeren dem Zielprojekt. Die Zeile der Tabelle bleibt
+#     im Vergleich — sie muss auf beiden Seiten EXISTIEREN —, nur ihre
+#     Zeilenzahl wird nicht verglichen. Ihre Spaltenform prueft weiter
+#     shape-auth-storage. Eine Tabelle, die hier fehlt, wird voll verglichen:
+#     eine neue Supabase-Tabelle faellt also auf, statt durchzurutschen.
+PLATTFORM_OHNE_ZEILEN="
+auth.audit_log_entries auth.custom_oauth_providers auth.flow_state
+auth.instances auth.mfa_amr_claims auth.mfa_challenges auth.mfa_factors
+auth.mfa_recovery_code_sets auth.mfa_recovery_codes auth.oauth_authorizations
+auth.oauth_client_states auth.oauth_clients auth.oauth_consents
+auth.one_time_tokens auth.refresh_tokens auth.saml_providers
+auth.saml_relay_states auth.schema_migrations auth.scim_tokens auth.scim_users
+auth.sessions auth.sso_domains auth.sso_providers auth.webauthn_challenges
+auth.webauthn_credentials
+storage.bucket_lifecycle_states storage.buckets_analytics storage.buckets_vectors
+storage.lifecycle_abandoned_artifacts storage.migrations
+storage.s3_multipart_uploads storage.s3_multipart_uploads_parts
+storage.vector_indexes"
+
+# (2) Plattformsequenzen, deren STAND der Plan nicht zurueckspielt — sie
+#     zaehlen fuer eine Tabelle aus (1).
+PLATTFORM_SEQUENZEN_OHNE_STAND="auth.refresh_tokens_id_seq"
+
+# (3) CHECK-Constraints, deren Text sich beim Restore nachweislich NUR in der
+#     Klammerung verschachtelter AND aendert. `x between a and b` wird als
+#     ((x >= a) AND (x <= b)) gespeichert und innerhalb eines weiteren AND
+#     verschachtelt; pg_dump schreibt das so aus, und das erneute Einlesen
+#     fasst die AND-Kette zusammen. Nachweis 2026-11-18: md5 des Dumptexts =
+#     Quell-Abdruck, und derselbe Text, im Ziel neu eingelesen, ergibt exakt
+#     den Ziel-Abdruck. Gepaart wird je Name genau EIN Quell- mit genau EINEM
+#     Ziel-Abdruck; jede andere Aenderung bleibt eine Abweichung.
+#     Format: <schema.tabelle.constraint> <md5 Quelle> <md5 Ziel>
+CHECK_AND_KETTE="
+public.orders.orders_tracking_number_shape b58560d2b4dcf9166975fa3465d18615 2dbdfdd8128a3f7c81950af957de4604
+public.perf_interactions.perf_interactions_viewport_sane d67c6156547b6db4424669f7a8c44cb9 cd2facf1fe84012b9ea9087120cc2304
+public.perf_navigations.perf_navigations_viewport_sane d67c6156547b6db4424669f7a8c44cb9 cd2facf1fe84012b9ea9087120cc2304
+public.profiles.profiles_username_format 3eb37843e35ff25c5a2fd84f799b263d b0a91b584e6aa0cab02f0b82f035e514"
+
+# (4) Lokales Ziel. Nur wenn der Bediener DR_TARGET_KIND=local AUSDRUECKLICH
+#     setzt, gelten zwei Unterschiede als Eigenschaft der Testumgebung statt
+#     als Befund: die Zahl der Extensions (Supabase bringt sie mit, ein
+#     lokaler Cluster nicht; der Plan verweist auf keine) und die Schema-ACL
+#     von auth und storage (sie stammt aus der lokalen Plattformhuelle, nicht
+#     aus dem Plan). Beides wird ausgegeben, nicht verschwiegen. Die ACL von
+#     public wird IMMER verglichen. Fuer ein Supabase-Ziel bleibt alles streng.
+LOKAL=0
+[ "${DR_TARGET_KIND:-}" = "local" ] && LOKAL=1
+
+# BSD awk (macOS) refuses a newline inside -v: the lists go in flattened.
+flach() { printf '%s' "$1" | tr '\n' "${2:- }"; }
+maskiere_zeilen() {
+  awk -F, -v liste="$(flach "$PLATTFORM_OHNE_ZEILEN")" '
+    BEGIN { n = split(liste, t, / +/); for (i = 1; i <= n; i++) if (t[i] != "") m[t[i]] = 1 }
+    NR > 1 && (($1 "." $2) in m) { print $1 "," $2 ",(Plattform, nicht restauriert)"; next }
+    { print }'
+}
+maskiere_sequenzen() {
+  awk -F, -v liste="$(flach "$PLATTFORM_SEQUENZEN_OHNE_STAND")" '
+    BEGIN { n = split(liste, t, / +/); for (i = 1; i <= n; i++) if (t[i] != "") m[t[i]] = 1 }
+    NR > 1 && (($1 "." $2) in m) { print $1 "," $2 ",(Plattform, nicht restauriert)"; next }
+    { print }'
+}
+ohne_extensions() { grep -v '^cron,' | grep -v '^global,Extension,'; }
+paare_check_and_kette() {
+  awk -F, -v liste="$(flach "$CHECK_AND_KETTE" ';')" '
+    BEGIN { n = split(liste, z, /;/)
+            for (i = 1; i <= n; i++) { split(z[i], f, " "); if (f[1] != "") { q[f[1]] = f[2]; ziel[f[1]] = f[3] } } }
+    $1 == "constraint" && ($2 in q) && ($3 == q[$2] || $3 == ziel[$2]) {
+      print "constraint," $2 ",AND-Kette:" q[$2] "~" ziel[$2]; next }
+    { print }'
+}
+
+# Katalog: `cron` wird absichtlich nicht restauriert. Extensions getrennt, unten.
+pruef baseline-catalog.csv     "Katalog-Inventar (ohne cron, Extensions getrennt)" "ohne_extensions"
+ext_a="$(grep -E '^global,Extension,' "$A/baseline-catalog.csv" | cut -d, -f3 || true)"
+ext_b="$(grep -E '^global,Extension,' "$B/baseline-catalog.csv" | cut -d, -f3 || true)"
+if [ -n "$ext_a" ] && [ "$ext_a" = "$ext_b" ]; then
+  printf '  gleich   Extensions (%s)\n' "$ext_a"
+elif [ "$LOKAL" = "1" ]; then
+  printf '  umgebung Extensions: Quelle %s, Ziel %s — lokales Ziel (DR_TARGET_KIND=local); ein Supabase-Ziel muss sie mitbringen\n' "${ext_a:-?}" "${ext_b:-?}"
+else
+  printf '  ABWEICH. Extensions: Quelle %s, Ziel %s\n' "${ext_a:-?}" "${ext_b:-?}"
+  befunde=$((befunde + 1))
+fi
+pruef baseline-rows.csv        "Zeilenzahlen je Tabelle (alle; Plattformtabellen ohne Zeilen siehe Liste)" "maskiere_zeilen"
+pruef baseline-sequences.csv   "Sequenzstaende (alle, inkl. Identitaetsspalten; Plattformsequenzen siehe Liste)" "maskiere_sequenzen"
 pruef baseline-digests.csv     "Inhaltsabdruecke (29 Tabellen)"
-pruef baseline-definitions.csv "Definitionen: Spalten, Constraints, Indizes, Trigger, Policies, Funktionen, RLS"
-pruef baseline-grants.csv      "Rechte: Tabellen-, Funktions- und Schema-ACL"
+pruef baseline-definitions.csv "Definitionen: Spalten, Constraints, Indizes, Trigger, Policies, Funktionen, RLS" "paare_check_and_kette"
+
+# Rechte. (5) Leere ACL im Ziel gegen ausdrueckliche Eigentuemer-ACL in der
+# Quelle: pg_dump schreibt fuer `postgres=arwdDxtm/postgres` (genau die
+# Eigentuemerrechte) keine Anweisung, im Ziel steht dann NULL. Gleichwertig
+# ist das NUR, wenn 50-verify.sh fuer genau diese Relation belegt: Eigentuemer
+# postgres, und anon, authenticated, service_role duerfen weder SELECT noch
+# INSERT, UPDATE, DELETE. Sonst bleibt es eine Abweichung.
+NULL_ACL_GLEICHWERTIG=""
+for obj in $(grep -E '^tabelle,public\.[a-z0-9_]+,postgres=arwdDxtm/postgres$' "$A/baseline-grants.csv" | cut -d, -f2); do
+  grep -qxF "tabelle,$obj,(Standard)" "$B/baseline-grants.csv" 2>/dev/null || continue
+  name="${obj#public.}"
+  if [ -f "$B/rights-effective.csv" ] && awk -F, -v n="$name" '
+       $1 == n { rows++; if ($2 != "postgres") bad++
+                 if ($3 != "postgres" && ($4 != "f" || $5 != "f" || $6 != "f" || $7 != "f")) bad++ }
+       END { exit !(rows == 4 && bad == 0) }' "$B/rights-effective.csv"; then
+    NULL_ACL_GLEICHWERTIG="$NULL_ACL_GLEICHWERTIG $obj"
+    printf '  ok       %s: Ziel ohne eigene ACL, effektiv nur der Eigentuemer postgres (anon, authenticated, service_role: kein S/I/U/D)\n' "$obj"
+  else
+    printf '  NICHT OK %s: leere ACL im Ziel, effektive Rechte nicht als gleichwertig belegt\n' "$obj"
+  fi
+done
+normalisiere_rechte() {
+  awk -v liste="$NULL_ACL_GLEICHWERTIG" -v lokal="$LOKAL" '
+    BEGIN { n = split(liste, t, " "); for (i = 1; i <= n; i++) ok[t[i]] = 1 }
+    skip { if ($0 ~ /"$/) skip = 0; next }
+    lokal == 1 && /^schema,(auth|storage),/ {
+      split($0, f, ","); print "schema," f[2] ",(lokale Plattformhuelle, nicht verglichen)"
+      if ($0 ~ /,"/ && $0 !~ /"$/) skip = 1; next }
+    /^tabelle,public\.[a-z0-9_]+,\(Standard\)$/ {
+      split($0, f, ","); if (f[2] in ok) { print "tabelle," f[2] ",postgres=arwdDxtm/postgres"; next } }
+    { print }'
+}
+pruef baseline-grants.csv      "Rechte: Tabellen-, Funktions- und Schema-ACL" "normalisiere_rechte"
 pruef baseline-business.csv    "Geschaeftsinvarianten: Belegkette, Lagerbilanz, Bestellungen, Rechnungen, Zaehler"
 pruef shape-auth-storage.csv   "Spaltenform von auth und storage"
 

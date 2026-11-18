@@ -28,6 +28,30 @@ note "--- RLS wirkt wirklich: als anon lesen"
 note "Ergebnis: $(tr -d '\n' < "$OUT/rls-anon-purchases.txt" | head -c 200)"
 note "  erwartet: 0 oder ein Rechtefehler — jede andere Zahl ist ein Befund"
 
+note "--- Effektive Rechte auf jede Relation in public OHNE eigene ACL"
+# pg_dump schreibt fuer eine Relation, deren ACL nur aus den Eigentuemerrechten
+# besteht, KEINE Anweisung: im Ziel steht dann eine leere ACL (NULL). Ob das
+# gleichwertig ist, entscheidet nicht der Text, sondern was die Rollen
+# wirklich duerfen. 60-compare.sh wertet diese Datei aus (F4b.6).
+# Grenze: lokal ist `postgres` Superuser — seine Spalte sagt dort nichts.
+"$PGBIN/psql" "$DR_TARGET_URI" --no-psqlrc --set=ON_ERROR_STOP=1 --csv \
+  > "$OUT/rights-effective.csv" <<'SQL'
+select c.relname as objekt,
+       pg_get_userbyid(c.relowner) as eigentuemer,
+       r.rolle,
+       has_table_privilege(r.rolle, c.oid, 'SELECT') as sel,
+       has_table_privilege(r.rolle, c.oid, 'INSERT') as ins,
+       has_table_privilege(r.rolle, c.oid, 'UPDATE') as upd,
+       has_table_privilege(r.rolle, c.oid, 'DELETE') as del
+  from pg_class c
+ cross join (values ('anon'), ('authenticated'), ('service_role'), ('postgres')) r(rolle)
+ where c.relnamespace = 'public'::regnamespace
+   and c.relkind in ('r', 'v', 'p')
+   and c.relacl is null
+ order by 1, 3;
+SQL
+note "$(awk -F, 'NR > 1' "$OUT/rights-effective.csv" | cut -d, -f1 | sort -u | grep -c . || true) Relation(en) ohne eigene ACL"
+
 note "--- Unveraenderlichkeit: ein update auf purchase_receipts MUSS abbrechen"
 "$PGBIN/psql" "$DR_TARGET_URI" --no-psqlrc --set=ON_ERROR_STOP=0 -tA \
   --command="begin; update public.purchase_receipts set receipt_number = receipt_number; rollback;" \

@@ -85,6 +85,18 @@ describe("DR scripts: source queries are locked read-only inside the session", (
     expect(filter.match(/mode: 0o600/g)).toHaveLength(2);
   });
 
+  it("every DR session renders timestamps in UTC (F4b.6: digests hash row::text)", () => {
+    expect(LIB).toMatch(/^export PGTZ=UTC$/m);
+  });
+
+  it("50-verify.sh records the effective rights of every public relation without its own ACL", () => {
+    const verify = readFileSync("tools/dr/50-verify.sh", "utf8");
+    expect(verify).toMatch(/rights-effective\.csv/);
+    for (const role of ["anon", "authenticated", "service_role", "postgres"]) expect(verify).toContain(`('${role}')`);
+    for (const p of ["SELECT", "INSERT", "UPDATE", "DELETE"]) expect(verify).toContain(`'${p}')`);
+    expect(verify).toMatch(/c\.relacl is null/);
+  });
+
   it("every baseline file exists, ends with ';' and carries no transaction control", () => {
     const files = baselineFiles();
     expect(files).toHaveLength(8);
